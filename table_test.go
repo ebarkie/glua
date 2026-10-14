@@ -94,15 +94,18 @@ func TestTableBorders(t *testing.T) {
 	for i := 1000; i >= 2; i-- {
 		h.Set(Int(int64(i)), Int(int64(i)))
 	}
-	if h.Len() != 0 {
-		t.Fatalf("t[1] is nil, Len() = %d", h.Len())
-	}
+	checkBorder(t, h) // 0 or 1000: with t[1] nil, both are borders
 	h.Set(Int(1), Int(1))
 	if h.Len() != 1000 {
 		t.Fatalf("Len() = %d, want 1000", h.Len())
 	}
-	if len(h.arr) != 1000 {
+	if len(h.arr) < 1000 {
 		t.Errorf("array part has %d items after t[1] was set; the hash keys should have moved", len(h.arr))
+	}
+	for _, nd := range h.nodes {
+		if !nd.v.IsNil() {
+			t.Errorf("key %v stayed in the hash part", nd.k)
+		}
 	}
 }
 

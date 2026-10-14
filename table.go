@@ -3,6 +3,7 @@ package glua
 import (
 	"iter"
 	"math"
+	"math/bits"
 	"strings"
 	"unsafe"
 )
@@ -162,6 +163,11 @@ func (t *Table) set(key, val Value) {
 			return
 		}
 		if i == int64(len(t.arr)) && !val.IsNil() {
+			if len(t.nodes) > 0 { // the key may be in the hash part, past the end of the array
+				if idx := t.findNode(&key, hashValue(key)); idx >= 0 {
+					t.nodes[idx].v = Value{} // a deleted key; the next rehash drops it
+				}
+			}
 			t.appendArr(val)
 			return
 		}
@@ -175,9 +181,95 @@ func (t *Table) set(key, val Value) {
 		return
 	}
 	if (t.used+1)*4 > len(t.nodes)*3 {
-		t.rehash(1)
+		if t.resize(key) {
+			t.set(key, val) // the key may belong in the array part now
+			return
+		}
 	}
 	t.insert(key, val, h)
+}
+
+// resize makes room for the new key k when the hash part is full, as C Lua's rehash does: it
+// counts the integer keys, k included, and gives the array part the largest size n that
+// keys 1..n fill more than half, then sizes the hash part for the rest. It reports whether
+// the array part grew.
+func (t *Table) resize(k Value) bool {
+	var nums [64]int // nums[i]: integer keys in (2^(i-1), 2^i]
+	nint := 0
+	count := func(key Value) {
+		if key.p == tInt() {
+			if n := int64(key.n); n >= 1 {
+				nums[bitsLen(uint64(n-1))]++
+				nint++
+			}
+		}
+	}
+	for i := range t.arr {
+		if !t.arr[i].IsNil() {
+			nums[bitsLen(uint64(i))]++
+			nint++
+		}
+	}
+	live := 0
+	for i := range t.nodes {
+		if nd := &t.nodes[i]; !nd.v.IsNil() {
+			count(nd.k)
+			live++
+		}
+	}
+	count(k)
+	na := computeSizes(&nums, nint)
+	if na <= len(t.arr) {
+		t.rehash(1)
+		return false
+	}
+	old := t.nodes
+	t.arr = append(t.arr, make([]Value, na-len(t.arr))...)
+	t.nodes = nil
+	t.used = 0
+	movedToArray := 0
+	for i := range old {
+		nd := &old[i]
+		if nd.v.IsNil() {
+			continue
+		}
+		if nd.k.p == tInt() && int64(nd.k.n) >= 1 && int64(nd.k.n) <= int64(na) {
+			t.arr[nd.k.n-1] = nd.v
+			movedToArray++
+		}
+	}
+	rest := live - movedToArray
+	if !(k.p == tInt() && int64(k.n) >= 1 && int64(k.n) <= int64(na)+1) { // na+1 is appended
+		rest++ // the new key goes to the hash part
+	}
+	if rest > 0 {
+		t.nodes = make([]node, nodeSize(rest))
+	}
+	for i := range old {
+		nd := &old[i]
+		if nd.v.IsNil() || nd.k.p == tInt() && int64(nd.k.n) >= 1 && int64(nd.k.n) <= int64(na) {
+			continue
+		}
+		t.insert(nd.k, nd.v, hashValue(nd.k))
+	}
+	return true
+}
+
+// bitsLen is the number of bits needed for x: ceil(log2(x+1)).
+func bitsLen(x uint64) int { return bits.Len64(x) }
+
+// computeSizes is C Lua's computesizes: the largest power of two n such that more than
+// n/2 of the slots 1..n hold an integer key.
+func computeSizes(nums *[64]int, nint int) int {
+	a, na, optimal := 0, 0, 0
+	for i, twotoi := 0, 1; twotoi > 0 && nint > twotoi/2; i, twotoi = i+1, twotoi*2 {
+		a += nums[i]
+		if a > twotoi/2 {
+			optimal, na = twotoi, a
+		}
+	}
+	_ = na
+	return optimal
 }
 
 // appendArr adds val at the end of the array part, then moves any following integer

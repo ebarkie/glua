@@ -429,6 +429,13 @@ dispatch:
 						setValue(v, &regs[uint8(i>>24)])
 						continue
 					}
+				} else if idx == uint64(len(t.arr)) && idx < uint64(cap(t.arr)) && len(t.nodes) == 0 &&
+					t.meta == nil && t.flags&tabFrozen == 0 && regs[uint8(i>>24)].p != nil {
+					// an append within capacity: no allocation, and with no hash part no key past
+					// the end to move. Only the length word changes, so no pointer is written.
+					*(*int)(unsafe.Add(unsafe.Pointer(&t.arr), unsafe.Sizeof(uintptr(0)))) = int(idx) + 1
+					setValue(&t.arr[idx], &regs[uint8(i>>24)])
+					continue
 				}
 			}
 			e = exSlowOp
