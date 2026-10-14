@@ -44,3 +44,8 @@ call a table without __call	runtime error: call a table without __call:2: attemp
 call through a __call that is not callable	runtime error: call through a __call that is not callable:2: attempt to call a number value (local 't')
 stack overflow	runtime error: stack overflow:1: stack overflow
 assign with a nil key	runtime error: assign with a nil key:2: table index is nil
+argument error through a field call	runtime error: argument error through a field call:1: bad argument #1 to 'rep' (string expected, got no value)
+argument error through a local alias	runtime error: argument error through a local alias:2: bad argument #2 to 'f' (number expected, got table)
+argument error in a method call	runtime error: argument error in a method call:2: bad argument #1 to 'rep' (number expected, got table)
+bad self in a method call	runtime error: bad self in a method call:2: calling 'rep' on bad self (string expected, got table)
+argument error in a global function	runtime error: argument error in a global function:1: bad argument #1 to 'setmetatable' (table expected, got number)

@@ -17,7 +17,8 @@ type Call struct {
 	nargs int
 	res   []Value // results, copied to the stack when the function returns
 
-	fromLua bool // called by the VM for Lua code, not by pcall or another Go function
+	fromLua bool    // called by the VM for Lua code, not by pcall or another Go function
+	fn      *goFunc // the function being called, for messages
 }
 
 func (c *Call) reset() {
@@ -136,7 +137,7 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 		ex.calls = append(ex.calls, &Call{ex: ex})
 	}
 	c := ex.calls[ex.depth] // one record per depth, so a nested call cannot overwrite its caller's
-	c.base, c.nargs, c.fromLua = fn+1, nargs, fromLua
+	c.base, c.nargs, c.fromLua, c.fn = fn+1, nargs, fromLua, g
 	st := &ex.st
 	cl, base, pc := st.cl, st.base, st.pc // the host function may re-enter the VM
 	ex.depth++

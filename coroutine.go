@@ -348,14 +348,10 @@ func coClose(c *Call) error {
 
 // coroutineLib returns the coroutine library table.
 func coroutineLib() *Table {
-	t := NewTable(0, 8)
-	for name, f := range map[string]GoFunc{
+	return newLib("coroutine", map[string]GoFunc{
 		"create": coCreate, "resume": coResume, "yield": coYield, "status": coStatusOf,
 		"running": coRunningFn, "isyieldable": coIsYieldable, "wrap": coWrap, "close": coClose,
-	} {
-		t.Set(String(name), goFnValue(&goFunc{name: name, f: f}))
-	}
-	return t
+	})
 }
 
 // yieldedAt records where the results of the yield that just happened go, for the Go call

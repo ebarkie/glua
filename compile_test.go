@@ -125,11 +125,16 @@ func expectations(t *testing.T, cases, expected string) map[string]string {
 	return want
 }
 
+// testStrMeta is the string metatable of the last testGlobals; executors made by the test
+// helpers use it.
+var testStrMeta *Table
+
 // testGlobals returns a globals table with the libraries that exist so far, and gofirst,
 // a Go function that returns its first argument, for metamethods written in Go.
 func testGlobals() *Table {
 	g := NewTable(0, 32)
 	openBase(g)
+	testStrMeta = openString(g)
 	g.Set(String("coroutine"), tableValue(coroutineLib()))
 	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
 		return c.ReturnValues(c.Value(0))
@@ -145,6 +150,7 @@ func runSource(name, src string) ([]Value, error) {
 	}
 	cl := &Closure{p: p, env: testGlobals()}
 	ex := newExecutor()
+	ex.strMeta = testStrMeta
 	ex.maxSteps = 100_000_000
 	ex.maxCallDepth = 200_000
 	return runClosure(context.Background(), ex, cl)
@@ -225,3 +231,7 @@ func TestCheckedLoopGenerated(t *testing.T) {
 }
 
 func TestBaseCorpus(t *testing.T) { runCorpus(t, "testdata/base.lua", "testdata/base.expected") }
+
+func TestStringCorpus(t *testing.T) {
+	runCorpus(t, "testdata/strings.lua", "testdata/strings.expected")
+}

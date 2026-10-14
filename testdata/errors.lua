@@ -130,3 +130,16 @@ return f()
 --== assign with a nil key
 local t, k = {}, nil
 t[k] = 1
+--== argument error through a field call
+string.rep()
+--== argument error through a local alias
+local f = string.rep
+f("x", {})
+--== argument error in a method call
+local s = "x"
+s:rep({})
+--== bad self in a method call
+local t = {rep = string.rep}
+t:rep(2)
+--== argument error in a global function
+setmetatable(1, {})

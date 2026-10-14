@@ -24,7 +24,7 @@ func openBase(g *Table) {
 	g.Set(String("error"), goFnValue(builtinError))
 	g.Set(String("_G"), tableValue(g))
 	g.Set(String("_VERSION"), String("Lua 5.4"))
-	g.Set(String("debug"), tableValue(newLib(map[string]GoFunc{"traceback": debugTraceback})))
+	g.Set(String("debug"), tableValue(newLib("debug", map[string]GoFunc{"traceback": debugTraceback})))
 }
 
 func baseAssert(c *Call) error {

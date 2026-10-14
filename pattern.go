@@ -1,0 +1,438 @@
+package glua
+
+// Lua patterns, ported from C Lua 5.4's lstrlib.c: a direct interpreter over the pattern
+// text, with no compile step. Backtracking charges steps, and recursion is capped at 200
+// levels ("pattern too complex").
+
+const (
+	maxMatchDepth = 200
+	maxCaptures   = 32
+	capUnfinished = -1
+	capPosition   = -2
+	luaEsc        = '%'
+	specials      = "^$*+?.([%-"
+)
+
+type capture struct {
+	init int // start in src
+	len  int // length, or capUnfinished, or capPosition
+}
+
+type matchState struct {
+	src     string
+	pat     string
+	level   int
+	capture [maxCaptures]capture
+	depth   int
+	ticks   int
+	c       *Call
+	err     error
+}
+
+// fail records the first error; matching then unwinds.
+func (ms *matchState) fail(format string, args ...any) int {
+	if ms.err == nil {
+		ms.err = ms.c.libErrorf(format, args...)
+	}
+	return -1
+}
+
+// step charges the budget for backtracking work: one step per 64 iterations.
+func (ms *matchState) step() bool {
+	if ms.ticks++; ms.ticks&63 == 0 {
+		if err := ms.c.ex.tick(); err != nil {
+			if ms.err == nil {
+				ms.err = err
+			}
+			return false
+		}
+	}
+	return ms.err == nil
+}
+
+func (ms *matchState) checkCapture(l byte) int {
+	l -= '1'
+	if int(l) >= ms.level || ms.capture[l].len == capUnfinished {
+		return ms.fail("invalid capture index %%%d", int(l)+1)
+	}
+	return int(l)
+}
+
+func (ms *matchState) captureToClose() int {
+	level := ms.level - 1
+	for ; level >= 0; level-- {
+		if ms.capture[level].len == capUnfinished {
+			return level
+		}
+	}
+	return ms.fail("invalid pattern capture")
+}
+
+// classEnd returns the index just past the single-character class at p.
+func (ms *matchState) classEnd(p int) int {
+	pat := ms.pat
+	c := pat[p]
+	p++
+	if c == luaEsc {
+		if p >= len(pat) {
+			return ms.fail("malformed pattern (ends with '%%')")
+		}
+		return p + 1
+	}
+	if c == '[' {
+		if p < len(pat) && pat[p] == '^' {
+			p++
+		}
+		for { // look for a ']'
+			if p >= len(pat) {
+				return ms.fail("malformed pattern (missing ']')")
+			}
+			cc := pat[p]
+			p++
+			if cc == luaEsc && p < len(pat) {
+				p++ // skip escapes, such as '%]'
+			}
+			if p < len(pat) && pat[p] == ']' {
+				return p + 1
+			}
+			if p >= len(pat) {
+				return ms.fail("malformed pattern (missing ']')")
+			}
+		}
+	}
+	return p
+}
+
+func isAlpha(c byte) bool  { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func isDigitB(c byte) bool { return c >= '0' && c <= '9' }
+func isLower(c byte) bool  { return c >= 'a' && c <= 'z' }
+func isUpper(c byte) bool  { return c >= 'A' && c <= 'Z' }
+func isSpaceB(c byte) bool { return c == ' ' || c >= '\t' && c <= '\r' }
+func isCntrl(c byte) bool  { return c < 32 || c == 127 }
+func isPunct(c byte) bool  { return c > 32 && c < 127 && !isAlpha(c) && !isDigitB(c) }
+func isXDigitB(c byte) bool {
+	return isDigitB(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+// singleClass reports whether c matches class cl, such as 'a' for %a; uppercase classes
+// are complements; any other cl matches itself.
+func singleClass(c, cl byte) bool {
+	var res bool
+	switch cl | 0x20 {
+	case 'a':
+		res = isAlpha(c)
+	case 'c':
+		res = isCntrl(c)
+	case 'd':
+		res = isDigitB(c)
+	case 'g':
+		res = c > 32 && c < 127
+	case 'l':
+		res = isLower(c)
+	case 'p':
+		res = isPunct(c)
+	case 's':
+		res = isSpaceB(c)
+	case 'u':
+		res = isUpper(c)
+	case 'w':
+		res = isAlpha(c) || isDigitB(c)
+	case 'x':
+		res = isXDigitB(c)
+	default:
+		return cl == c
+	}
+	if isUpper(cl) {
+		return !res
+	}
+	return res
+}
+
+// matchClass reports whether c matches the set [ ... ] whose '[' is at p and whose ']' is
+// at ec-1.
+func (ms *matchState) matchClass(c byte, p, ec int) bool {
+	pat := ms.pat
+	sig := true
+	p++
+	if pat[p] == '^' {
+		sig = false
+		p++
+	}
+	for ec--; p < ec; p++ {
+		switch {
+		case pat[p] == luaEsc:
+			p++
+			if singleClass(c, pat[p]) {
+				return sig
+			}
+		case p+2 < ec && pat[p+1] == '-':
+			if pat[p] <= c && c <= pat[p+2] {
+				return sig
+			}
+			p += 2
+		case pat[p] == c:
+			return sig
+		}
+	}
+	return !sig
+}
+
+// singleMatch reports whether src[s] matches the class from p to ep.
+func (ms *matchState) singleMatch(s, p, ep int) bool {
+	if s >= len(ms.src) {
+		return false
+	}
+	c := ms.src[s]
+	switch ms.pat[p] {
+	case '.':
+		return true
+	case luaEsc:
+		return singleClass(c, ms.pat[p+1])
+	case '[':
+		return ms.matchClass(c, p, ep)
+	default:
+		return ms.pat[p] == c
+	}
+}
+
+func (ms *matchState) matchBalance(s, p int) int {
+	if p+1 >= len(ms.pat) {
+		return ms.fail("malformed pattern (missing arguments to '%%b')")
+	}
+	if s >= len(ms.src) || ms.src[s] != ms.pat[p] {
+		return -1
+	}
+	b, e := ms.pat[p], ms.pat[p+1]
+	cont := 1
+	for s++; s < len(ms.src); s++ {
+		if !ms.step() {
+			return -1
+		}
+		switch ms.src[s] {
+		case e:
+			if cont--; cont == 0 {
+				return s + 1
+			}
+		case b:
+			cont++
+		}
+	}
+	return -1
+}
+
+func (ms *matchState) maxExpand(s, p, ep int) int {
+	i := 0
+	for ms.singleMatch(s+i, p, ep) {
+		i++
+		if !ms.step() {
+			return -1
+		}
+	}
+	for ; i >= 0; i-- { // try with the maximum repetitions, then fewer
+		if r := ms.match(s+i, ep+1); r != -1 {
+			return r
+		}
+		if ms.err != nil || !ms.step() {
+			return -1
+		}
+	}
+	return -1
+}
+
+func (ms *matchState) minExpand(s, p, ep int) int {
+	for {
+		if r := ms.match(s, ep+1); r != -1 {
+			return r
+		}
+		if ms.err != nil || !ms.step() {
+			return -1
+		}
+		if ms.singleMatch(s, p, ep) {
+			s++
+		} else {
+			return -1
+		}
+	}
+}
+
+func (ms *matchState) startCapture(s, p, what int) int {
+	if ms.level >= maxCaptures {
+		return ms.fail("too many captures")
+	}
+	ms.capture[ms.level] = capture{init: s, len: what}
+	ms.level++
+	r := ms.match(s, p)
+	if r == -1 {
+		ms.level-- // undo the capture
+	}
+	return r
+}
+
+func (ms *matchState) endCapture(s, p int) int {
+	l := ms.captureToClose()
+	if l < 0 {
+		return -1
+	}
+	ms.capture[l].len = s - ms.capture[l].init
+	r := ms.match(s, p)
+	if r == -1 {
+		ms.capture[l].len = capUnfinished
+	}
+	return r
+}
+
+func (ms *matchState) matchCapture(s int, l byte) int {
+	i := ms.checkCapture(l)
+	if i < 0 {
+		return -1
+	}
+	c := ms.capture[i]
+	if len(ms.src)-s >= c.len && ms.src[c.init:c.init+c.len] == ms.src[s:s+c.len] {
+		return s + c.len
+	}
+	return -1
+}
+
+// match matches the pattern from p against the subject from s, and returns the end of the
+// match or -1.
+func (ms *matchState) match(s, p int) int {
+	if ms.depth++; ms.depth > maxMatchDepth {
+		return ms.fail("pattern too complex")
+	}
+	defer func() { ms.depth-- }()
+	pat := ms.pat
+	for {
+		if ms.err != nil || !ms.step() {
+			return -1
+		}
+		if p == len(pat) {
+			return s
+		}
+		switch pat[p] {
+		case '(':
+			if p+1 < len(pat) && pat[p+1] == ')' {
+				return ms.startCapture(s, p+2, capPosition)
+			}
+			return ms.startCapture(s, p+1, capUnfinished)
+		case ')':
+			return ms.endCapture(s, p+1)
+		case '$':
+			if p+1 == len(pat) {
+				if s == len(ms.src) {
+					return s
+				}
+				return -1
+			}
+		case luaEsc:
+			if p+1 < len(pat) {
+				switch pat[p+1] {
+				case 'b':
+					s = ms.matchBalance(s, p+2)
+					if s != -1 {
+						p += 4
+						continue
+					}
+					return -1
+				case 'f':
+					p += 2
+					if p >= len(pat) || pat[p] != '[' {
+						return ms.fail("missing '[' after '%%f' in pattern")
+					}
+					ep := ms.classEnd(p)
+					if ep < 0 {
+						return -1
+					}
+					var prev, cur byte
+					if s > 0 {
+						prev = ms.src[s-1]
+					}
+					if s < len(ms.src) {
+						cur = ms.src[s]
+					}
+					if !ms.matchClass(prev, p, ep) && ms.matchClass(cur, p, ep) {
+						p = ep
+						continue
+					}
+					return -1
+				case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+					s = ms.matchCapture(s, pat[p+1])
+					if s != -1 {
+						p += 2
+						continue
+					}
+					return -1
+				}
+			}
+		}
+		// default: a single class, possibly followed by a quantifier
+		ep := ms.classEnd(p)
+		if ep < 0 {
+			return -1
+		}
+		var epc byte
+		if ep < len(pat) {
+			epc = pat[ep]
+		}
+		if !ms.singleMatch(s, p, ep) {
+			if epc == '*' || epc == '?' || epc == '-' { // accept empty
+				p = ep + 1
+				continue
+			}
+			return -1
+		}
+		switch epc {
+		case '?':
+			if r := ms.match(s+1, ep+1); r != -1 {
+				return r
+			}
+			if ms.err != nil {
+				return -1
+			}
+			p = ep + 1
+		case '+':
+			return ms.maxExpand(s+1, p, ep)
+		case '*':
+			return ms.maxExpand(s, p, ep)
+		case '-':
+			return ms.minExpand(s, p, ep)
+		default:
+			s++
+			p = ep
+		}
+	}
+}
+
+// getCapture returns capture i as a value: a substring of the subject (no copy), or a
+// position. With no captures, capture 0 is the whole match.
+func (ms *matchState) getCapture(i, s, e int) Value {
+	if i >= ms.level {
+		if i != 0 {
+			ms.fail("invalid capture index %%%d", i+1)
+			return Value{}
+		}
+		return subString(String(ms.src), s, e)
+	}
+	c := ms.capture[i]
+	switch c.len {
+	case capUnfinished:
+		ms.fail("unfinished capture")
+		return Value{}
+	case capPosition:
+		return Int(int64(c.init) + 1)
+	}
+	return subString(String(ms.src), c.init, c.init+c.len)
+}
+
+// captures returns the captures of a match from s to e, or the whole match when there are
+// none and whole is set.
+func (ms *matchState) captures(s, e int, whole bool) []Value {
+	n := ms.level
+	if n == 0 && whole {
+		n = 1
+	}
+	vals := make([]Value, n)
+	for i := range n {
+		vals[i] = ms.getCapture(i, s, e)
+	}
+	return vals
+}

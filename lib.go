@@ -17,9 +17,47 @@ func (c *Call) libErrorf(format string, args ...any) error {
 	return &Error{Value: String(msg)}
 }
 
-// argError raises "bad argument #n to 'fname' (msg)", counting arguments from 1.
+// argError raises "bad argument #n to 'f' (msg)", counting arguments from 1, as
+// luaL_argerror does: the function is named as the call site names it, a method call does
+// not count self, and without a call-site name the library's qualified name is used.
 func (c *Call) argError(n int, fname, msg string) error {
-	return c.libErrorf("bad argument #%d to '%s' (%s)", n, fname, msg)
+	name, method := c.callSiteName()
+	if method {
+		n--
+		if n == 0 {
+			return c.libErrorf("calling '%s' on bad self (%s)", name, msg)
+		}
+	}
+	if name == "" {
+		name = fname
+		if c.fn != nil && c.fn.qualname != "" {
+			name = c.fn.qualname
+		}
+	}
+	return c.libErrorf("bad argument #%d to '%s' (%s)", n, name, msg)
+}
+
+// callSiteName returns the name the calling Lua code used for the function, and whether
+// it was a method call. It is empty when Go code, such as pcall, made the call.
+func (c *Call) callSiteName() (string, bool) {
+	ex := c.ex
+	if !c.fromLua || ex.st.cl == nil || ex.st.pc < 1 {
+		return "", false
+	}
+	i := ex.instr(ex.st.pc - 1)
+	switch uint8(i) {
+	case opCall, opTailCall:
+	default:
+		return "", false
+	}
+	kind, name := ex.st.cl.p.objName(ex.st.pc-1, decA(i))
+	switch kind {
+	case "global", "field", "local", "upvalue":
+		return name, false
+	case "method":
+		return name, true
+	}
+	return "", false
 }
 
 // typeArgError raises "bad argument #n to 'fname' (T expected, got U)".
@@ -171,11 +209,11 @@ func (c *Call) tostring(v Value) (string, error) {
 	return v.String(), nil
 }
 
-// newLib builds a library table from Go functions.
-func newLib(funcs map[string]GoFunc) *Table {
+// newLib builds the library table lib from Go functions.
+func newLib(lib string, funcs map[string]GoFunc) *Table {
 	t := NewTable(0, len(funcs))
 	for name, f := range funcs {
-		t.Set(String(name), goFnValue(&goFunc{name: name, f: f}))
+		t.Set(String(name), goFnValue(&goFunc{name: name, qualname: lib + "." + name, f: f}))
 	}
 	return t
 }

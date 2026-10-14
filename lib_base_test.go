@@ -16,7 +16,9 @@ func runWithOutput(t *testing.T, src string) (string, []Value) {
 	var out bytes.Buffer
 	ex := newExecutor()
 	ex.output = &out
-	res, err := runClosure(context.Background(), ex, &Closure{p: p, env: testGlobals()})
+	g := testGlobals()
+	ex.strMeta = testStrMeta
+	res, err := runClosure(context.Background(), ex, &Closure{p: p, env: g})
 	if err != nil {
 		t.Fatal(err)
 	}
