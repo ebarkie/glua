@@ -39,3 +39,13 @@ return a, b, t[1], #t
 local s = 0
 for i = 1, 1000 do s = s + math.floor(i / 3) + math.max(i % 7, 3) + math.abs(-i) % 5 end
 return s
+--== an alias of a built-in
+local floor, sqrt, tp = math.floor, math.sqrt, type
+local function f(x) return floor(x) + sqrt(x * x), tp(x) end
+local a, b = f(2.5)
+return a, b, floor(-1.5)
+--== an alias that is assigned is not one
+local floor = math.floor
+local r1 = floor(1.5)
+floor = function() return "mine" end
+return r1, floor(1.5)

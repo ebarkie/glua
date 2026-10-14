@@ -63,6 +63,9 @@ func compileResolved(source string, fn *syntax.FunctionExpr, info *syntax.Info) 
 type compiler struct {
 	source string
 	info   *syntax.Info
+	// aliases are locals bound once to a built-in, as in local floor = math.floor, and never
+	// assigned again: calls through them get a FASTCALL too
+	aliases map[*syntax.Var]uint8
 }
 
 // ekind is the state of an expression that has been parsed but not yet placed. Like C Lua's
@@ -1190,6 +1193,9 @@ func (fs *fstate) builtin(fn syntax.Expr) uint8 {
 		if name, ok := global(e); ok {
 			return fastIDs[name]
 		}
+		if ref := fs.c.info.Names[e]; ref.Var != nil && ref.Field == "" && (ref.Kind == syntax.RefLocal || ref.Kind == syntax.RefUpval) {
+			return fs.c.aliases[ref.Var]
+		}
 	case *syntax.IndexExpr:
 		k, isStr := e.Key.(*syntax.StringExpr)
 		if name, ok := global(e.Obj); ok && isStr {
@@ -1526,6 +1532,16 @@ func (fs *fstate) local(s *syntax.LocalStmt) {
 		}
 	}
 	base := fs.freereg
+	for i, v := range vars {
+		if i < len(s.Values) && !v.Assigned && v.Attrib != "close" {
+			if id := fs.builtin(s.Values[i]); id != 0 {
+				if fs.c.aliases == nil {
+					fs.c.aliases = map[*syntax.Var]uint8{}
+				}
+				fs.c.aliases[v] = id
+			}
+		}
+	}
 	if len(s.Values) == 0 {
 		fs.reserve(nvars)
 		fs.abc(opLoadNil, base, nvars-1, 0)

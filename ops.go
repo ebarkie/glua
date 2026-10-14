@@ -548,6 +548,12 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			if err := ex.tableSet(t, k, val); err != nil {
 				return err
 			}
+			if (op == opSetField || op == opSetGlobal) && hops == 0 && k.isString() {
+				// learn where the key lives, so the next write at this site is inline
+				if idx := t.findNode(&k, hashValue(k)); idx >= 0 {
+					learn(&ex.st.cl.p.hints[ex.aux()], idx)
+				}
+			}
 			ex.skipAux(op)
 			return nil
 		case obj.isObj(kindUser):
