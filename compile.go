@@ -995,6 +995,7 @@ func (fs *fstate) expr(n syntax.Expr) expdesc {
 		return fs.name(n)
 	case *syntax.IndexExpr:
 		t := fs.expr(n.Obj)
+		fs.exp2anyreg(&t) // before the key, so that the key's temporaries sit above it
 		fs.line = n.Line
 		k := fs.expr(n.Key)
 		fs.indexed(&t, &k)

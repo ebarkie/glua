@@ -296,3 +296,10 @@ function obj:sum(...)
   return s
 end
 return obj:sum(1, 2, 3), obj.sum(obj)
+--== index with an assigned _ENV and a temporary key
+_ENV = _ENV
+local f = {"k"}
+local g = function(m) m[f[1]] = _G[f[1]] or f[1] end
+local m = {}
+g(m)
+return m.k
