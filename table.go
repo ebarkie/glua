@@ -27,6 +27,9 @@ type Table struct {
 	// it; the driver fills it for a mutable metatable, and Freeze for a frozen one.
 	index *Table
 	flags uint8
+	// metaOK caches that setmetatable accepted this table as a metatable: no __mode, and no
+	// __gc without __close. Cleared with index.
+	metaOK bool
 }
 
 // Table flags. The absent bits cache that a metatable lacks a metamethod. They are filled
@@ -176,9 +179,9 @@ func (t *Table) Set(key, val Value) {
 
 // set assigns t[key] = val for a normalised key.
 func (t *Table) set(key, val Value) {
-	if (t.flags&tabAbsent != 0 || t.index != nil) && key.isString() && strings.HasPrefix(key.str(), "__") {
+	if (t.flags&tabAbsent != 0 || t.index != nil || t.metaOK) && key.isString() && strings.HasPrefix(key.str(), "__") {
 		t.flags &^= tabAbsent // a metamethod may have appeared
-		t.index = nil
+		t.index, t.metaOK = nil, false
 	}
 	if key.p == tInt() {
 		i := int64(key.n) - 1

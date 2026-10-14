@@ -101,13 +101,18 @@ func baseSetMetatable(c *Call) error {
 		return c.ReturnValues(c.Value(0))
 	}
 	mt := (*Table)(mtv.p)
-	// decision 8: weak tables and finalisers are not supported. __gc is accepted beside
-	// __close, a common fallback idiom, and refused otherwise.
-	if !mt.Get(String("__mode")).IsNil() {
-		return c.libErrorf("weak tables are not supported ('__mode')")
-	}
-	if !mt.Get(String("__gc")).IsNil() && mt.Get(String("__close")).IsNil() {
-		return c.libErrorf("finalizers are not supported ('__gc')")
+	if !mt.metaOK {
+		// decision 8: weak tables and finalisers are not supported. __gc is accepted beside
+		// __close, a common fallback idiom, and refused otherwise.
+		if !mt.Get(String("__mode")).IsNil() {
+			return c.libErrorf("weak tables are not supported ('__mode')")
+		}
+		if !mt.Get(String("__gc")).IsNil() && mt.Get(String("__close")).IsNil() {
+			return c.libErrorf("finalizers are not supported ('__gc')")
+		}
+		if !mt.Frozen() { // a frozen table is shared: Freeze sets the mark instead
+			mt.metaOK = true
+		}
 	}
 	t.meta = mt
 	return c.ReturnValues(c.Value(0))

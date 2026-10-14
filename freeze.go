@@ -139,6 +139,7 @@ func (t *Table) freeze() {
 	if h := t.Get(String("__index")); h.isObj(kindTable) {
 		t.index = (*Table)(h.p)
 	}
+	t.metaOK = t.Get(String("__mode")).IsNil() && (t.Get(String("__gc")).IsNil() || !t.Get(String("__close")).IsNil())
 	t.flags |= tabFrozen
 }
 
