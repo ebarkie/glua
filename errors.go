@@ -79,7 +79,7 @@ func (e *Error) Traceback() []Frame {
 			frames = append(frames, Frame{Function: "Go function"})
 			continue
 		}
-		f := Frame{Source: t.p.source, Line: t.p.lineAt(t.pc - 1)}
+		f := Frame{Source: t.p.source, Line: t.p.lineAt(max(t.pc-1, 0))}
 		switch name := t.p.name; {
 		case name == "main chunk":
 			f.Function = name
