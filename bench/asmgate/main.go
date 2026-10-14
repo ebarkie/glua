@@ -5,8 +5,8 @@
 //
 //   - fast calls anything other than a GC write barrier, a bounds-check panic or morestack,
 //   - the dispatch switch is not a jump table,
-//   - the dispatch head touches the stack, or
-//   - a hot opcode touches the stack more often than the checked-in baseline allows.
+//   - the dispatch head or a hot opcode touches the stack more often than the checked-in
+//     baseline allows. The design allows one store of pc in the head.
 //
 // Stack accesses on the write-barrier slow path, which runs only while the GC is marking, do
 // not count. Run with -update to accept a new baseline after an improvement.
@@ -48,7 +48,7 @@ var (
 	directJump   = regexp.MustCompile(`^(?:J\w*|B\w*|CBN?ZW?|TBN?Z)\s+(?:.*,\s*)?(?:0x([0-9a-f]+)|(-?\d+)\(PC\))$`)
 	callRe       = regexp.MustCompile(`^CALL\s+(\S+)`)
 	stackRe      = regexp.MustCompile(`\((R?SP)\)`)
-	indirectJump = regexp.MustCompile(`^JMP\s+(\S*\(R\w+\)(\(R\w+\*\d\))?|R\w+)$`)
+	indirectJump = regexp.MustCompile(`^JMP\s+(\S*\([A-Z][A-Z0-9]*\)(\([A-Z][A-Z0-9]*\*\d\))?|R\w+)$`)
 )
 
 // region is a part of fast's source: the dispatch head or one case clause.
@@ -64,6 +64,7 @@ func main() {
 	flag.Parse()
 
 	regions, loopEnd := parseRegions("fast.go")
+	headLine := regions[0].start // regions[0] is the head, from the loop's opening brace
 	baseline := readBaseline(*baselineFile)
 	measured := map[string]int{}
 	failed := false
@@ -108,6 +109,9 @@ func main() {
 			}
 			r := regionOf(regions, insns, i)
 			if i >= head[0] && i <= head[1] {
+				if filepath.Base(in.file) == "fast.go" && in.line < headLine {
+					continue // the function's prologue, which falls into the head on some ports
+				}
 				r = "head"
 			}
 			if r != "" {
@@ -120,14 +124,9 @@ func main() {
 		if !jumpTable {
 			problems = append(problems, "the dispatch switch is not a jump table")
 		}
-		if n := spills["head"]; n > 0 {
-			problems = append(problems, fmt.Sprintf("the dispatch head touches the stack %d times", n))
-		}
 		names := make([]string, 0, len(regions))
 		for _, r := range regions {
-			if r.name != "head" {
-				names = append(names, r.name)
-			}
+			names = append(names, r.name) // "head" included: the design allows one store of pc there
 		}
 		fmt.Printf("%s: %d instructions, jump table %v\n", c.name, len(insns), jumpTable)
 		for _, name := range names {

@@ -349,6 +349,312 @@ dispatch:
 				break dispatch
 			}
 
+		case opLoadF:
+			setFloat(&regs[uint8(i>>8)], float64(int16(i>>16)))
+
+		case opGetGlobal, opSetGlobal: // a field of the closure's globals table; the aux word is the site
+			t := cl.env
+			key := kAt(k, i>>16)
+			hint := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) // site verified
+			slot := hint & hintSlotMask
+			if t != nil && int(slot) < len(t.nodes) {
+				nd := &t.nodes[slot]
+				if same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) {
+					if uint8(i) == opGetGlobal {
+						setValue(&regs[uint8(i>>8)], &nd.v)
+						pc = unsafe.Add(pc, 4)
+						continue
+					}
+					if t.flags&tabFrozen == 0 && regs[uint8(i>>8)].p != nil { // a nil store may shrink: the driver
+						setValue(&nd.v, &regs[uint8(i>>8)])
+						pc = unsafe.Add(pc, 4)
+						continue
+					}
+				}
+			}
+			e = exSlowOp
+			break dispatch
+
+		case opSetField: // R[A][K[B]] = R[C]; the aux word is the site number
+			obj, key := &regs[uint8(i>>8)], kAt(k, uint32(uint8(i>>16)))
+			if obj.n == kindTable<<56 && !isScalar(obj.p) {
+				t := (*Table)(obj.p)
+				slot := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) & hintSlotMask
+				// a write hit also needs the table not frozen, and an old value or no metatable,
+				// because of __newindex. Keys starting with "__" go to the driver, which clears
+				// the table's cache of absent metamethods.
+				if int(slot) < len(t.nodes) && t.flags&tabFrozen == 0 && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
+					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) && regs[uint8(i>>24)].p != nil {
+						setValue(&nd.v, &regs[uint8(i>>24)])
+						pc = unsafe.Add(pc, 4)
+						continue
+					}
+				}
+			}
+			e = exSlowOp
+			break dispatch
+
+		case opGetTable, opGetIndex: // R[A] = R[B][R[C]] or R[B][C]: the array part inline
+			obj := &regs[uint8(i>>16)]
+			var idx uint64
+			if uint8(i) == opGetIndex {
+				idx = uint64(uint8(i>>24)) - 1
+			} else if key := &regs[uint8(i>>24)]; key.p == tInt() {
+				idx = key.n - 1
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+			if obj.n == kindTable<<56 && !isScalar(obj.p) {
+				t := (*Table)(obj.p)
+				if idx < uint64(len(t.arr)) {
+					if v := &t.arr[idx]; v.p != nil || t.meta == nil {
+						setValue(&regs[uint8(i>>8)], v)
+						continue
+					}
+				}
+			}
+			e = exSlowOp
+			break dispatch
+
+		case opSetTable, opSetIndex: // R[A][R[B]] or R[A][B] = R[C]: the array part inline
+			obj := &regs[uint8(i>>8)]
+			var idx uint64
+			if uint8(i) == opSetIndex {
+				idx = uint64(uint8(i>>16)) - 1
+			} else if key := &regs[uint8(i>>16)]; key.p == tInt() {
+				idx = key.n - 1
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+			if obj.n == kindTable<<56 && !isScalar(obj.p) {
+				t := (*Table)(obj.p)
+				if idx < uint64(len(t.arr)) && t.flags&tabFrozen == 0 {
+					if v := &t.arr[idx]; v.p != nil || t.meta == nil {
+						setValue(v, &regs[uint8(i>>24)])
+						continue
+					}
+				}
+			}
+			e = exSlowOp
+			break dispatch
+
+		case opSelf: // R[A+1] = R[B]; R[A] = R[B][K[C]]; the aux word is the site number
+			obj, key := &regs[uint8(i>>16)], kAt(k, i>>24)
+			if obj.n == kindTable<<56 && !isScalar(obj.p) {
+				t := (*Table)(obj.p)
+				slot := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) & hintSlotMask
+				if int(slot) < len(t.nodes) {
+					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) {
+						a := uint8(i >> 8)
+						setValue(&regs[a+1], obj) // obj may be R[A]: copy it first
+						setValue(&regs[a], &nd.v)
+						pc = unsafe.Add(pc, 4)
+						continue
+					}
+				}
+			}
+			e = exSlowOp
+			break dispatch
+
+		case opDiv, opDivK:
+			x, y := &regs[uint8(i>>16)], &regs[uint8(i>>24)]
+			if uint8(i) == opDivK {
+				y = kAt(k, i>>24)
+			}
+			if isNum(x) && isNum(y) {
+				setFloat(&regs[uint8(i>>8)], toFloat(x)/toFloat(y))
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opMod, opModK, opIDiv, opIDivK: // integers with a divisor other than 0 and -1
+			x, y := &regs[uint8(i>>16)], &regs[uint8(i>>24)]
+			if uint8(i) == opModK || uint8(i) == opIDivK {
+				y = kAt(k, i>>24)
+			}
+			if x.p == tInt() && y.p == tInt() && int64(y.n)+1 > 1 {
+				a, b := int64(x.n), int64(y.n)
+				q, m := a/b, a%b
+				if m != 0 && (m^b) < 0 { // round towards minus infinity
+					q--
+					m += b
+				}
+				if uint8(i) == opMod || uint8(i) == opModK {
+					setInt(&regs[uint8(i>>8)], uint64(m))
+				} else {
+					setInt(&regs[uint8(i>>8)], uint64(q))
+				}
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opBAnd, opBOr, opBXor, opBAndK, opBOrK, opBXorK:
+			x, y := &regs[uint8(i>>16)], &regs[uint8(i>>24)]
+			op := uint8(i)
+			if op >= opBAndK {
+				y = kAt(k, i>>24)
+				op -= opBAndK - opBAnd
+			}
+			if x.p == tInt() && y.p == tInt() {
+				r := x.n & y.n
+				if op == opBOr {
+					r = x.n | y.n
+				} else if op == opBXor {
+					r = x.n ^ y.n
+				}
+				setInt(&regs[uint8(i>>8)], r)
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opShl, opShr, opShlK, opShrK:
+			x, y := &regs[uint8(i>>16)], &regs[uint8(i>>24)]
+			if uint8(i) == opShlK || uint8(i) == opShrK {
+				y = kAt(k, i>>24)
+			}
+			if x.p == tInt() && y.p == tInt() {
+				n := int64(y.n)
+				if uint8(i) == opShr || uint8(i) == opShrK {
+					n = -n
+				}
+				var r uint64
+				if n > -64 && n < 64 { // 64 or more either way gives 0
+					if n >= 0 {
+						r = x.n << uint(n)
+					} else {
+						r = x.n >> uint(-n)
+					}
+				}
+				setInt(&regs[uint8(i>>8)], r)
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opUnm:
+			x := &regs[uint8(i>>16)]
+			if x.p == tInt() {
+				setInt(&regs[uint8(i>>8)], -x.n)
+			} else if x.p == tFloat() {
+				setFloat(&regs[uint8(i>>8)], -math.Float64frombits(x.n))
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opNot:
+			x := &regs[uint8(i>>16)]
+			if x.p == nil || (x.p == tBool() && x.n == 0) {
+				setBool(&regs[uint8(i>>8)], 1)
+			} else {
+				setBool(&regs[uint8(i>>8)], 0)
+			}
+
+		case opEqJmp: // test R[A] == R[B]: the same words, or numbers of one kind
+			x, y := &regs[uint8(i>>8)], &regs[uint8(i>>16)]
+			var eq bool
+			if same(x, y) {
+				eq = x.p != tFloat() || x.n<<1 <= 0x7ff<<53 // the same bits are equal, unless they are a NaN
+			} else if x.p == tFloat() && y.p == tFloat() {
+				eq = math.Float64frombits(x.n) == math.Float64frombits(y.n)
+			} else if x.p == y.p && (x.p == tInt() || x.p == tBool()) || x.p == nil || y.p == nil {
+				eq = false // scalars of one kind with other bits, or nil against anything else
+			} else {
+				e = exSlowOp // mixed numbers, strings behind other pointers, __eq
+				break dispatch
+			}
+			if eq == (i>>24 != 0) {
+				pc = unsafe.Add(pc, 4)
+			} else {
+				pc = unsafe.Add(pc, (int(int32(*(*uint32)(pc)))+1)*4)
+			}
+
+		case opLeJmp, opLeKJmp, opGtKJmp, opGeKJmp: // R[A] <= R[B] or K[B]; K[B] < R[A]; K[B] <= R[A]
+			x, y := &regs[uint8(i>>8)], &regs[uint8(i>>16)]
+			op := uint8(i)
+			if op != opLeJmp {
+				y = kAt(k, uint32(uint8(i>>16)))
+			}
+			if op == opGtKJmp || op == opGeKJmp {
+				x, y = y, x
+			}
+			var r bool
+			if x.p == tInt() && y.p == tInt() {
+				r = int64(x.n) < int64(y.n) || (op != opGtKJmp && x.n == y.n)
+			} else if x.p == tFloat() && y.p == tFloat() {
+				a, b := math.Float64frombits(x.n), math.Float64frombits(y.n)
+				r = a < b || (op != opGtKJmp && a == b)
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+			if r == (i>>24 != 0) {
+				pc = unsafe.Add(pc, 4)
+			} else {
+				pc = unsafe.Add(pc, (int(int32(*(*uint32)(pc)))+1)*4)
+			}
+
+		case opTestJmp: // test R[A] is truthy
+			x := &regs[uint8(i>>8)]
+			if (x.p != nil && !(x.p == tBool() && x.n == 0)) == (i>>24 != 0) {
+				pc = unsafe.Add(pc, 4)
+			} else {
+				pc = unsafe.Add(pc, (int(int32(*(*uint32)(pc)))+1)*4)
+			}
+
+		case opTestSet: // test R[B]; fall through when it equals C, else R[A] = R[B] and jump
+			x := &regs[uint8(i>>16)]
+			if (x.p != nil && !(x.p == tBool() && x.n == 0)) == (i>>24 != 0) {
+				pc = unsafe.Add(pc, 4)
+			} else {
+				setValue(&regs[uint8(i>>8)], x)
+				pc = unsafe.Add(pc, (int(int32(*(*uint32)(pc)))+1)*4)
+			}
+
+		case opGetCell, opGetUpCell: // R[A] = cell of R[B] or of Up[B]
+			var c *Value
+			if uint8(i) == opGetCell {
+				c = &regs[uint8(i>>16)]
+			} else {
+				c = (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(uint8(i>>16))*16)) // index verified
+			}
+			if c.n == kindCell<<56 && !isScalar(c.p) {
+				setValue(&regs[uint8(i>>8)], &(*cell)(c.p).v)
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opSetCell, opSetUpCell: // cell of R[A] = R[B]; cell of Up[B] = R[A]
+			var c, v *Value
+			if uint8(i) == opSetCell {
+				c, v = &regs[uint8(i>>8)], &regs[uint8(i>>16)]
+			} else {
+				c, v = (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(uint8(i>>16))*16)), &regs[uint8(i>>8)]
+			}
+			if c.n == kindCell<<56 && !isScalar(c.p) && !(*cell)(c.p).frozen {
+				setValue(&(*cell)(c.p).v, v)
+			} else {
+				e = exSlowOp
+				break dispatch
+			}
+
+		case opTForLoop: // if R[A+4] ~= nil then R[A+2] = R[A+4]; pc -= Bx
+			a := uint8(i >> 8)
+			if regs[a+4].p != nil {
+				setValue(&regs[a+2], &regs[a+4])
+				pc = unsafe.Add(pc, -int(i>>16)*4)
+				if ex.st.ticks--; ex.st.ticks < 0 { // every back-edge ticks
+					e = exTick
+					break dispatch
+				}
+			}
+
 		default: // everything else is done by the driver, which also rejects opBad. Listing all 256
 			// values would not drop the range check: the compiler merges the unused ones into one run,
 			// and the switch then fails the jump-table density test.
