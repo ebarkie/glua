@@ -126,6 +126,15 @@ func setInt(d *Value, n uint64) {
 	d.n = n
 }
 
+// setValue copies v into d. Like setInt, it writes p only when it changes, so copying a
+// number over a number, or the same object over itself, takes no write barrier.
+func setValue(d *Value, v *Value) {
+	if d.p != v.p {
+		d.p = v.p
+	}
+	d.n = v.n
+}
+
 // setFloat stores a float result, like setInt.
 func setFloat(d *Value, f float64) {
 	if d.p != tFloat() {

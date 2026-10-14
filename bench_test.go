@@ -3,12 +3,13 @@ package glua
 import (
 	"context"
 	"math"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-// VM benchmarks: one op is one run of the whole program. bench/compare.sh times the same
-// programs in C Lua.
+// VM benchmarks: one op is one run of the whole program. `go run ./bench/compare` times
+// the same programs in C Lua, in interleaved rounds.
 
 func benchProgram(b *testing.B, p *Proto) {
 	ex := newExecutor()
@@ -146,3 +147,43 @@ func BenchmarkHostCall(b *testing.B) {
 		}
 	}
 }
+
+// GC-marking variants: a background goroutine keeps a heap of 3 million nodes and runs
+// collections back to back, so the write barrier is on for nearly the whole run.
+
+type gcNode struct {
+	next *gcNode
+	pad  [2]*gcNode
+}
+
+func gcPressure() (stop func()) {
+	var head *gcNode
+	for range 3_000_000 {
+		head = &gcNode{next: head}
+	}
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for {
+			select {
+			case <-done:
+				runtime.KeepAlive(head)
+				return
+			default:
+				runtime.GC()
+			}
+		}
+	}()
+	return func() { close(done); <-finished }
+}
+
+func benchProgramGC(b *testing.B, p *Proto) {
+	stop := gcPressure()
+	defer stop()
+	benchProgram(b, p)
+}
+
+func BenchmarkGCFloatLoop(b *testing.B) { benchProgramGC(b, progFloatLoop(1_000_000)) }
+func BenchmarkGCFib27(b *testing.B)     { benchProgramGC(b, progFib(27)) }
+func BenchmarkGCFieldRead(b *testing.B) { benchProgramGC(b, progFieldRead(1_000_000)) }

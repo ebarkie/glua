@@ -2,3 +2,4 @@
 *.out
 *.prof
 /bench/results/
+/bench/.clua/

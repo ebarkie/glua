@@ -53,10 +53,10 @@ dispatch:
 		pc = unsafe.Add(pc, 4)
 		switch uint8(i) { // a jump table, after one range check
 		case opMove:
-			regs[uint8(i>>8)] = regs[uint8(i>>16)]
+			setValue(&regs[uint8(i>>8)], &regs[uint8(i>>16)])
 
 		case opLoadK:
-			regs[uint8(i>>8)] = *kAt(k, i>>16)
+			setValue(&regs[uint8(i>>8)], kAt(k, i>>16))
 
 		case opLoadI:
 			setInt(&regs[uint8(i>>8)], uint64(int64(int16(i>>16))))
@@ -77,7 +77,7 @@ dispatch:
 			setBool(&regs[uint8(i>>8)], 1)
 
 		case opGetUpval:
-			regs[uint8(i>>8)] = cl.up[uint8(i>>16)]
+			setValue(&regs[uint8(i>>8)], &cl.up[uint8(i>>16)])
 
 		case opGetField: // R[A] = R[B][K[C]]; the aux word is the site number
 			obj, key := &regs[uint8(i>>16)], kAt(k, i>>24)
@@ -88,7 +88,7 @@ dispatch:
 				if int(slot) < len(t.nodes) {
 					// a hit needs the key, and a value or no metatable: a deleted key must still consult __index
 					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) {
-						regs[uint8(i>>8)] = nd.v
+						setValue(&regs[uint8(i>>8)], &nd.v)
 						pc = unsafe.Add(pc, 4)
 						continue
 					}
@@ -102,7 +102,7 @@ dispatch:
 							if nd.v.p == nil && t.meta != nil {
 								break
 							}
-							regs[uint8(i>>8)] = nd.v
+							setValue(&regs[uint8(i>>8)], &nd.v)
 							pc = unsafe.Add(pc, 4)
 							continue dispatch
 						}
