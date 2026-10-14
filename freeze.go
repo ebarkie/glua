@@ -12,6 +12,7 @@ import (
 
 // freezer collects the objects reachable from the values given to add.
 type freezer struct {
+	plans  *[]*typeInfo // the Runtime's view of bound types; nil for the process-wide one
 	seen   map[unsafe.Pointer]bool
 	work   []freezeItem
 	tables []*Table
@@ -85,7 +86,13 @@ func (f *freezer) walk() error {
 		case kindThread:
 			return fmt.Errorf("%s is a coroutine, which cannot be shared", it.path)
 		case kindUser:
-			if ti := userType(v); ti != nil && ti.writable() {
+			ti := userType(v)
+			if f.plans != nil {
+				if id := v.n & typeIDMask; id < uint64(len(*f.plans)) {
+					ti = (*f.plans)[id]
+				}
+			}
+			if ti != nil && ti.writable() {
 				return fmt.Errorf("%s is a %s, whose writable fields cannot be shared", it.path, ti.rt)
 			}
 		}

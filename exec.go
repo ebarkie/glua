@@ -159,7 +159,7 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	if ctx.Err() != nil {
 		return ctxError(ctx) // a cancelled context never runs script code
 	}
-	ex.running, ex.ctx, ex.types = true, ctx, types.Load()
+	ex.running, ex.ctx, ex.types = true, ctx, ex.planSet()
 	q := min(tickQuantum, ex.maxSteps)
 	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q) // budgets are set here only: nested entries share them
 	ex.allocLeft = ex.maxAlloc

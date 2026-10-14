@@ -163,6 +163,12 @@ func (c *Call) index(obj, key Value) (Value, error) {
 				return v, nil
 			}
 			h = t.meta.metaGet("__index")
+		} else if obj.isObj(kindUser) {
+			v, slot, err := ex.indexUser(obj, key)
+			if slot != -2 {
+				return v, err
+			}
+			h = v
 		} else {
 			h = ex.metamethod(obj, "__index")
 		}

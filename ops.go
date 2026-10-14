@@ -473,19 +473,23 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 			}
 			obj = h
 		case obj.isObj(kindUser):
-			ti := (*ex.types)[uint32(obj.n)]
-			name, _ := key.Str()
-			for j := range ti.fields {
-				if ti.fields[j].name == name {
-					if op == opGetField || op == opSelf {
-						learn(&st.cl.p.hints[ex.aux()], j)
-					}
-					*ex.reg(dst) = ti.fields[j].load(obj.p)
-					ex.skipAux(op)
-					return nil
-				}
+			v, slot, err := ex.indexUser(obj, key)
+			if err != nil {
+				return err
 			}
-			return ex.errorf("no field '%s' on %s", name, ti.rt.Name())
+			if slot == -2 { // the type's __index
+				if v.isObj(kindLuaFn) || v.isObj(kindGoFn) {
+					return ex.callMeta("__index", v, obj, key)
+				}
+				obj = v
+				continue
+			}
+			if slot >= 0 && (op == opGetField || op == opSelf) {
+				learn(&st.cl.p.hints[ex.aux()], slot)
+			}
+			*ex.reg(dst) = v
+			ex.skipAux(op)
+			return nil
 		default:
 			if hops == 0 {
 				return ex.typeError("index", obj, ex.objReg())
@@ -527,6 +531,12 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 				return ex.errorf("table index is NaN")
 			}
 			t.set(k, val)
+			ex.skipAux(op)
+			return nil
+		case obj.isObj(kindUser):
+			if err := ex.newindexUser(obj, key, val); err != nil {
+				return err
+			}
 			ex.skipAux(op)
 			return nil
 		default:
@@ -1087,6 +1097,10 @@ func (ex *executor) metatable(v Value) *Table {
 		return (*Table)(v.p).meta
 	case v.isString():
 		return ex.strMeta
+	case v.isObj(kindUser):
+		if ti := ex.plan(v); ti != nil {
+			return ti.meta
+		}
 	}
 	return nil
 }

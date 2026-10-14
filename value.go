@@ -176,6 +176,9 @@ func rawEqual(a, b Value) bool {
 	if isScalar(a.p) || isScalar(b.p) {
 		return a.isNumber() && b.isNumber() && numEq(a, b)
 	}
+	if a.n>>56 == kindUser && b.n>>56 == kindUser {
+		return a.p == b.p && a.n&typeIDMask == b.n&typeIDMask // the same object, whatever the flags
+	}
 	if a.n != b.n || a.n>>56 != kindString {
 		return false // different kinds, lengths or objects
 	}

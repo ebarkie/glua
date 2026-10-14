@@ -38,7 +38,7 @@ func (rt *Runtime) Load(ctx context.Context, name, src string) (*Script, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := freezeEnv(env, res); err != nil {
+	if err := freezeEnv(rt, env, res); err != nil {
 		return nil, fmt.Errorf("glua: %s: cannot freeze: %w", name, err)
 	}
 	return &Script{rt: rt, name: name, env: env, result: res, lim: &rt.run, main: p, info: info}, nil
@@ -59,8 +59,9 @@ func (rt *Runtime) runTop(ctx context.Context, cl *Closure, name string) ([]Valu
 
 // freezeEnv freezes the globals of an environment and the results of its top level, naming
 // what cannot be frozen.
-func freezeEnv(env *Table, res []Value) error {
+func freezeEnv(rt *Runtime, env *Table, res []Value) error {
 	f := newFreezer()
+	f.plans = rt.plans()
 	for k, v := range env.All() {
 		if k.isString() {
 			f.add(v, "global '"+k.str()+"'")
@@ -283,7 +284,10 @@ type argEnc[T any] struct {
 	id      uint64
 }
 
-func newArgEnc[T any]() (argEnc[T], error) {
+func newArgEnc[T any](rt *Runtime) (argEnc[T], error) {
+	if err := rt.checkType(reflect.TypeFor[T]()); err != nil {
+		return argEnc[T]{}, err
+	}
 	enc, byValue, err := encoderFor[T]()
 	a := argEnc[T]{enc: enc, byValue: byValue}
 	if byValue {
@@ -424,7 +428,7 @@ func bindName(name string, err error) error {
 }
 
 func func0[R any](b *boundFunc) (func(context.Context) (R, error), error) {
-	dec, err := resultDecoderFor[R]()
+	dec, err := checkedResultDecoder[R](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
@@ -439,11 +443,11 @@ func func0[R any](b *boundFunc) (func(context.Context) (R, error), error) {
 }
 
 func func1[A, R any](b *boundFunc) (func(context.Context, A) (R, error), error) {
-	ea, err := newArgEnc[A]()
+	ea, err := newArgEnc[A](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
-	dec, err := resultDecoderFor[R]()
+	dec, err := checkedResultDecoder[R](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
@@ -468,15 +472,15 @@ func func1[A, R any](b *boundFunc) (func(context.Context, A) (R, error), error) 
 }
 
 func func2[A, B, R any](b *boundFunc) (func(context.Context, A, B) (R, error), error) {
-	ea, err := newArgEnc[A]()
+	ea, err := newArgEnc[A](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
-	eb, err := newArgEnc[B]()
+	eb, err := newArgEnc[B](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
-	dec, err := resultDecoderFor[R]()
+	dec, err := checkedResultDecoder[R](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
@@ -506,19 +510,19 @@ func func2[A, B, R any](b *boundFunc) (func(context.Context, A, B) (R, error), e
 }
 
 func func3[A, B, C, R any](b *boundFunc) (func(context.Context, A, B, C) (R, error), error) {
-	ea, err := newArgEnc[A]()
+	ea, err := newArgEnc[A](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
-	eb, err := newArgEnc[B]()
+	eb, err := newArgEnc[B](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
-	ec, err := newArgEnc[C]()
+	ec, err := newArgEnc[C](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
-	dec, err := resultDecoderFor[R]()
+	dec, err := checkedResultDecoder[R](b.rt)
 	if err != nil {
 		return nil, bindName(b.name, err)
 	}
@@ -550,4 +554,15 @@ func func3[A, B, C, R any](b *boundFunc) (func(context.Context, A, B, C) (R, err
 		clearSlot(sc)
 		return r, err
 	}, nil
+}
+
+// checkedResultDecoder is resultDecoderFor, after checking that the Runtime exposes a pointer
+// result's struct type.
+func checkedResultDecoder[R any](rt *Runtime) (resultDecoder[R], error) {
+	if t := reflect.TypeFor[R](); t.Kind() == reflect.Pointer {
+		if err := rt.checkType(t); err != nil {
+			return resultDecoder[R]{}, err
+		}
+	}
+	return resultDecoderFor[R]()
 }

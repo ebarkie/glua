@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/folbricht/glua/internal/syntax"
@@ -35,6 +36,11 @@ type Runtime struct {
 	recover  bool
 	hardened bool
 	checked  bool
+
+	custom     map[uint64]*typeInfo  // plans customised by Type, by type ID
+	registered map[reflect.Type]bool // the types Type registered
+	planCache  atomic.Pointer[planSet]
+	planMu     sync.Mutex
 
 	pool sync.Pool // executors; they hold no script state, so one pool serves every Script and Rule
 }
@@ -122,6 +128,7 @@ type options struct {
 	hardened bool
 	checked  *bool // tests choose the loop
 	converts []convertReg
+	types    []*typeOptions
 }
 
 type namedValue struct {
@@ -245,6 +252,9 @@ func New(opts ...Option) (*Runtime, error) {
 			return nil, err
 		}
 	}
+	if err := rt.registerTypes(o.types); err != nil {
+		return nil, err
+	}
 	var err error
 	if rt.run, rt.init, err = resolveLimits(o.limits, o.hardened); err != nil {
 		return nil, err
@@ -362,6 +372,13 @@ func (rt *Runtime) buildLayer(o *options) error {
 		rt.reserved[name] = true
 	}
 	define := func(name string, v Value) error {
+		if v.n>>56 == kindUser && !isScalar(v.p) {
+			if ti := userType(v); ti != nil {
+				if err := rt.checkType(ti.rt); err != nil {
+					return bindName(name, err)
+				}
+			}
+		}
 		if !isName(name) {
 			return &BindError{Name: name, Reason: "not a Lua name"}
 		}
@@ -403,9 +420,13 @@ func (rt *Runtime) buildLayer(o *options) error {
 		}
 		rt.sources[name] = m
 	}
-	if err := freezeValue(tableValue(g), "globals"); err != nil {
+	fr := newFreezer()
+	fr.plans = rt.plans()
+	fr.add(tableValue(g), "globals")
+	if err := fr.walk(); err != nil {
 		return &BindError{Reason: err.Error()}
 	}
+	fr.freeze()
 	if err := freezeValue(tableValue(rt.modules), "package.loaded"); err != nil {
 		return &BindError{Reason: err.Error()}
 	}

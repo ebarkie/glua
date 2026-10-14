@@ -85,8 +85,11 @@ dispatch:
 					}
 				}
 			} else if obj.n>>56 == kindUser && !isScalar(obj.p) { // both halves: an integer can carry these bits
-				ti := (*ex.types)[uint32(obj.n)] // the type ID: below 2^32, so no 48-bit mask constant ties up a register
-				if int(slot) < len(ti.fields) && same(&ti.fields[slot].key, key) {
+				ts := *ex.types
+				// the type ID: below 2^32, so no 48-bit mask constant ties up a register. A type
+				// bound during this entry is not in ts yet: the driver reloads the plans
+				if id := uint32(obj.n); int(id) < len(ts) && int(slot) < len(ts[id].fields) && same(&ts[id].fields[slot].key, key) {
+					ti := ts[id]
 					fd, d := &ti.fields[slot], &regs[uint8(i>>8)]
 					p := unsafe.Add(obj.p, fd.off)
 					switch fd.kind {
@@ -104,6 +107,9 @@ dispatch:
 						} else {
 							*d = Value{p: *(*unsafe.Pointer)(p), n: kindString<<56 | uint64(s[1])}
 						}
+					default:
+						e = exSlowOp // hints are learnt only for the inline kinds; this cannot happen
+						break dispatch
 					}
 					pc++
 					continue
