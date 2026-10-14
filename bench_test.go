@@ -41,6 +41,40 @@ func BenchmarkCheckedFieldRead(b *testing.B) { benchChecked(b, progFieldRead(1_0
 func BenchmarkFib27(b *testing.B)            { benchProgram(b, progFib(27)) }
 func BenchmarkFieldRead(b *testing.B)        { benchProgram(b, progFieldRead(1_000_000)) }
 
+// The same programs compiled from source, as bench/lua runs them in C Lua: on the checked
+// loop, the default, and on the fast loop.
+
+const (
+	srcFloatLoop = "local s = 0.0; for i = 1, 1000000 do s = s + i * 1.5 end; return s"
+	srcFib27     = "local function fib(n) if n < 2 then return n end return fib(n-1) + fib(n-2) end; return fib(27)"
+	srcFieldRead = "local t = {x = 1}; local s = 0; for i = 1, 1000000 do s = s + t.x end; return s"
+)
+
+func benchSource(b *testing.B, src string, checked bool) {
+	p, info, err := compileChunk("bench", src)
+	if err != nil {
+		b.Fatal(err)
+	}
+	ex := newExecutor()
+	ex.checked = checked
+	ex.maxSteps = math.MaxInt64
+	cl := newMainClosure(p, info, NewTable(0, 0))
+	ctx := context.Background()
+	for b.Loop() {
+		if err := ex.call(ctx, cl, 0, 0); err != nil {
+			b.Fatal(err)
+		}
+		ex.reset()
+	}
+}
+
+func BenchmarkSourceFloatLoop(b *testing.B)     { benchSource(b, srcFloatLoop, true) }
+func BenchmarkSourceFib27(b *testing.B)         { benchSource(b, srcFib27, true) }
+func BenchmarkSourceFieldRead(b *testing.B)     { benchSource(b, srcFieldRead, true) }
+func BenchmarkSourceFastFloatLoop(b *testing.B) { benchSource(b, srcFloatLoop, false) }
+func BenchmarkSourceFastFib27(b *testing.B)     { benchSource(b, srcFib27, false) }
+func BenchmarkSourceFastFieldRead(b *testing.B) { benchSource(b, srcFieldRead, false) }
+
 // Boundary benchmarks: one op is one call from Go.
 
 // privateFunc1 is a typed function on an executor of its own, as a private VM has.

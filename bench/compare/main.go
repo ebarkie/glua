@@ -6,6 +6,7 @@
 //
 //	bench/build-clua.sh
 //	go run ./bench/compare -rounds 12
+//	go run ./bench/compare -source   # the workloads compiled from source
 package main
 
 import (
@@ -26,16 +27,21 @@ import (
 )
 
 type workload struct {
-	name   string // as shown in the report
-	script string // under bench/lua
-	bench  string // Go benchmark, idle GC
-	gc     string // Go benchmark, GC marking
+	name    string // as shown in the report
+	script  string // under bench/lua
+	bench   string // Go benchmark, idle GC
+	gc      string // Go benchmark, GC marking
+	src     string // Go benchmark compiled from source, checked loop
+	srcFast string // same, fast loop
 }
 
 var workloads = []workload{
-	{"Float loop, 1M iterations of `s = s + i * 1.5`", "floatloop.lua", "BenchmarkFloatLoop", "BenchmarkGCFloatLoop"},
-	{"`fib(27)`, recursive", "fib27.lua", "BenchmarkFib27", "BenchmarkGCFib27"},
-	{"Field read, 1M iterations of `s = s + t.x`", "fieldread.lua", "BenchmarkFieldRead", "BenchmarkGCFieldRead"},
+	{"Float loop, 1M iterations of `s = s + i * 1.5`", "floatloop.lua", "BenchmarkFloatLoop", "BenchmarkGCFloatLoop",
+		"BenchmarkSourceFloatLoop", "BenchmarkSourceFastFloatLoop"},
+	{"`fib(27)`, recursive", "fib27.lua", "BenchmarkFib27", "BenchmarkGCFib27",
+		"BenchmarkSourceFib27", "BenchmarkSourceFastFib27"},
+	{"Field read, 1M iterations of `s = s + t.x`", "fieldread.lua", "BenchmarkFieldRead", "BenchmarkGCFieldRead",
+		"BenchmarkSourceFieldRead", "BenchmarkSourceFastFieldRead"},
 }
 
 var boundary = []struct{ name, bench string }{
@@ -55,6 +61,7 @@ func main() {
 	runs := flag.Int("runs", 5, "runs of each workload per round")
 	lua := flag.String("lua", "bench/.clua/lua-5.4.9/src/lua", "C Lua binary")
 	out := flag.String("raw", "bench/results/go.txt", "file for the raw Go results, in benchstat format")
+	source := flag.Bool("source", false, "time the workloads compiled from source, on the checked and the fast loop, instead")
 	flag.Parse()
 
 	if _, err := os.Stat(*lua); err != nil {
@@ -65,6 +72,10 @@ func main() {
 	defer os.RemoveAll(tmp)
 	testBin := filepath.Join(tmp, "glua.test")
 	run("go", "test", "-c", "-o", testBin, ".")
+	if *source {
+		compareSource(*lua, testBin, *rounds, *runs, *out)
+		return
+	}
 
 	var raw bytes.Buffer
 	cTimes := make([][]float64, len(workloads))  // per workload: round means, ms
@@ -126,6 +137,47 @@ func main() {
 		fmt.Printf("| %s | %s | %s |\n", b.name, spreadNs(bounds[i].ns), bounds[i].allocs)
 	}
 	fmt.Printf("\nRaw Go results for benchstat: %s\n", *out)
+}
+
+// compareSource times the workloads compiled from source against C Lua, on the checked
+// loop, the default, and on the fast loop.
+func compareSource(lua, testBin string, rounds, runs int, out string) {
+	var raw bytes.Buffer
+	cTimes := make([][]float64, len(workloads))
+	chkTimes := make([][]float64, len(workloads))
+	fastTimes := make([][]float64, len(workloads))
+	for r := range rounds {
+		fmt.Fprintf(os.Stderr, "round %d/%d\n", r+1, rounds)
+		for i, w := range workloads {
+			cTimes[i] = append(cTimes[i], luaRound(lua, filepath.Join("bench/lua", w.script), runs))
+			ns, line := goRound(testBin, w.src, runs, false)
+			chkTimes[i] = append(chkTimes[i], ns/1e6)
+			raw.WriteString(line)
+			ns, line = goRound(testBin, w.srcFast, runs, false)
+			fastTimes[i] = append(fastTimes[i], ns/1e6)
+			raw.WriteString(line)
+		}
+	}
+	check(os.MkdirAll(filepath.Dir(out), 0o755))
+	check(os.WriteFile(out, raw.Bytes(), 0o644))
+
+	luaName := luaVersion(lua)
+	fmt.Printf("Machine: %s, %d CPUs, governor %s. %s. %s: %s.\n", cpuModel(), runtime.NumCPU(), governor(),
+		goVersion(), luaName, luaInfo(lua))
+	fmt.Printf("%d interleaved rounds of %d runs each; medians of the round means, with the range of the round means. %s.\n\n",
+		rounds, runs, time.Now().Format("2 January 2006"))
+	fmt.Printf("| Workload from source, ms | %s | glua, checked loop | / C Lua | glua, fast loop | / C Lua |\n", luaName)
+	fmt.Println("| --- | --- | --- | --- | --- | --- |")
+	geoChk, geoFast := 0.0, 0.0
+	for i, w := range workloads {
+		c, k, f := median(cTimes[i]), median(chkTimes[i]), median(fastTimes[i])
+		geoChk += math.Log(k / c)
+		geoFast += math.Log(f / c)
+		fmt.Printf("| %s | %s | %s | %.2fx | %s | %.2fx |\n", w.name, spread(cTimes[i]), spread(chkTimes[i]), k/c, spread(fastTimes[i]), f/c)
+	}
+	n := float64(len(workloads))
+	fmt.Printf("| Geometric mean against C Lua | | | %.2fx | | %.2fx |\n", math.Exp(geoChk/n), math.Exp(geoFast/n))
+	fmt.Printf("\nRaw Go results for benchstat: %s\n", out)
 }
 
 // luaRound runs a Lua workload script and returns the mean of its runs, in ms.
