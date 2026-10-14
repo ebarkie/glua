@@ -246,6 +246,22 @@ dispatch:
 			}
 			pc = unsafe.Add(pc, 4) // not the built-in: the CALL
 
+		case opLen: // R[A] = #R[B], for a string, or a table whose length its array part shows
+			x := &regs[uint8(i>>16)]
+			if x.n>>56 == kindString && !isScalar(x.p) {
+				setInt(&regs[uint8(i>>8)], x.n&lenMask)
+				continue
+			}
+			if x.n == kindTable<<56 && !isScalar(x.p) {
+				t := (*Table)(x.p)
+				if n := len(t.arr); t.meta == nil && len(t.nodes) == 0 && (n == 0 || t.arr[n-1].p != nil) {
+					setInt(&regs[uint8(i>>8)], uint64(n))
+					continue
+				}
+			}
+			e = exSlowOp
+			break dispatch
+
 		case opJmpX: // pc += int32(aux), counting from the word after the aux word
 			off := int(int32(*(*uint32)(pc))) + 1
 			pc = unsafe.Add(pc, off*4)

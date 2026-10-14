@@ -6,5 +6,5 @@ amd64-v1 opJmp 1
 amd64-v1 opSelf 1
 amd64-v3 head 1
 amd64-v3 opGetField 8
-amd64-v3 opJmp 1
+amd64-v3 opGetTable,opGetIndex 1
 amd64-v3 opSelf 1
