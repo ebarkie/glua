@@ -112,21 +112,21 @@ func (e *expdesc) hasJumps() bool { return len(e.t) > 0 || len(e.f) > 0 }
 
 // fstate is the state of the function being compiled.
 type fstate struct {
-	c       *compiler
-	parent  *fstate
-	node    *syntax.FunctionExpr
-	fi      *syntax.FuncInfo
-	p       *Proto
-	kcache  map[kkey]int
-	freereg int
-	nactive int // registers held by active locals
-	regOf   map[*syntax.Var]int
-	consts  map[*syntax.Var]Value
-	bl      *cblock
-	line    int
-	tbc     []int // registers of active to-be-closed variables
-	open    []int // indices into p.locvars of the active locals, for their end pc
-	target  int   // pc of the last jump target: no peephole across it
+	c         *compiler
+	parent    *fstate
+	node      *syntax.FunctionExpr
+	fi        *syntax.FuncInfo
+	p         *Proto
+	kcache    map[kkey]int
+	freereg   int
+	nactive   int // registers held by active locals
+	regOf     map[*syntax.Var]int
+	consts    map[*syntax.Var]Value
+	bl        *cblock
+	line      int
+	tbc       []int        // registers of active to-be-closed variables
+	open      []int        // indices into p.locvars of the active locals, for their end pc
+	target    int          // pc of the last jump target: no peephole across it
 	fastCalls map[int]bool // CALLs a FASTCALL stands before
 }
 
