@@ -330,7 +330,7 @@ func TestRuleEvalNoAlloc(t *testing.T) {
 		t.Fatalf("Eval allocates %v times per call", allocs)
 	}
 	ex := e.pool.Get().(*executor)
-	if slot := (*request)(ex.slots[rule.id]); *slot != (request{}) {
+	if slot := (*request)(ex.slots[rule.id*maxSlotArgs]); *slot != (request{}) {
 		t.Fatalf("slot still holds %+v", *slot)
 	}
 }

@@ -226,7 +226,7 @@ func bindFunc1[A, R any](e *engine, cl *Closure) func(context.Context, A) (R, er
 		id := bindType(reflect.TypeFor[A]())
 		return func(ctx context.Context, a A) (r R, err error) {
 			ex := e.pool.Get().(*executor)
-			slot := slotFor[A](ex, id)
+			slot := slotFor[A](ex, id, 0)
 			*slot = a // copy in: the script sees the slot, flagged readonly and callscoped
 			ex.stack[1] = Value{p: unsafe.Pointer(slot), n: kindUser<<56 | flagReadonly | flagCallscoped | id}
 			if err = ex.call(ctx, cl, 0, 1); err == nil {
@@ -272,7 +272,7 @@ func newRule[E, R any](e *engine, cl *Closure) *Rule[E, R] {
 // itself does not escape, so a caller-local struct stays on the stack.
 func (ru *Rule[E, R]) Eval(ctx context.Context, env *E) (r R, err error) {
 	ex := ru.pool.Get().(*executor)
-	slot := slotFor[E](ex, ru.id)
+	slot := slotFor[E](ex, ru.id, 0)
 	*slot = *env // copy in
 	ex.stack[1] = Value{p: unsafe.Pointer(slot), n: kindUser<<56 | flagCallscoped | ru.id}
 	if err = ex.call(ctx, ru.cl, 0, 1); err == nil {
@@ -283,17 +283,4 @@ func (ru *Rule[E, R]) Eval(ctx context.Context, env *E) (r R, err error) {
 	clear(unsafe.Slice(slot, 1)) // nothing of this call stays reachable from the pool
 	release(ru.pool, ex)
 	return r, err
-}
-
-// slotFor returns this executor's slot for type E. It is allocated as an E, so the GC sees its pointers.
-func slotFor[E any](ex *executor, id uint64) *E {
-	if id < uint64(len(ex.slots)) && ex.slots[id] != nil {
-		return (*E)(ex.slots[id])
-	}
-	for uint64(len(ex.slots)) <= id {
-		ex.slots = append(ex.slots, nil)
-	}
-	s := new(E)
-	ex.slots[id] = unsafe.Pointer(s)
-	return s
 }

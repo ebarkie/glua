@@ -171,7 +171,14 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 		}
 		ex.poisoned = true // a panic or runtime.Goexit is passing through: never pool this one again
 		if ex.hostCalls > 0 {
-			return // a host function's panic, or Goexit: it continues
+			// a host function's panic, or Goexit: it continues, unless the Runtime recovers
+			// panics. recover returns nil for Goexit, which then goes on.
+			if ex.rt != nil && ex.rt.recover {
+				if r := recover(); r != nil {
+					err = &PanicError{Value: r, Stack: debug.Stack()}
+				}
+			}
+			return
 		}
 		// a panic inside the VM itself, such as a failed bounds check in the checked loop: a VM
 		// bug must not take the process down
@@ -181,6 +188,9 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	}()
 	err = ex.run(cl, fn, nargs)
 	completed = true
+	if le, ok := err.(*Error); ok && le.terminal {
+		ex.poisoned = true // a terminal error may leave closers half run: start the next entry afresh
+	}
 	return err
 }
 

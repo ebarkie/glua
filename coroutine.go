@@ -301,7 +301,7 @@ func coWrap(c *Call) error {
 	if err != nil {
 		return err
 	}
-	g := &goFunc{name: "wrap", stateful: true}
+	g := &goFunc{name: "wrap", qualname: "coroutine.wrap", stateful: true}
 	g.f = func(c *Call) error {
 		vals, ok, err := c.ex.resume(co, callArgs(c, 0))
 		if err != nil {
