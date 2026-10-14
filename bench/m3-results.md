@@ -55,7 +55,7 @@ Found by profiling the suite, in the order of their effect:
   at its end, so `t[2..n]` lived in the hash part. A full hash part now triggers C Lua's rehash,
   and the array part doubles when it fills. Sieve: 9.2x to 1.7x.
 - **Hints learned on writes.** SETFIELD and SETGLOBAL sites never learned a hint, so every write
-  to a field other than the first slot left the hot loop. n-body: 2.4x to 1.07x on the fast loop.
+  to a field other than the first slot left the hot loop. n-body: 2.2x to 1.07x on the fast loop.
 - **Library callbacks climbed the stack.** Each call from Go, such as sort's comparator, left
   `ex.top` above its results, so 5,000 comparisons grew the stack to 131,072 slots.
 - **Integers compared inline.** EQKJMP sent every compare of two different integers to the
@@ -71,7 +71,7 @@ Found by profiling the suite, in the order of their effect:
 
 - **GC idle: misses.** 1.28x on the fast loop and 1.46x on the checked loop, against 1.2x. Nine
   scripts are within 1.2x on the fast loop; the worst is policy at 2.05x.
-- **Worst case: misses.** policy, vararg, sieve, parse, coroutine and sort are above 1.5x on both
+- **Worst case: misses.** policy, vararg, sieve, parse, coroutine, sort and oop are above 1.5x on both
   loops.
 - **The checked loop costs 14%** across the suite, and up to 40% in tight arithmetic loops
   (floatloop, fib).
