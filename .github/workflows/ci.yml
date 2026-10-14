@@ -44,6 +44,17 @@ jobs:
       - name: Test with checkptr
         run: go test -gcflags=all=-d=checkptr ./...
 
+  stackstress:
+    name: Stack stress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test with the stack moving at every growth check
+        run: go test -tags lua_stackstress ./...
+
   cross:
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest

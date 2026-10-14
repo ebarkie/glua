@@ -94,6 +94,11 @@ type executor struct {
 	maxSteps     int64
 	maxCallDepth int
 	errExtra     int // frames a message handler may use beyond maxCallDepth, as C Lua's error stack
+
+	// under lua_stackstress, the stack moves between two buffers: spare is the other one,
+	// whose first spareDirty slots hold poison
+	spare        []Value
+	spareDirty   int
 	maxHostDepth int
 	maxAlloc     int64 // bytes one entry may allocate
 	allocLeft    int64 // what is left of it in the current entry
@@ -235,9 +240,14 @@ func release(pool *sync.Pool, ex *executor) {
 // frameLimit is the number of frames allowed now.
 func (ex *executor) frameLimit() int { return ex.maxCallDepth + ex.errExtra }
 
-// ensure grows the stack so that n slots plus the slack exist.
+// ensure grows the stack so that n slots plus the slack exist. Under the lua_stackstress
+// build tag it moves the stack every time, and poisons the old one.
 func (ex *executor) ensure(n int) error {
 	if n+stackSlack <= len(ex.stack) {
+		if !stackStress || len(ex.stack) > stressMax {
+			return nil
+		}
+		ex.moveStack(len(ex.stack))
 		return nil
 	}
 	limit := maxStack
@@ -247,12 +257,42 @@ func (ex *executor) ensure(n int) error {
 	if n+stackSlack > limit {
 		return ex.errorf("stack overflow")
 	}
-	size := min(max(2*len(ex.stack), n+stackSlack), limit)
+	ex.moveStack(min(max(2*len(ex.stack), n+stackSlack), limit))
+	return nil
+}
+
+// stressMax is the largest stack lua_stackstress moves at every check; past it, moving the
+// whole stack per call would make deep recursion quadratic.
+const stressMax = 64 << 10
+
+// stalePoison fills a stack that was moved away from, under lua_stackstress: a stale read
+// shows up as this string in a result or a message.
+var stalePoison = String("glua: stale stack slot")
+
+// moveStack moves the stack to a new one of size slots.
+func (ex *executor) moveStack(size int) {
+	if stackStress {
+		// only the part in use: above the high-water mark and top, every slot is nil
+		used := min(len(ex.stack), max(ex.st.hi, ex.top)+stackSlack)
+		s, dirty := ex.spare, ex.spareDirty
+		if len(s) != size {
+			s, dirty = make([]Value, size), 0
+		}
+		copy(s, ex.stack[:used])
+		if dirty > used {
+			clear(s[used:dirty])
+		}
+		for i := range used {
+			ex.stack[i] = stalePoison
+		}
+		ex.spare, ex.spareDirty = ex.stack, used
+		ex.stack = s
+		return
+	}
 	s := make([]Value, size)
 	copy(s, ex.stack)
 	clear(ex.stack) // the old stack may stay reachable from a stale pointer; leave nothing in it
 	ex.stack = s
-	return nil
 }
 
 // charge takes n bytes from the entry's allocation budget, before the allocation. Running

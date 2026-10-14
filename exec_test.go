@@ -326,7 +326,7 @@ func TestRuleEvalNoAlloc(t *testing.T) {
 			t.Fatal(ok, err)
 		}
 	})
-	if allocs != 0 {
+	if allocs != 0 && !stackStress { // lua_stackstress allocates a stack at every check
 		t.Fatalf("Eval allocates %v times per call", allocs)
 	}
 	ex := e.pool.Get().(*executor)
@@ -359,8 +359,8 @@ func TestTypedFuncs(t *testing.T) {
 	if r, err := byVal(ctx, *req); !r || err != nil {
 		t.Fatal(r, err)
 	}
-	if raceEnabled {
-		return // sync.Pool drops items in race builds
+	if raceEnabled || stackStress {
+		return // sync.Pool drops items in race builds; lua_stackstress allocates stacks
 	}
 	for name, f := range map[string]func(){
 		"add1":     func() { add1(ctx, 1) },
