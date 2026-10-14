@@ -199,6 +199,18 @@ func (v *verifier) instr(pc int) error {
 		if c > 1 {
 			return reg(a + c - 2)
 		}
+	case opFastCall:
+		// the CALL it stands for must follow, with the same function and arguments
+		if next >= len(p.code)-1 || uint8(p.code[next]) != opCall {
+			return fail("not followed by a CALL")
+		}
+		if ci := p.code[next]; decA(ci) != a || decB(ci) != b || b < 1 {
+			return fail("does not match its CALL")
+		}
+		if aux == 0 || aux >= numFast {
+			return fail("unknown built-in %d", aux)
+		}
+		return reg(a + b - 1)
 	case opClosure:
 		for _, u := range p.protos[bx].upvals {
 			if u.fromStack {

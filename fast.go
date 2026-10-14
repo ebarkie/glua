@@ -238,6 +238,13 @@ dispatch:
 				}
 			}
 
+		case opFastCall: // a built-in; the aux word is its id, and the CALL it stands for follows
+			if f := &regs[uint8(i>>8)]; f.n == kindGoFn<<56 && !isScalar(f.p) && uint32((*goFunc)(f.p).fast) == *(*uint32)(pc) {
+				e = exSlowOp // the driver does it, or falls through to the CALL
+				break dispatch
+			}
+			pc = unsafe.Add(pc, 4) // not the built-in: the CALL
+
 		case opJmpX: // pc += int32(aux), counting from the word after the aux word
 			off := int(int32(*(*uint32)(pc))) + 1
 			pc = unsafe.Add(pc, off*4)

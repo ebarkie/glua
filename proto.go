@@ -59,6 +59,7 @@ type goFunc struct {
 	qualname string // "string.format": the name messages use when the call site gives none
 	stateful bool   // hidden state, such as coroutine.wrap's coroutine: freezing refuses it
 	host     bool   // the host's, not the library's: its results are charged to the budget
+	fast     uint8  // the built-in FASTCALL can do inline, or 0
 }
 
 func luaFnValue(cl *Closure) Value { return Value{p: unsafe.Pointer(cl), n: kindLuaFn << 56} }

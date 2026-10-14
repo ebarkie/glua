@@ -17,7 +17,7 @@ func openBase(g *Table) {
 		"select": baseSelect, "setmetatable": baseSetMetatable, "tonumber": baseToNumber,
 		"tostring": baseToString, "type": baseType, "warn": baseWarn,
 	} {
-		g.Set(String(name), goFnValue(&goFunc{name: name, f: f}))
+		g.Set(String(name), goFnValue(&goFunc{name: name, f: f, fast: fastIDs[name]}))
 	}
 	g.Set(String("pairs"), goFnValue(builtinPairs))
 	g.Set(String("pcall"), goFnValue(builtinPcall))
@@ -128,13 +128,20 @@ func baseNext(c *Call) error {
 	return c.ReturnValues(k, v)
 }
 
-var nextFn = goFnValue(&goFunc{name: "next", f: baseNext})
+var (
+	nextG  = &goFunc{name: "next"}
+	nextFn = goFnValue(nextG)
+)
 
 // builtinPairs is pairs. When Lua calls it for a value with __pairs, the VM calls
 // pairsMeta instead, so that __pairs can yield.
 var builtinPairs = &goFunc{name: "pairs"}
 
-func init() { builtinPairs.f = basePairs }
+func init() {
+	builtinPairs.f = basePairs
+	nextG.f = baseNext // set here: the VM refers to these functions, which refer back to it
+	ipairsAuxG.f = ipairsAux
+}
 
 // pairsMeta is function(mm, t) local f, s, c = mm(t) return f, s, c end: pairs through
 // __pairs, which C Lua truncates to three results.
@@ -181,7 +188,10 @@ func ipairsAux(c *Call) error {
 	return c.ReturnValues(Int(i), v)
 }
 
-var ipairsAuxFn = goFnValue(&goFunc{name: "ipairs_aux", f: ipairsAux})
+var (
+	ipairsAuxG  = &goFunc{name: "ipairs_aux"}
+	ipairsAuxFn = goFnValue(ipairsAuxG)
+)
 
 func baseIpairs(c *Call) error {
 	if err := c.checkAny(0, "ipairs"); err != nil {

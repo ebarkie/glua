@@ -127,6 +127,7 @@ type fstate struct {
 	tbc     []int // registers of active to-be-closed variables
 	open    []int // indices into p.locvars of the active locals, for their end pc
 	target  int   // pc of the last jump target: no peephole across it
+	fastCalls map[int]bool // CALLs a FASTCALL stands before
 }
 
 type kkey struct {
@@ -1168,7 +1169,34 @@ func (fs *fstate) call(n *syntax.CallExpr) expdesc {
 	f := fs.expr(n.Fn)
 	fs.line = n.Line
 	fs.exp2nextreg(&f)
-	return fs.finishCall(f.info, n.Args, n.Line)
+	return fs.finishCall(f.info, n.Args, n.Line, fs.builtin(n.Fn))
+}
+
+// builtin returns the FASTCALL id for a call of fn, a free name such as type or a field of
+// one such as math.floor, when that names a built-in; or 0. FASTCALL checks at run time
+// that the function really is the built-in, so a script that defines its own math still
+// gets its own.
+func (fs *fstate) builtin(fn syntax.Expr) uint8 {
+	global := func(e syntax.Expr) (string, bool) {
+		n, ok := e.(*syntax.NameExpr)
+		if !ok {
+			return "", false
+		}
+		ref := fs.c.info.Names[n]
+		return n.Name, ref.Kind == syntax.RefGlobal && ref.Env == nil && ref.Field == ""
+	}
+	switch e := fn.(type) {
+	case *syntax.NameExpr:
+		if name, ok := global(e); ok {
+			return fastIDs[name]
+		}
+	case *syntax.IndexExpr:
+		k, isStr := e.Key.(*syntax.StringExpr)
+		if name, ok := global(e.Obj); ok && isStr {
+			return fastIDs[name+"."+k.Value]
+		}
+	}
+	return 0
 }
 
 func (fs *fstate) methodCall(n *syntax.MethodCallExpr) expdesc {
@@ -1187,12 +1215,12 @@ func (fs *fstate) methodCall(n *syntax.MethodCallExpr) expdesc {
 		fs.abc(opGetTable, base, base+1, base)
 	}
 	fs.freereg = base + 1 // the function; self is the first argument
-	return fs.finishCall(base, append([]syntax.Expr{nil}, n.Args...), n.Line)
+	return fs.finishCall(base, append([]syntax.Expr{nil}, n.Args...), n.Line, 0)
 }
 
 // finishCall compiles the arguments of a call whose function is in register base. A nil
 // first argument stands for self, which is already in place.
-func (fs *fstate) finishCall(base int, args []syntax.Expr, line int) expdesc {
+func (fs *fstate) finishCall(base int, args []syntax.Expr, line int, fast uint8) expdesc {
 	nargs := 0
 	open := false
 	var last expdesc
@@ -1219,7 +1247,17 @@ func (fs *fstate) finishCall(base int, args []syntax.Expr, line int) expdesc {
 		b = 0
 	}
 	fs.line = line
+	if fast != 0 && !open {
+		fs.abc(opFastCall, base, b, 0)
+		fs.emit(uint32(fast))
+	}
 	pc := fs.abc(opCall, base, b, 2)
+	if fast != 0 && !open {
+		if fs.fastCalls == nil {
+			fs.fastCalls = map[int]bool{}
+		}
+		fs.fastCalls[pc] = true
+	}
 	fs.freereg = base + 1 // the call leaves one result in base, until told otherwise
 	return expdesc{k: eCall, info: pc}
 }
@@ -1588,6 +1626,10 @@ func (fs *fstate) ret(s *syntax.ReturnStmt) {
 		if e.k == eCall && !closing {
 			i := fs.p.code[e.info]
 			fs.p.code[e.info] = iABC(opTailCall, uint8(decA(i)), uint8(decB(i)), 0)
+			if fs.fastCalls[e.info] {
+				// FASTCALL stands only before a CALL: make it a jump to the next instruction
+				fs.p.code[e.info-2], fs.p.code[e.info-1] = iABC(opJmpX, 0, 0, 0), 0
+			}
 			fs.abc(opReturn, decA(i), 0, 0) // for a Go function, which returns here
 			return
 		}

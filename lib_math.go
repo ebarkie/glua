@@ -143,16 +143,28 @@ func mathMinMax(c *Call, name string, max bool) error {
 	if n < 1 {
 		return c.argError(1, name, "value expected")
 	}
-	best, err := c.checkNumber(0, name)
-	if err != nil {
+	// as C Lua: each argument must convert to a number, but the comparisons are of the
+	// arguments themselves, so math.max("10", 9) compares a string with a number
+	if _, err := c.checkNumber(0, name); err != nil {
 		return err
 	}
+	best := c.Value(0)
 	for i := 1; i < n; i++ {
-		v, err := c.checkNumber(i, name)
+		if _, err := c.checkNumber(i, name); err != nil {
+			return err
+		}
+		v := c.Value(i)
+		var less bool
+		var err error
+		if max {
+			less = c.lessThan(best, v, &err)
+		} else {
+			less = c.lessThan(v, best, &err)
+		}
 		if err != nil {
 			return err
 		}
-		if max && numLessAny(best, v) || !max && numLessAny(v, best) {
+		if less {
 			best = v
 		}
 	}

@@ -25,6 +25,7 @@ var rewrites = []struct {
 	with string
 }{
 	{regexp.MustCompile(`func \(ex \*executor\) fast\(\) exit`), "func (ex *executor) checkedLoop() exit"},
+	{regexp.MustCompile(`\*\(\*uint32\)\(unsafe\.Add\(pc, 4\)\)`), "code[pc+1]"},
 	{regexp.MustCompile(`\*\(\*uint32\)\(pc\)`), "code[pc]"},
 	{regexp.MustCompile(`pc = unsafe\.Add\(pc, 4\)`), "pc++"},
 	{regexp.MustCompile(`pc = unsafe\.Add\(pc, (.+)\*4\)`), "pc += $1"},

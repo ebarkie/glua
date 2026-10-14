@@ -113,6 +113,11 @@ const (
 	opTBC        // mark R[A] to be closed
 	opClose      // close the to-be-closed variables in R[A] and above
 
+	// built-ins. FASTCALL stands right before the CALL of a library function with B-1
+	// arguments: if R[A] is built-in aux and its inline form applies, it does the call and
+	// skips the CALL; otherwise it falls through to it.
+	opFastCall
+
 	numOps
 )
 
@@ -228,6 +233,7 @@ var opTable = [numOps]opInfo{
 	opVararg:     {"VARARG", oReg, oNone, oInt, false, oNone},
 	opTBC:        {"TBC", oReg, oNone, oNone, false, oNone},
 	opClose:      {"CLOSE", oReg, oNone, oNone, false, oNone},
+	opFastCall:   {"FASTCALL", oReg, oInt, oNone, false, oSize},
 }
 
 // hasAux reports whether an opcode is followed by an auxiliary word.

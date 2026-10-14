@@ -295,8 +295,14 @@ func (ex *executor) slowOp() error {
 			return err
 		}
 		st.pc += decBx(i)
+	case opFastCall:
+		ex.fastCall(i)
+		return nil
 	case opTForCall:
 		base := st.base + a
+		if done, err := ex.builtinIter(base, c); done {
+			return err
+		}
 		if err := ex.ensure(base + 7); err != nil {
 			return err
 		}
@@ -1283,4 +1289,38 @@ func typeName(v Value) string {
 // script cannot assign in its environment.
 func (ex *executor) reservedKey(key Value) bool {
 	return ex.rt != nil && key.isString() && ex.rt.reserved[key.str()]
+}
+
+// builtinIter runs a step of a generic for over next, as pairs gives it, or over ipairs's
+// iterator, without a Go call: the iterator, state and control are at stack[base:], and
+// the c results go to stack[base+4:]. It reports whether it did the step.
+func (ex *executor) builtinIter(base, c int) (bool, error) {
+	f, s, ctl := ex.stack[base], ex.stack[base+1], ex.stack[base+2]
+	if !s.isObj(kindTable) || c > stackSlack-4 {
+		return false, nil
+	}
+	t := (*Table)(s.p)
+	var k, v Value
+	switch {
+	case f.p == unsafe.Pointer(nextG) && f.n == kindGoFn<<56:
+		var ok bool
+		if k, v, ok = t.Next(ctl); !ok {
+			return false, nil // the general path raises the error
+		}
+	case f.p == unsafe.Pointer(ipairsAuxG) && f.n == kindGoFn<<56 && t.meta == nil && ctl.p == tInt():
+		i := int64(ctl.n) + 1
+		if v = t.Get(Int(i)); !v.IsNil() {
+			k = Int(i)
+		}
+	default:
+		return false, nil
+	}
+	r := ex.stack[base+4 : base+4+c]
+	clear(r)
+	r[0] = k
+	if c > 1 {
+		r[1] = v
+	}
+	ex.st.hi = max(ex.st.hi, base+4+c)
+	return true, ex.tick() // a call ticks
 }

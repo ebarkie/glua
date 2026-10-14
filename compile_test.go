@@ -243,3 +243,7 @@ func TestStringCorpus(t *testing.T) {
 func TestLibsCorpus(t *testing.T) { runCorpus(t, "testdata/libs.lua", "testdata/libs.expected") }
 
 func TestLoadCorpus(t *testing.T) { runCorpus(t, "testdata/load.lua", "testdata/load.expected") }
+
+func TestFastCallCorpus(t *testing.T) {
+	runCorpus(t, "testdata/fastcall.lua", "testdata/fastcall.expected")
+}

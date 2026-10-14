@@ -224,7 +224,8 @@ func (c *Call) tostring(v Value) (string, error) {
 func newLib(lib string, funcs map[string]GoFunc) *Table {
 	t := NewTable(0, len(funcs))
 	for name, f := range funcs {
-		t.Set(String(name), goFnValue(&goFunc{name: name, qualname: lib + "." + name, f: f}))
+		qual := lib + "." + name
+		t.Set(String(name), goFnValue(&goFunc{name: name, qualname: qual, f: f, fast: fastIDs[qual]}))
 	}
 	return t
 }
