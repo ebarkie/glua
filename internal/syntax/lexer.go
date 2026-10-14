@@ -87,6 +87,12 @@ func (l *Lexer) fail(msg, near string) {
 
 // Next returns the next token.
 func (l *Lexer) Next() Token {
+	tok := l.next()
+	tok.EndLine = l.line
+	return tok
+}
+
+func (l *Lexer) next() Token {
 	for {
 		c := l.cur()
 		start := l.pos

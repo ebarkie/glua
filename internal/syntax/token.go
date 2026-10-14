@@ -120,13 +120,14 @@ func IsReserved(s string) bool {
 
 // Token is one lexical token.
 type Token struct {
-	Kind Kind
-	Line int     // 1-based
-	Col  int     // 1-based byte column of the first character
-	Str  string  // the name, or the string's contents after escapes
-	Int  int64   // the value of an Int token
-	Num  float64 // the value of a Float token
-	raw  string  // the text C Lua shows after "near" for names, strings and numerals
+	Kind    Kind
+	Line    int     // 1-based
+	EndLine int     // the line the lexer is on after the token, which C Lua reports errors at
+	Col     int     // 1-based byte column of the first character
+	Str     string  // the name, or the string's contents after escapes
+	Int     int64   // the value of an Int token
+	Num     float64 // the value of a Float token
+	raw     string  // the text C Lua shows after "near" for names, strings and numerals
 }
 
 // Error is a syntax error. Its message has C Lua's form, such as "unexpected symbol near 'x'".
