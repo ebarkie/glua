@@ -136,7 +136,9 @@ func (ex *executor) errorf(format string, args ...any) error {
 // when it is in register reg of the current frame (reg < 0: not in a register).
 func (ex *executor) typeError(what string, v Value, reg int) error {
 	info := ""
-	if reg >= 0 {
+	if op := uint8(ex.instr(ex.st.pc - 1)); what == "index" && (op == opGetGlobal || op == opSetGlobal) {
+		info = " (upvalue '_ENV')" // a nil globals table, which C Lua sees as the _ENV upvalue
+	} else if reg >= 0 {
 		if vi := ex.st.cl.p.varInfo(ex.st.pc-1, reg); vi != "" {
 			info = " (" + vi + ")"
 		}

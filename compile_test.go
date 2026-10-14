@@ -138,6 +138,7 @@ func testGlobals() *Table {
 	openTable(g)
 	openMath(g)
 	openUTF8(g)
+	openLoad(g)
 	g.Set(String("coroutine"), tableValue(coroutineLib()))
 	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
 		return c.ReturnValues(c.Value(0))
@@ -147,11 +148,11 @@ func testGlobals() *Table {
 
 // runSource compiles and runs a chunk and returns its results.
 func runSource(name, src string) ([]Value, error) {
-	p, _, err := compileChunk(name, src)
+	p, info, err := compileChunk(name, src)
 	if err != nil {
 		return nil, err
 	}
-	cl := &Closure{p: p, env: testGlobals()}
+	cl := newMainClosure(p, info, testGlobals())
 	ex := newExecutor()
 	ex.strMeta = testStrMeta
 	ex.maxSteps = 100_000_000
@@ -240,3 +241,5 @@ func TestStringCorpus(t *testing.T) {
 }
 
 func TestLibsCorpus(t *testing.T) { runCorpus(t, "testdata/libs.lua", "testdata/libs.expected") }
+
+func TestLoadCorpus(t *testing.T) { runCorpus(t, "testdata/load.lua", "testdata/load.expected") }
