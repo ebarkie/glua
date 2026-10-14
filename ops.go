@@ -381,7 +381,7 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				ex.skipAux(op)
 				return nil
 			}
-			h := t.meta.Get(String("__index"))
+			h := t.meta.metaGet("__index")
 			if h.IsNil() {
 				*ex.reg(dst) = Value{}
 				ex.skipAux(op)
@@ -423,7 +423,7 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			t := (*Table)(obj.p)
 			if t.meta != nil {
 				if old := t.Get(key); old.IsNil() {
-					if h := t.meta.Get(String("__newindex")); !h.IsNil() {
+					if h := t.meta.metaGet("__newindex"); !h.IsNil() {
 						if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
 							return ex.callMeta(h, obj, key, val)
 						}
@@ -832,7 +832,7 @@ func (ex *executor) closeTo(level int) error {
 func (ex *executor) metamethod(v Value, event string) Value {
 	if v.isObj(kindTable) {
 		if mt := (*Table)(v.p).meta; mt != nil {
-			return mt.Get(String(event))
+			return mt.metaGet(event)
 		}
 	}
 	return Value{}

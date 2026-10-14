@@ -1,6 +1,11 @@
 package glua
 
-import "unsafe"
+import (
+	"iter"
+	"math"
+	"strings"
+	"unsafe"
+)
 
 // node is one slot of a table's hash part. A deleted key stays with a nil value, so
 // assigning nil during a traversal is safe; a rehash drops it.
@@ -19,9 +24,40 @@ type Table struct {
 	flags uint8
 }
 
+// Table flags. The absent bits cache that a metatable lacks a metamethod. They are filled
+// lazily only on mutable tables, Freeze computes them in full, so reading a shared table
+// never writes. Any raw write of a key that starts with "__" clears them.
 const (
 	tabFrozen = 1 << iota
+	tabNoIndex
+	tabNoNewIndex
+	tabNoEq
+	tabNoLen
+	tabNoCall
+	tabNoClose
+
+	tabAbsent = tabNoIndex | tabNoNewIndex | tabNoEq | tabNoLen | tabNoCall | tabNoClose
 )
+
+// cachedEvents are the metamethods whose absence a metatable caches, with their flag.
+var cachedEvents = map[string]uint8{
+	"__index": tabNoIndex, "__newindex": tabNoNewIndex, "__eq": tabNoEq,
+	"__len": tabNoLen, "__call": tabNoCall, "__close": tabNoClose,
+}
+
+// metaGet returns the metamethod event of the metatable mt, using and filling the cache of
+// absent metamethods.
+func (mt *Table) metaGet(event string) Value {
+	bit := cachedEvents[event]
+	if mt.flags&bit != 0 {
+		return Value{}
+	}
+	v := mt.Get(String(event))
+	if v.IsNil() && bit != 0 && mt.flags&tabFrozen == 0 {
+		mt.flags |= bit
+	}
+	return v
+}
 
 // NewTable returns a table with room for narr array items and nhash other keys.
 func NewTable(narr, nhash int) *Table {
@@ -112,6 +148,9 @@ func (t *Table) Set(key, val Value) {
 
 // set assigns t[key] = val for a normalised key.
 func (t *Table) set(key, val Value) {
+	if t.flags&tabAbsent != 0 && key.isString() && strings.HasPrefix(key.str(), "__") {
+		t.flags &^= tabAbsent // a metamethod may have appeared
+	}
 	if key.p == tInt() {
 		i := int64(key.n) - 1
 		if uint64(i) < uint64(len(t.arr)) {
@@ -183,13 +222,108 @@ func (t *Table) rehash(extra int) {
 	}
 }
 
-// Len returns the length of t's sequence part, without metamethods.
+// Len returns a border of t, as C Lua's luaH_getn does: an n such that t[n] is not nil
+// and t[n+1] is nil, or 0 if t[1] is nil. It does not run metamethods.
 func (t *Table) Len() int {
 	n := len(t.arr)
-	for n > 0 && t.arr[n-1].IsNil() {
-		n--
+	if n > 0 && t.arr[n-1].IsNil() {
+		// a border inside the array part: binary search, keeping arr[i-1] non-nil (or i = 0)
+		// and arr[j-1] nil
+		i, j := 0, n
+		for j-i > 1 {
+			m := (i + j) / 2
+			if t.arr[m-1].IsNil() {
+				j = m
+			} else {
+				i = m
+			}
+		}
+		return i
 	}
-	return n
+	if len(t.nodes) == 0 || t.Get(Int(int64(n)+1)).IsNil() {
+		return n
+	}
+	// the hash part continues the sequence: double until a nil, then binary search
+	i, j := n+1, n+2
+	for !t.Get(Int(int64(j))).IsNil() {
+		i = j
+		if j > math.MaxInt64/2 {
+			for !t.Get(Int(int64(i) + 1)).IsNil() { // a pathological table: linear search
+				i++
+			}
+			return i
+		}
+		j *= 2
+	}
+	for j-i > 1 {
+		m := i + (j-i)/2
+		if t.Get(Int(int64(m))).IsNil() {
+			j = m
+		} else {
+			i = m
+		}
+	}
+	return i
+}
+
+// Next returns the key and value after key in traversal order: the array part, then the
+// hash part by node index. A nil key starts the traversal; a nil result key ends it. Setting
+// existing fields, also to nil, during a traversal is allowed. ok is false for a key that is
+// not in the table.
+func (t *Table) Next(key Value) (k, v Value, ok bool) {
+	i := 0 // position to resume from: 0..len(arr)-1 array, then len(arr)+node index
+	if !key.IsNil() {
+		nk, valid := normKey(key)
+		if !valid {
+			return Value{}, Value{}, false
+		}
+		if nk.p == tInt() && int64(nk.n) >= 1 && int64(nk.n) <= int64(len(t.arr)) {
+			i = int(nk.n)
+		} else {
+			idx := t.findNode(&nk, hashValue(nk))
+			if idx < 0 {
+				return Value{}, Value{}, false
+			}
+			i = len(t.arr) + idx + 1
+		}
+	}
+	for ; i < len(t.arr); i++ {
+		if !t.arr[i].IsNil() {
+			return Int(int64(i) + 1), t.arr[i], true
+		}
+	}
+	for j := i - len(t.arr); j < len(t.nodes); j++ {
+		if nd := &t.nodes[j]; !nd.v.IsNil() {
+			return nd.k, nd.v, true
+		}
+	}
+	return Value{}, Value{}, true
+}
+
+// All iterates over every key and value of t, raw, in traversal order.
+func (t *Table) All() iter.Seq2[Value, Value] {
+	return func(yield func(Value, Value) bool) {
+		k := Value{}
+		for {
+			nk, v, ok := t.Next(k)
+			if !ok || nk.IsNil() || !yield(nk, v) {
+				return
+			}
+			k = nk
+		}
+	}
+}
+
+// Items iterates over t[1], t[2], ... up to the first nil, raw.
+func (t *Table) Items() iter.Seq2[int, Value] {
+	return func(yield func(int, Value) bool) {
+		for i := 1; ; i++ {
+			v := t.Get(Int(int64(i)))
+			if v.IsNil() || !yield(i, v) {
+				return
+			}
+		}
+	}
 }
 
 // Frozen reports whether t is read-only.
