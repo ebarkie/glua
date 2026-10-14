@@ -69,7 +69,10 @@ func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
 	cl, base, pc := st.cl, st.base, st.pc
 	ex.nny++ // a nested run: it cannot yield
 	defer func() { st.cl, st.base, st.pc = cl, base, pc; ex.nny-- }()
-	slot := max(base+int(cl.p.maxstack), ex.top)
+	slot := ex.top // a coroutine with a Go body has no Lua frame yet
+	if cl != nil {
+		slot = max(base+int(cl.p.maxstack), ex.top)
+	}
 	if d := ex.depth - 1; d >= 0 && d < len(ex.calls) {
 		slot = max(slot, ex.calls[d].base+ex.calls[d].nargs) // above the calling Go function's arguments
 	}

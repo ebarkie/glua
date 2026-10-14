@@ -149,10 +149,11 @@ type (
 	}
 
 	GenericForStmt struct {
-		Line  int
-		Names []string
-		Exprs []Expr
-		Body  *Block
+		Line     int
+		ExprLine int // line of the token after 'in', where C Lua places the iterator call
+		Names    []string
+		Exprs    []Expr
+		Body     *Block
 	}
 
 	// FunctionStmt is "function a.b.c() end" or "function a.b:c() end": Target = Func.

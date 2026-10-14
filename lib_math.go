@@ -14,7 +14,9 @@ func openMath(g *Table) {
 		"abs": mathAbs, "ceil": mathCeil, "floor": mathFloor, "fmod": mathFmod, "log": mathLog,
 		"max": mathMax, "min": mathMin, "modf": mathModf, "random": mathRandom,
 		"randomseed": mathRandomseed, "sqrt": mathFloat1(math.Sqrt, "sqrt"), "tointeger": mathToInteger,
-		"type": mathType, "ult": mathUlt, "exp": mathFloat1(math.Exp, "exp"), "sin": mathFloat1(math.Sin, "sin"),
+		"type": mathType, "ult": mathUlt,
+		"deg": mathFloat1(func(x float64) float64 { return x * (180.0 / math.Pi) }, "deg"),
+		"rad": mathFloat1(func(x float64) float64 { return x * (math.Pi / 180.0) }, "rad"), "exp": mathFloat1(math.Exp, "exp"), "sin": mathFloat1(math.Sin, "sin"),
 		"cos": mathFloat1(math.Cos, "cos"), "tan": mathFloat1(math.Tan, "tan"), "asin": mathFloat1(math.Asin, "asin"),
 		"acos": mathFloat1(math.Acos, "acos"), "atan": mathAtan,
 	})
@@ -139,7 +141,7 @@ func mathLog(c *Call) error {
 func mathMinMax(c *Call, name string, max bool) error {
 	n := c.Len()
 	if n < 1 {
-		return c.argError(1, name, "number expected, got no value")
+		return c.argError(1, name, "value expected")
 	}
 	best, err := c.checkNumber(0, name)
 	if err != nil {

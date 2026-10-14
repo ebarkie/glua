@@ -1,6 +1,8 @@
 package glua
 
 import (
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/folbricht/glua/internal/syntax"
@@ -33,6 +35,12 @@ func strToNumber(s string) (Value, bool) {
 	i, f, isInt, ok := syntax.ParseNumber(s)
 	if !ok {
 		return Value{}, false
+	}
+	if neg && !isInt {
+		// -9223372036854775808 is an integer, though its digits alone overflow
+		if u, err := strconv.ParseUint(s, 10, 64); err == nil && u == 1<<63 {
+			return Int(math.MinInt64), true
+		}
 	}
 	if isInt {
 		if neg {

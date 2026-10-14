@@ -39,6 +39,14 @@ func chunkID(name string) string {
 	return pre + name + rets + pos
 }
 
+// setChunkName records the chunk name as given in p and the functions inside it.
+func setChunkName(p *Proto, name string) {
+	p.chunk = name
+	for _, q := range p.protos {
+		setChunkName(q, name)
+	}
+}
+
 // newMainClosure makes the closure of a chunk's main function under the globals table env.
 // A chunk that names _ENV reads it through upvalue 0, which then holds env, in a cell when
 // the chunk assigns it.
@@ -134,6 +142,7 @@ func baseLoad(c *Call, globals *Table) error {
 		}
 		return err
 	}
+	setChunkName(p, name)
 	env := globals
 	if c.Len() >= 4 {
 		env = nil

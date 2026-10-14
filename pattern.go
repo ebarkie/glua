@@ -50,12 +50,12 @@ func (ms *matchState) step() bool {
 	return ms.err == nil
 }
 
-func (ms *matchState) checkCapture(l byte) int {
-	l -= '1'
-	if int(l) >= ms.level || ms.capture[l].len == capUnfinished {
-		return ms.fail("invalid capture index %%%d", int(l)+1)
+func (ms *matchState) checkCapture(c byte) int {
+	l := int(c) - '1'
+	if l < 0 || l >= ms.level || ms.capture[l].len == capUnfinished {
+		return ms.fail("invalid capture index %%%d", l+1)
 	}
-	return int(l)
+	return l
 }
 
 func (ms *matchState) captureToClose() int {
@@ -139,6 +139,8 @@ func singleClass(c, cl byte) bool {
 		res = isAlpha(c) || isDigitB(c)
 	case 'x':
 		res = isXDigitB(c)
+	case 'z':
+		res = c == 0 // deprecated, but C Lua 5.4 still has it
 	default:
 		return cl == c
 	}

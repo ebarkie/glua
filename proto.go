@@ -21,8 +21,11 @@ type Proto struct {
 	lines    []int32 // source line of each code word
 	upnames  []string
 	locvars  []locVar // for messages: which register holds which local, from where to where
-	source   string
+	source   string   // the chunk name as messages show it, such as "file.lua"
+	chunk    string   // the chunk name as given, such as "@file.lua"
 	name     string
+	// linedefined and lastline are where the function's text starts and ends; 0 for a main chunk
+	linedefined, lastline int32
 
 	handles []unique.Handle[string] // keep canonical constant strings alive as long as the proto
 }

@@ -270,6 +270,7 @@ func (p *parser) forStat(line int) Stmt {
 			s.Names = append(s.Names, p.name())
 		}
 		p.checkNext(In)
+		s.ExprLine = p.tok.Line
 		s.Exprs = p.exprList()
 		p.checkNext(Do)
 		s.Body = p.block()
@@ -429,7 +430,6 @@ func (p *parser) primaryExpr() Expr {
 }
 
 func (p *parser) suffixedExpr() Expr {
-	line := p.tok.Line
 	e := p.primaryExpr()
 	saved := p.chain
 	defer func() { p.chain = saved }()
@@ -448,9 +448,11 @@ func (p *parser) suffixedExpr() Expr {
 		case Colon:
 			p.next()
 			name := p.name()
-			e = &MethodCallExpr{Line: line, Obj: e, Name: name, Args: p.args(line)}
+			al := p.tok.Line // a call is on the line of its arguments, as in C Lua 5.4.9
+			e = &MethodCallExpr{Line: al, Obj: e, Name: name, Args: p.args(al)}
 		case LParen, String, LBrace:
-			e = &CallExpr{Line: line, Fn: e, Args: p.args(line)}
+			al := p.tok.Line
+			e = &CallExpr{Line: al, Fn: e, Args: p.args(al)}
 		default:
 			return e
 		}

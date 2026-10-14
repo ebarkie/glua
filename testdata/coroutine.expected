@@ -9,3 +9,5 @@ yield errors	false | str:617474656d707420746f207969656c642066726f6d206f757473696
 close	true | str:636c6f7365643a6e696c | str:64656164 | false | str:78
 resume non-suspended	true | false | str:63616e6e6f7420726573756d65206e6f6e2d73757370656e64656420636f726f7574696e65 | false | str:63616e6e6f7420726573756d65206e6f6e2d73757370656e64656420636f726f7574696e65
 many coroutines and deep yields	5050 | 60500
+a coroutine with a Go body	true | str:62 | str:64656164 | true | true | false
+resume nested too deep	str:4320737461636b206f766572666c6f77

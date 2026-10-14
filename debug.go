@@ -121,10 +121,17 @@ func (p *Proto) objName(lastpc, reg int) (kind, name string) {
 		}
 		return "field", key
 	case opGetTable:
-		if k, n := p.objName(pc, decC(i)); k == "constant" {
-			return "field", n
+		k, n := p.objName(pc, decC(i))
+		if k != "constant" {
+			return "field", "?"
 		}
-		return "field", "?"
+		if a := decA(i); decC(i) == a && decB(i) == a+1 {
+			return "method", n // a method call whose name is past the SELF constant limit
+		}
+		if tk, tn := p.objName(pc, decB(i)); tn == "_ENV" && (tk == "local" || tk == "upvalue") {
+			return "global", n
+		}
+		return "field", n
 	case opGetIndex:
 		return "field", "integer index"
 	case opSelf:

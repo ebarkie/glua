@@ -90,3 +90,14 @@ local t = 0
 for i = 1, 200 do t = t + cs[i](i) end
 for i = 1, 200 do t = t + cs[i](i) end
 return s, t
+--== a coroutine with a Go body
+local co = coroutine.create(select)
+local r = {coroutine.resume(co, 2, "a", "b")}
+return r[1], r[2], coroutine.status(co), coroutine.isyieldable(co), coroutine.isyieldable(coroutine.create(print)), coroutine.isyieldable(coroutine.running())
+--== resume nested too deep
+local function f()
+  local c = coroutine.create(f)
+  local a, b = coroutine.resume(c)
+  return b
+end
+return f()

@@ -329,7 +329,7 @@ func strGsub(c *Call) error {
 	}
 	ms := &matchState{src: src, pat: p, c: c}
 	var b strings.Builder
-	s, n, lastMatch := 0, int64(0), -1
+	s, n, lastMatch, changed := 0, int64(0), -1, false
 	for n < maxN {
 		ms.level, ms.depth = 0, 0
 		e := ms.match(s, pi)
@@ -339,9 +339,11 @@ func strGsub(c *Call) error {
 		switch {
 		case e != -1 && e != lastMatch: // a match, but not an empty one right after the last
 			n++
-			if err := addValue(c, ms, &b, s, e, repl); err != nil {
+			ch, err := addValue(c, ms, &b, s, e, repl)
+			if err != nil {
 				return err
 			}
+			changed = changed || ch
 			if err := c.ex.charge(e - s + 16); err != nil {
 				return err
 			}
@@ -357,6 +359,9 @@ func strGsub(c *Call) error {
 		}
 	}
 done:
+	if !changed && c.Value(0).isString() {
+		return c.ReturnValues(c.Value(0), Int(n)) // the original string, as C Lua returns it
+	}
 	b.WriteString(src[s:])
 	if err := c.ex.charge(b.Len()); err != nil {
 		return err
@@ -365,7 +370,7 @@ done:
 }
 
 // addValue adds the replacement for the match from s to e.
-func addValue(c *Call, ms *matchState, b *strings.Builder, s, e int, repl Value) error {
+func addValue(c *Call, ms *matchState, b *strings.Builder, s, e int, repl Value) (changed bool, err error) {
 	var v Value
 	switch {
 	case repl.isString() || repl.isNumber():
@@ -378,7 +383,7 @@ func addValue(c *Call, ms *matchState, b *strings.Builder, s, e int, repl Value)
 			}
 			i++
 			if i >= len(r) {
-				return c.libErrorf("invalid use of '%%' in replacement string")
+				return false, c.libErrorf("invalid use of '%%' in replacement string")
 			}
 			switch d := r[i]; {
 			case d == luaEsc:
@@ -390,32 +395,31 @@ func addValue(c *Call, ms *matchState, b *strings.Builder, s, e int, repl Value)
 				} else {
 					cv = ms.getCapture(int(d-'1'), s, e)
 					if ms.err != nil {
-						return ms.err
+						return false, ms.err
 					}
 				}
 				b.WriteString(cv.String())
 			default:
-				return c.libErrorf("invalid use of '%%' in replacement string")
+				return false, c.libErrorf("invalid use of '%%' in replacement string")
 			}
 		}
-		return nil
+		return true, nil
 	case repl.isObj(kindTable):
 		k := ms.getCapture(0, s, e)
 		if ms.err != nil {
-			return ms.err
+			return false, ms.err
 		}
-		var err error
 		if v, err = c.index(repl, k); err != nil {
-			return err
+			return false, err
 		}
 	default:
 		caps := ms.captures(s, e, true)
 		if ms.err != nil {
-			return ms.err
+			return false, ms.err
 		}
 		res, err := c.call(repl, caps...)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if len(res) > 0 {
 			v = res[0]
@@ -424,12 +428,13 @@ func addValue(c *Call, ms *matchState, b *strings.Builder, s, e int, repl Value)
 	switch {
 	case !v.Truthy():
 		b.WriteString(ms.src[s:e]) // keep the original text
+		return false, nil
 	case v.isString() || v.isNumber():
 		b.WriteString(v.String())
 	default:
-		return c.libErrorf("invalid replacement value (a %s)", typeName(v))
+		return false, c.libErrorf("invalid replacement value (a %s)", typeName(v))
 	}
-	return nil
+	return true, nil
 }
 
 // string.format

@@ -151,6 +151,9 @@ func (c *compiler) function(node *syntax.FunctionExpr, parent *fstate) *Proto {
 		line:   node.Line,
 		target: -1,
 	}
+	if parent != nil {
+		fs.p.linedefined, fs.p.lastline = int32(node.Line), int32(node.EndLine)
+	}
 	for _, u := range fs.fi.Upvals {
 		d := upvalDesc{fromStack: u.Parent == nil}
 		if u.Parent != nil {
@@ -1660,7 +1663,7 @@ func (fs *fstate) genericFor(s *syntax.GenericForStmt) {
 	fs.stmts(s.Body.Stmts)
 	fs.line = s.Body.EndLine
 	fs.leaveBlock()
-	fs.line = s.Line
+	fs.line = s.ExprLine
 	call := fs.label()
 	fs.forJump(prep, call-(prep+1))
 	fs.abc(opTForCall, base, 0, len(vars)+1)

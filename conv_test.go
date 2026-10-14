@@ -14,7 +14,7 @@ func TestStrToNumber(t *testing.T) {
 		{"10", Int(10), true}, {"  10  ", Int(10), true}, {"-10", Int(-10), true}, {"+10", Int(10), true},
 		{"0x10", Int(16), true}, {"-0x10", Int(-16), true}, {"0xffffffffffffffff", Int(-1), true},
 		{"1e2", Float(100), true}, {".5", Float(0.5), true}, {"0x1p4", Float(16), true}, {"3.", Float(3), true},
-		{"9223372036854775808", Float(9223372036854775808), true}, {"-9223372036854775808", Float(-9223372036854775808), true},
+		{"9223372036854775808", Float(9223372036854775808), true}, {"-9223372036854775808", Int(math.MinInt64), true},
 		{"", Value{}, false}, {" ", Value{}, false}, {"1e", Value{}, false}, {"0x", Value{}, false},
 		{"inf", Value{}, false}, {"nan", Value{}, false}, {"1 2", Value{}, false}, {"- 1", Value{}, false},
 		{"1\x00", Value{}, false}, {"++1", Value{}, false}, {"1_000", Value{}, false}, {"0b101", Value{}, false},
@@ -25,8 +25,9 @@ func TestStrToNumber(t *testing.T) {
 			t.Errorf("%q: got %v (%v) %v, want %v (%v) %v", tt.s, got, got.Kind(), ok, tt.want, tt.want.Kind(), tt.ok)
 		}
 	}
-	// "-9223372036854775808" is a float in C Lua too: the digits overflow before the sign applies
-	if v, _ := strToNumber("-9223372036854775808"); v.Kind() != KindFloat {
+	// "-9223372036854775808" is an integer, as in C Lua, whose l_str2int lets the sign extend
+	// the range; "-9223372036854775809" overflows to a float
+	if v, _ := strToNumber("-9223372036854775809"); v.Kind() != KindFloat {
 		t.Error("expected a float")
 	}
 }

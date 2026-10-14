@@ -83,3 +83,7 @@ return utf8.len("abc\xff"), utf8.len("\xe4\xbd"), select(2, pcall(utf8.codepoint
 local n = 0
 for ch in ("aé€"):gmatch(utf8.charpattern) do n = n + 1 end
 return n, utf8.charpattern
+--== integer extremes as strings
+return math.type(tonumber(tostring(math.mininteger))), tonumber("-9223372036854775808"), math.type(tonumber("-9223372036854775809")), math.type(-9223372036854775808)
+--== the %z class
+return ("a\0b"):find("%z"), ("a\0b"):gsub("%Z", "x")

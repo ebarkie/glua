@@ -88,10 +88,15 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		return []Value{String("cannot resume dead coroutine")}, false, nil
 	case co.status != coSuspended:
 		return []Value{String("cannot resume non-suspended coroutine")}, false, nil
+	case ex.depth >= ex.maxHostDepth-1:
+		// the coroutine could not call Go: refuse, as C Lua's resume does near LUAI_MAXCCALLS
+		return []Value{String("C stack overflow")}, false, nil
 	}
 	prev := ex.co
 	if prev != nil {
 		prev.status = coNormal
+	} else if ex.mainCo != nil {
+		ex.mainCo.status = coNormal
 	}
 	saved := ex.saveThread()
 	ex.loadThread(co.threadState)
@@ -106,6 +111,8 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		ex.co = prev
 		if prev != nil {
 			prev.status = coRunning
+		} else if ex.mainCo != nil {
+			ex.mainCo.status = coRunning
 		}
 	}()
 
@@ -118,7 +125,7 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 			res, cerr := ex.callSync(f, args)
 			co.status = coDead
 			if cerr != nil {
-				return errorValues(cerr)
+				return ex.coFailed(co, cerr)
 			}
 			return res, true, nil
 		}
@@ -266,6 +273,15 @@ func coRunningFn(c *Call) error {
 
 func coIsYieldable(c *Call) error {
 	ex := c.ex
+	if c.Len() > 0 {
+		co, err := coArg(c, "isyieldable")
+		if err != nil {
+			return err
+		}
+		if co != ex.co {
+			return c.ReturnValues(Bool(!co.main)) // a coroutine that is not running can yield when resumed
+		}
+	}
 	return c.ReturnValues(Bool(ex.co != nil && !ex.co.main && ex.nny == ex.co.nnyBase+1))
 }
 
@@ -320,14 +336,30 @@ func coClose(c *Call) error {
 		// close the variables the coroutine left open, on its own stack
 		saved := ex.saveThread()
 		ex.loadThread(co.threadState)
+		// the closers run as the coroutine, which cannot yield meanwhile
 		prev := ex.co
-		ex.co = nil // closers cannot yield
+		ex.co, co.status = co, coRunning
+		if prev != nil {
+			prev.status = coNormal
+		} else if ex.mainCo != nil {
+			ex.mainCo.status = coNormal
+		}
+		nnyBase := co.nnyBase
+		co.nnyBase = ex.nny + 1
+		ex.nny++
 		value := Value{}
 		if errv != nil {
 			value = *errv
 		}
 		v, cerr := ex.closeOnError(0, value)
+		ex.nny--
+		co.nnyBase = nnyBase
 		ex.co = prev
+		if prev != nil {
+			prev.status = coRunning
+		} else if ex.mainCo != nil {
+			ex.mainCo.status = coRunning
+		}
 		co.threadState = ex.saveThread()
 		ex.loadThread(saved)
 		if cerr != nil {
