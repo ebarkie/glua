@@ -239,8 +239,8 @@ func bindFunc1[A, R any](e *engine, cl *Closure) func(context.Context, A) (R, er
 		}
 	}
 	return func(ctx context.Context, a A) (r R, err error) {
-		ex := e.pool.Get().(*executor)                // borrow
-		ex.stack[1], err = enc(a) // encode
+		ex := e.pool.Get().(*executor) // borrow
+		ex.stack[1], err = enc(a)      // encode
 		if err == nil {
 			err = ex.call(ctx, cl, 0, 1) // run
 		}
