@@ -16,6 +16,8 @@ type Call struct {
 	base  int // index of the first argument
 	nargs int
 	res   []Value // results, copied to the stack when the function returns
+
+	fromLua bool // called by the VM for Lua code, not by pcall or another Go function
 }
 
 func (c *Call) reset() {
@@ -101,7 +103,10 @@ func (ex *executor) hostCall() error {
 // callGo calls g with the nargs arguments above stack[fn], for the CALL at pc-1, and puts
 // its results where that CALL expects them.
 func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
-	n, err := ex.callGoRaw(g, fn, nargs)
+	if g == builtinPcall || g == builtinXpcall {
+		return ex.pcallValue(g, fn, nargs)
+	}
+	n, err := ex.callGoRawFrom(g, fn, nargs, true)
 	if err != nil {
 		return err
 	}
@@ -113,6 +118,12 @@ func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
 // stack[fn]. Call records live in a slice indexed by host-call depth, so nesting allocates
 // nothing and each host frame has its own record.
 func (ex *executor) callGoRaw(g *goFunc, fn, nargs int) (int, error) {
+	return ex.callGoRawFrom(g, fn, nargs, false)
+}
+
+// callGoRawFrom is callGoRaw; fromLua tells the function that the VM called it for Lua code,
+// which error's level argument needs.
+func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, error) {
 	if ex.depth >= ex.maxHostDepth {
 		return 0, ex.terminal(ErrHostDepth)
 	}
@@ -120,7 +131,7 @@ func (ex *executor) callGoRaw(g *goFunc, fn, nargs int) (int, error) {
 		ex.calls = append(ex.calls, &Call{ex: ex})
 	}
 	c := ex.calls[ex.depth] // one record per depth, so a nested call cannot overwrite its caller's
-	c.base, c.nargs = fn+1, nargs
+	c.base, c.nargs, c.fromLua = fn+1, nargs, fromLua
 	st := &ex.st
 	cl, base, pc := st.cl, st.base, st.pc // the host function may re-enter the VM
 	ex.depth++

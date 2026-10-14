@@ -141,6 +141,9 @@ func testGlobals() *Table {
 		}
 		return c.ReturnValues(t)
 	}}))
+	g.Set(String("pcall"), goFnValue(builtinPcall))
+	g.Set(String("xpcall"), goFnValue(builtinXpcall))
+	g.Set(String("error"), goFnValue(builtinError))
 	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
 		return c.ReturnValues(c.Value(0)) // a metamethod written in Go
 	}}))
@@ -217,3 +220,5 @@ func TestErrorCorpus(t *testing.T) { runCorpus(t, "testdata/errors.lua", "testda
 func TestArithCorpus(t *testing.T) { runCorpus(t, "testdata/arith.lua", "testdata/arith.expected") }
 
 func TestMetaCorpus(t *testing.T) { runCorpus(t, "testdata/meta.lua", "testdata/meta.expected") }
+
+func TestPcallCorpus(t *testing.T) { runCorpus(t, "testdata/pcall.lua", "testdata/pcall.expected") }

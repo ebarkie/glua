@@ -551,7 +551,7 @@ func (ex *executor) callMeta(h Value, args ...Value) error {
 	if h.isObj(kindLuaFn) {
 		return ex.pushLua((*Closure)(h.p), fn, len(args), frCont)
 	}
-	n, err := ex.callGoRaw((*goFunc)(h.p), fn, len(args))
+	n, err := ex.callGoRawFrom((*goFunc)(h.p), fn, len(args), true)
 	if err != nil {
 		return err
 	}
@@ -892,7 +892,7 @@ func (ex *executor) tailCall(fn, nargs int) error {
 	copy(ex.stack[dst:dst+1+nargs], ex.stack[fn:fn+1+nargs])
 	clear(ex.stack[dst+1+nargs : fn+1+nargs])
 	st.nf--
-	if err := ex.pushFrame((*Closure)(v.p), dst, nargs, int(uint32(fr)), callerBase, fr&(frGoEntry|frCont)); err != nil {
+	if err := ex.pushFrame((*Closure)(v.p), dst, nargs, int(uint32(fr)), callerBase, fr&^frVararg&(0xff<<56)); err != nil {
 		return err
 	}
 	return ex.tick()
@@ -930,11 +930,27 @@ func (ex *executor) frameReturned(fn, n int) (done bool, err error) {
 		ex.top = fn + n
 		return true, nil
 	}
+	handlerFor := int(-1)
+	if fr&frErrHandler != 0 {
+		handlerFor = int(ex.cont[st.nf])
+	}
 	st.base -= int(fr >> 32 & 0xffffff)
 	st.cl = (*Closure)(ex.stack[st.base-1].p)
 	st.pc = int(uint32(fr))
-	if fr&frCont != 0 {
+	switch {
+	case handlerFor >= 0: // an xpcall handler returned: unwind to its xpcall with the result
+		var r Value
+		if n > 0 {
+			r = ex.stack[fn]
+		}
+		ex.unwindFrom(handlerFor, r)
+		return false, nil
+	case fr&frCont != 0:
 		return false, ex.finishOp(fn, n)
+	case fr&frCatch != 0: // a protected call returned: true, then its results
+		fn--
+		ex.stack[fn] = Bool(true)
+		n++
 	}
 	ex.adjustResults(ex.instr(st.pc-1), fn, n)
 	return false, nil

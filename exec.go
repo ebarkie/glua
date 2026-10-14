@@ -22,10 +22,12 @@ const (
 
 // Frame flags, in the top byte of a frame record. RETURN tests them all at once.
 const (
-	frGoEntry = 1 << (56 + iota) // pushed by run: unwinding and returning stop here
-	frCatch                      // pcall
-	frCont                       // a metamethod, iterator or closer: finish the interrupted instruction
-	frVararg                     // a vararg function: its arguments lie below the frame
+	frGoEntry    = 1 << (56 + iota) // pushed by run: unwinding and returning stop here
+	frCatch                         // pcall
+	frCont                          // a metamethod, iterator or closer: finish the interrupted instruction
+	frVararg                        // a vararg function: its arguments lie below the frame
+	frHandler                       // with frCatch: an xpcall, whose message handler is in the slot below the function
+	frErrHandler                    // an xpcall message handler running on top of the failing frame
 )
 
 // Hint words are missCount<<24 | slot. The driver calls learn after a slow lookup.
@@ -74,12 +76,13 @@ type executor struct {
 	depth   int
 	slots   []unsafe.Pointer // by type ID: a *T made with new(T), for structs passed by value
 	ctx     context.Context
-	steps   int64   // budget not yet handed to st.ticks
-	top     int     // end of an open list of results or arguments, as a stack index
-	nvar    []int32 // per frame: the number of extra arguments of a vararg function
-	tbc     []int   // stack indices of active to-be-closed variables, innermost last
-	cont    []int32 // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
-	strMeta *Table  // the metatable all strings share; the string library sets it
+	steps   int64                    // budget not yet handed to st.ticks
+	top     int                      // end of an open list of results or arguments, as a stack index
+	nvar    []int32                  // per frame: the number of extra arguments of a vararg function
+	tbc     []int                    // stack indices of active to-be-closed variables, innermost last
+	cont    []int32                  // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
+	strMeta *Table                   // the metatable all strings share; the string library sets it
+	goErrs  map[unsafe.Pointer]error // Go errors by the data of their message, so raising it again keeps the chain
 	st      state
 	types   *[]*typeInfo
 
@@ -139,7 +142,10 @@ func (ex *executor) run(cl *Closure, fn, nargs int) error {
 	if err := ex.pushFrame(cl, fn, nargs, 0, fn+1, frGoEntry); err != nil {
 		return err
 	}
-	err := ex.drive()
+	err := ex.drive(nf)
+	if le, ok := err.(*Error); ok {
+		ex.captureTrace(le, nf) // the error leaves this run uncaught
+	}
 	st.nf = nf // on an error this is the unwinding: it never crosses a goEntry frame
 	return err
 }
@@ -159,6 +165,7 @@ func (ex *executor) reset() {
 	ex.st = state{}
 	ex.ctx, ex.top, ex.depth = nil, 0, 0
 	ex.tbc = ex.tbc[:0]
+	clear(ex.goErrs)
 }
 
 // release returns an executor to the pool, unless it ended abnormally or has grown large.
@@ -216,8 +223,8 @@ func (ex *executor) refill() error {
 }
 
 // drive runs fast and does the work it hands back, until the goEntry frame of the
-// current run returns.
-func (ex *executor) drive() error {
+// current run, frame nf0, returns. Errors stop at catch frames above nf0.
+func (ex *executor) drive(nf0 int) error {
 	for {
 		var err error
 		switch ex.fast() {
@@ -255,6 +262,9 @@ func (ex *executor) drive() error {
 			return nil
 		}
 		if err != nil {
+			if ex.unwind(err, nf0) {
+				continue
+			}
 			return err
 		}
 	}
