@@ -1,0 +1,10 @@
+arithmetic metamethods in both orders	str:6164643a762c31 | str:7375623a322c76 | str:6d756c3a762c76 | str:6469763a762c33 | str:6d6f643a342c76 | str:706f773a762c35 | str:696469763a762c36 | str:62616e643a762c37 | str:626f723a382c76 | str:62786f723a762c39 | str:73686c3a762c3130 | str:7368723a31312c76
+unary metamethods	str:756e6d | str:626e6f74 | 42
+__len overrides the border	99
+concat metamethods inside a chain	str:61542b6263 | str:542b54 | str:312b54 | str:542b3233
+__eq	true | false | true | true | true | false
+__lt and __le	true | false | true | false | true | true | true | true
+metamethods written in Go	true | true | true
+__name in error messages	runtime error: __name in error messages:2: attempt to perform arithmetic on a MyType value (local 't')
+metamethod results are truncated to one value	1 | nil | str:78 | nil
+__index function receives table and key	42 | 21

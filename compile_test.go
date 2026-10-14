@@ -64,7 +64,8 @@ for part in (text .. "\n--=="):gmatch("(.-)\n%-%-==") do
   local name, src = part:match("^([^\n]*)\n(.*)$")
   if name and not name:match("^%-%-") then
     name = name:match("^%s*(.-)%s*$")
-    local fn, err = load(src, "=" .. name)
+    local env = setmetatable({gofirst = function(a) return a end}, {__index = _G})
+    local fn, err = load(src, "=" .. name, "t", env)
     local out
     if not fn then
       out = "compile error: " .. err
@@ -140,6 +141,9 @@ func testGlobals() *Table {
 		}
 		return c.ReturnValues(t)
 	}}))
+	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
+		return c.ReturnValues(c.Value(0)) // a metamethod written in Go
+	}}))
 	g.Set(String("next"), goFnValue(&goFunc{name: "next", f: func(c *Call) error {
 		t := c.Value(0)
 		if !t.isObj(kindTable) {
@@ -211,3 +215,5 @@ func TestCompileCorpus(t *testing.T) {
 func TestErrorCorpus(t *testing.T) { runCorpus(t, "testdata/errors.lua", "testdata/errors.expected") }
 
 func TestArithCorpus(t *testing.T) { runCorpus(t, "testdata/arith.lua", "testdata/arith.expected") }
+
+func TestMetaCorpus(t *testing.T) { runCorpus(t, "testdata/meta.lua", "testdata/meta.expected") }

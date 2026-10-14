@@ -174,6 +174,9 @@ func (ex *executor) slowOp() error {
 			*ex.reg(a) = r
 			return nil
 		}
+		if h := ex.metamethod(x, "__unm"); !h.IsNil() {
+			return ex.callMeta(h, x, x)
+		}
 		if x.isString() {
 			return ex.errorf("attempt to unm a 'string' with a 'string'")
 		}
@@ -187,6 +190,9 @@ func (ex *executor) slowOp() error {
 			}
 			return ex.intError(b)
 		}
+		if h := ex.metamethod(x, "__bnot"); !h.IsNil() {
+			return ex.callMeta(h, x, x)
+		}
 		return ex.typeError("perform bitwise operation on", x, b)
 	case opNot:
 		*ex.reg(a) = Bool(!ex.reg(b).truthy())
@@ -195,9 +201,14 @@ func (ex *executor) slowOp() error {
 		switch {
 		case x.isString():
 			*ex.reg(a) = Int(int64(x.n & lenMask))
-		case x.isObj(kindTable):
-			*ex.reg(a) = Int(int64((*Table)(x.p).Len()))
 		default:
+			if h := ex.metamethod(x, "__len"); !h.IsNil() {
+				return ex.callMeta(h, x, x)
+			}
+			if x.isObj(kindTable) {
+				*ex.reg(a) = Int(int64((*Table)(x.p).Len()))
+				return nil
+			}
 			return ex.typeError("get length of", x, b)
 		}
 	case opConcat:
@@ -217,7 +228,13 @@ func (ex *executor) slowOp() error {
 		}
 		return nil
 	case opEqJmp:
-		ex.jumpAux(rawEqual(*ex.reg(a), *ex.reg(b)) == (c != 0))
+		x, y := *ex.reg(a), *ex.reg(b)
+		if eq := rawEqual(x, y); !eq {
+			if h := ex.eqMeta(x, y); !h.IsNil() {
+				return ex.callMeta(h, x, y)
+			}
+		}
+		ex.jumpAux(rawEqual(x, y) == (c != 0))
 		return nil
 	case opEqKJmp:
 		ex.jumpAux(rawEqual(*ex.reg(a), p.k[b]) == (c != 0))
@@ -232,9 +249,23 @@ func (ex *executor) slowOp() error {
 		default:
 			y = p.k[b]
 		}
+		less := op == opLtJmp || op == opLtKJmp || op == opGtKJmp
+		if !(x.isNumber() && y.isNumber()) && !(x.isString() && y.isString()) {
+			event := "__le"
+			if less {
+				event = "__lt"
+			}
+			h := ex.metamethod(x, event)
+			if h.IsNil() {
+				h = ex.metamethod(y, event)
+			}
+			if !h.IsNil() {
+				return ex.callMeta(h, x, y)
+			}
+		}
 		var r bool
 		var err error
-		if op == opLtJmp || op == opLtKJmp || op == opGtKJmp {
+		if less {
 			r, err = ex.lessThan(x, y)
 		} else {
 			r, err = ex.lessEqual(x, y)
@@ -432,6 +463,15 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				return ex.callMeta(h, obj, key)
 			}
 			obj = h
+		case obj.isString() && ex.strMeta != nil:
+			h := ex.strMeta.metaGet("__index")
+			if h.IsNil() {
+				return ex.typeError("index", obj, ex.objReg())
+			}
+			if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
+				return ex.callMeta(h, obj, key)
+			}
+			obj = h
 		case obj.isObj(kindUser):
 			ti := (*ex.types)[uint32(obj.n)]
 			name, _ := key.Str()
@@ -529,9 +569,18 @@ func (ex *executor) finishOp(fn, n int) error {
 		r = ex.stack[fn]
 	}
 	switch op {
-	case opGetField, opGetTable, opGetIndex, opGetGlobal, opSelf:
+	case opGetField, opGetTable, opGetIndex, opGetGlobal, opSelf, opUnm, opBNot, opLen,
+		opAdd, opSub, opMul, opDiv, opMod, opPow, opIDiv, opBAnd, opBOr, opBXor, opShl, opShr,
+		opAddK, opSubK, opMulK, opDivK, opModK, opPowK, opIDivK, opBAndK, opBOrK, opBXorK, opShlK, opShrK:
 		*ex.reg(decA(i)) = r
 	case opSetField, opSetTable, opSetIndex, opSetGlobal:
+	case opEqJmp, opLtJmp, opLeJmp, opLtKJmp, opLeKJmp, opGtKJmp, opGeKJmp:
+		ex.jumpAux(r.truthy() == (decC(i) != 0))
+		return nil
+	case opConcat:
+		total := int(ex.cont[st.nf]) // the operands left when the metamethod was called
+		*ex.reg(decA(i) + total - 2) = r
+		return ex.concatRange(decA(i), total-1)
 	case opClose:
 		st.pc-- // close the next variable
 		return nil
@@ -575,6 +624,9 @@ func (ex *executor) arithOp(op uint8, dst int, x, y Value, rx, ry int) error {
 		}
 		*ex.reg(dst) = r
 		return nil
+	}
+	if h := ex.binMeta(x, y, arithEvent[op]); !h.IsNil() {
+		return ex.callMeta(h, x, y)
 	}
 	bad, reg := x, rx
 	if ok1 {
@@ -631,43 +683,107 @@ func (ex *executor) compareError(x, y Value) error {
 	return ex.errorf("attempt to compare %s with %s", tx, ty)
 }
 
-// concat does R[a] = R[a] .. ... .. R[a+n-1] for strings and numbers, in one allocation.
-func (ex *executor) concat(a, n int) error {
-	regs := ex.stack[ex.st.base+a : ex.st.base+a+n]
-	size := 0
-	bad := -1
-	for j, v := range regs {
-		switch {
-		case v.isString():
-			size += int(v.n & lenMask)
-		case v.isNumber():
-			size += len(v.String())
-		default:
-			bad = j
+// concat does R[a] = R[a] .. ... .. R[a+n-1].
+func (ex *executor) concat(a, n int) error { return ex.concatRange(a, n) }
+
+// concatRange concatenates R[a], ..., R[a+total-1] into R[a] as C Lua's luaV_concat does:
+// from the right, joining as long a run of strings and numbers as possible in one allocation,
+// and calling __concat for a pair that is not. A Lua __concat runs in a continuation frame
+// that records how many operands are left; finishOp then resumes here.
+func (ex *executor) concatRange(a, total int) error {
+	for total > 1 {
+		regs := ex.stack[ex.st.base+a : ex.st.base+a+total]
+		x, y := regs[total-2], regs[total-1]
+		if !strNum(x) || !strNum(y) {
+			h := ex.binMeta(x, y, "__concat")
+			if h.IsNil() {
+				// C Lua reports the left operand when it is bad, else the right one
+				bad := total - 2
+				if strNum(x) {
+					bad = total - 1
+				}
+				return ex.typeError("concatenate", regs[bad], a+bad)
+			}
+			if h.isObj(kindLuaFn) {
+				for len(ex.cont) <= ex.st.nf {
+					ex.cont = append(ex.cont, 0)
+				}
+				ex.cont[ex.st.nf] = int32(total)
+				return ex.callMeta(h, x, y)
+			}
+			fn := max(ex.st.base+int(ex.st.cl.p.maxstack), ex.top)
+			if err := ex.ensure(fn + 3 + stackSlack); err != nil {
+				return err
+			}
+			ex.stack[fn], ex.stack[fn+1], ex.stack[fn+2] = h, x, y
+			ex.st.hi = max(ex.st.hi, fn+3)
+			n, err := ex.callGoRaw((*goFunc)(h.p), fn, 2)
+			if err != nil {
+				return err
+			}
+			var r Value
+			if n > 0 {
+				r = ex.stack[fn]
+			}
+			ex.stack[ex.st.base+a+total-2] = r
+			total--
+			continue
 		}
-	}
-	if bad >= 0 {
-		// C Lua concatenates from the right, pair by pair, and reports the left operand of the
-		// first bad pair when it is bad, else the right one
-		if bad == n-1 && n >= 2 && !regs[n-2].isString() && !regs[n-2].isNumber() {
-			bad = n - 2
+		// the longest run of strings and numbers that ends at the right
+		n := 2
+		for n < total && strNum(regs[total-n-1]) {
+			n++
 		}
-		return ex.typeError("concatenate", regs[bad], a+bad)
-	}
-	if err := ex.charge(size); err != nil {
-		return err
-	}
-	var sb strings.Builder
-	sb.Grow(size)
-	for _, v := range regs {
-		if v.isString() {
-			sb.WriteString(v.str())
-		} else {
-			sb.WriteString(v.String())
+		run := regs[total-n:]
+		size := 0
+		for _, v := range run {
+			if v.isString() {
+				size += int(v.n & lenMask)
+			} else {
+				size += len(v.String())
+			}
 		}
+		if err := ex.charge(size); err != nil {
+			return err
+		}
+		var sb strings.Builder
+		sb.Grow(size)
+		for _, v := range run {
+			if v.isString() {
+				sb.WriteString(v.str())
+			} else {
+				sb.WriteString(v.String())
+			}
+		}
+		run[0] = String(sb.String())
+		total -= n - 1
 	}
-	regs[0] = String(sb.String())
 	return nil
+}
+
+func strNum(v Value) bool { return v.isString() || v.isNumber() }
+
+// arithEvent names the metamethod of each arithmetic and bitwise operator.
+var arithEvent = map[uint8]string{
+	opAdd: "__add", opSub: "__sub", opMul: "__mul", opDiv: "__div", opMod: "__mod", opPow: "__pow",
+	opIDiv: "__idiv", opBAnd: "__band", opBOr: "__bor", opBXor: "__bxor", opShl: "__shl", opShr: "__shr",
+}
+
+// binMeta returns the metamethod event of x, or else of y, or nil, as luaT_trybinTM looks.
+func (ex *executor) binMeta(x, y Value, event string) Value {
+	if h := ex.metamethod(x, event); !h.IsNil() {
+		return h
+	}
+	return ex.metamethod(y, event)
+}
+
+// eqMeta returns the __eq metamethod for comparing x and y, which are not raw equal, or nil.
+// As in C Lua, only two tables or two userdata values compare through __eq.
+func (ex *executor) eqMeta(x, y Value) Value {
+	if (x.isObj(kindTable) && y.isObj(kindTable)) || (x.isObj(kindUser) && y.isObj(kindUser)) {
+		return ex.binMeta(x, y, "__eq")
+	}
+	return Value{}
 }
 
 // callValue calls the value at stack[fn] with nargs arguments, for the CALL or TFORCALL at
@@ -902,12 +1018,21 @@ func (ex *executor) closeTo(level int) error {
 
 // metamethod returns the metamethod event of v, or nil.
 func (ex *executor) metamethod(v Value, event string) Value {
-	if v.isObj(kindTable) {
-		if mt := (*Table)(v.p).meta; mt != nil {
-			return mt.metaGet(event)
-		}
+	if mt := ex.metatable(v); mt != nil {
+		return mt.metaGet(event)
 	}
 	return Value{}
+}
+
+// metatable returns the metatable of v: a table's own, or the one all strings share.
+func (ex *executor) metatable(v Value) *Table {
+	switch {
+	case v.isObj(kindTable):
+		return (*Table)(v.p).meta
+	case v.isString():
+		return ex.strMeta
+	}
+	return nil
 }
 
 // forPrep prepares a loop that fast did not: float values, a float limit, numeric strings,
@@ -1064,8 +1189,16 @@ func numLess(x, y Value) bool {
 	return int64(math.Floor(f)) < i // f < i  <=>  floor(f) < i
 }
 
-// typeName is the Lua type name of v, as error messages use it.
+// typeName is the Lua type name of v, as error messages use it: "number" for both number
+// kinds, and a table's __name when its metatable has a string there, as luaT_objtypename does.
 func typeName(v Value) string {
+	if v.isObj(kindTable) {
+		if mt := (*Table)(v.p).meta; mt != nil {
+			if n := mt.Get(String("__name")); n.isString() {
+				return n.str()
+			}
+		}
+	}
 	switch k := v.Kind(); k {
 	case KindInt, KindFloat:
 		return "number"

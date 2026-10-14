@@ -78,6 +78,8 @@ type executor struct {
 	top     int     // end of an open list of results or arguments, as a stack index
 	nvar    []int32 // per frame: the number of extra arguments of a vararg function
 	tbc     []int   // stack indices of active to-be-closed variables, innermost last
+	cont    []int32 // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
+	strMeta *Table  // the metatable all strings share; the string library sets it
 	st      state
 	types   *[]*typeInfo
 
