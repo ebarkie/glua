@@ -1,7 +1,6 @@
 package glua
 
 import (
-	"fmt"
 	"math"
 	"unique"
 	"unsafe"
@@ -101,9 +100,10 @@ func (a *asm) field(op uint8, x, y, z int) {
 	a.p.hints = append(a.p.hints, 0)
 }
 
-// cjump emits a compare-and-jump whose aux word jumps to label when the test fails.
+// cjump emits a compare-and-jump that falls through when its test holds and jumps to label
+// when it does not.
 func (a *asm) cjump(op uint8, x, y int, label string) {
-	a.abc(op, x, y, 0)
+	a.abc(op, x, y, 1)
 	a.fixups = append(a.fixups, fixup{at: len(a.p.code), from: len(a.p.code) + 1, label: label, wide: true})
 	a.emit(0)
 }
@@ -122,6 +122,12 @@ func (a *asm) forPrep(x int, exit string) {
 func (a *asm) forLoop(x int, body string) {
 	a.fixups = append(a.fixups, fixup{at: len(a.p.code), from: len(a.p.code) + 1, label: body, back: true})
 	a.emit(iABx(opForLoop, uint8(x), 0))
+}
+
+// newTable emits NEWTABLE with its aux word.
+func (a *asm) newTable(x, narr, nhash int) {
+	a.abc(opNewTable, x, nhash, 0)
+	a.emit(uint32(narr))
 }
 
 func (a *asm) proto(p *Proto) int {
@@ -150,7 +156,7 @@ func (a *asm) done() *Proto {
 			}
 			a.p.code[f.at] |= uint32(-off) << 16
 		default:
-			if off < 0 && a.p.code[f.at]&0xff == opForPrep || off < math.MinInt16 || off > math.MaxInt16 {
+			if off < 0 && (a.p.code[f.at]&0xff == opForPrep || a.p.code[f.at]&0xff == opTForPrep) || off < math.MinInt16 || off > math.MaxInt16 {
 				panic("asm: bad jump to " + f.label)
 			}
 			a.p.code[f.at] |= uint32(uint16(int16(off))) << 16
@@ -162,133 +168,4 @@ func (a *asm) done() *Proto {
 		panic(err)
 	}
 	return &p
-}
-
-// verify checks what the loop trusts: register operands below maxstack, constant, upvalue
-// and prototype indices in range, jumps landing on the first word of an instruction, aux
-// words consumed, and the padding word at the end. It is the spike's subset of the verifier.
-func verify(p *Proto) error {
-	n := len(p.code)
-	if n == 0 || p.code[n-1] != opBad {
-		return fmt.Errorf("%s: missing padding word", p.name)
-	}
-	if p.maxstack < p.nparams {
-		return fmt.Errorf("%s: maxstack below nparams", p.name)
-	}
-	starts := make([]bool, n)
-	for pc := 0; pc < n-1; pc++ {
-		starts[pc] = true
-		if hasAux[uint8(p.code[pc])] {
-			pc++
-		}
-	}
-	reg := func(pc, r int) error {
-		if r >= int(p.maxstack) {
-			return fmt.Errorf("%s:%d: register %d not below maxstack %d", p.name, pc, r, p.maxstack)
-		}
-		return nil
-	}
-	kidx := func(pc, k int) error {
-		if k >= len(p.k) {
-			return fmt.Errorf("%s:%d: constant %d out of range", p.name, pc, k)
-		}
-		return nil
-	}
-	target := func(pc, t int) error {
-		if t < 0 || t >= n-1 || !starts[t] {
-			return fmt.Errorf("%s:%d: jump to %d is not an instruction", p.name, pc, t)
-		}
-		return nil
-	}
-	for pc := 0; pc < n-1; pc++ {
-		i := p.code[pc]
-		op, a, b, c := uint8(i), decA(i), decB(i), decC(i)
-		next := pc + 1
-		if hasAux[op] {
-			if pc+1 >= n-1 {
-				return fmt.Errorf("%s:%d: missing aux word", p.name, pc)
-			}
-			next++
-		}
-		var errs []error
-		switch op {
-		case opMove:
-			errs = append(errs, reg(pc, a), reg(pc, b))
-		case opLoadK:
-			errs = append(errs, reg(pc, a), kidx(pc, decBx(i)))
-		case opLoadI, opLoadFalse, opLoadTrue, opNewTable:
-			errs = append(errs, reg(pc, a))
-		case opLoadNil:
-			errs = append(errs, reg(pc, a+b))
-		case opGetUpval:
-			errs = append(errs, reg(pc, a))
-			if b >= len(p.upvals) {
-				errs = append(errs, fmt.Errorf("%s:%d: upvalue %d out of range", p.name, pc, b))
-			}
-		case opGetField, opSetField:
-			x, kk, z := a, c, b
-			if op == opSetField {
-				x, kk, z = a, b, c
-			}
-			errs = append(errs, reg(pc, x), reg(pc, z), kidx(pc, kk))
-			if int(p.code[pc+1]) >= len(p.hints) {
-				errs = append(errs, fmt.Errorf("%s:%d: hint site out of range", p.name, pc))
-			}
-		case opAdd, opSub, opMul:
-			errs = append(errs, reg(pc, a), reg(pc, b), reg(pc, c))
-		case opAddK, opSubK, opMulK:
-			errs = append(errs, reg(pc, a), reg(pc, b), kidx(pc, c))
-		case opJmp:
-			errs = append(errs, target(pc, next+int(int16(decBx(i)))))
-		case opLtJmp:
-			errs = append(errs, reg(pc, a), reg(pc, b), target(pc, next+int(int32(p.code[pc+1]))))
-		case opLtKJmp, opEqKJmp:
-			errs = append(errs, reg(pc, a), kidx(pc, b), target(pc, next+int(int32(p.code[pc+1]))))
-		case opForPrep:
-			errs = append(errs, reg(pc, a+3), target(pc, next+decBx(i)))
-		case opForLoop:
-			errs = append(errs, reg(pc, a+3), target(pc, next-decBx(i)))
-		case opCall:
-			errs = append(errs, reg(pc, a))
-			if b > 0 {
-				errs = append(errs, reg(pc, a+b-1))
-			}
-			if c > 1 {
-				errs = append(errs, reg(pc, a+c-2))
-			}
-		case opReturn:
-			if b > 1 {
-				errs = append(errs, reg(pc, a+b-2))
-			} else {
-				errs = append(errs, reg(pc, a))
-			}
-		case opReturn0:
-		case opReturn1:
-			errs = append(errs, reg(pc, a))
-		case opClosure:
-			errs = append(errs, reg(pc, a))
-			if decBx(i) >= len(p.protos) {
-				errs = append(errs, fmt.Errorf("%s:%d: prototype out of range", p.name, pc))
-			} else {
-				for _, u := range p.protos[decBx(i)].upvals {
-					if u.fromStack {
-						errs = append(errs, reg(pc, int(u.index)))
-					} else if int(u.index) >= len(p.upvals) {
-						errs = append(errs, fmt.Errorf("%s:%d: captured upvalue out of range", p.name, pc))
-					}
-				}
-			}
-		default:
-			return fmt.Errorf("%s:%d: unknown opcode %d", p.name, pc, op)
-		}
-		for _, err := range errs {
-			if err != nil {
-				return err
-			}
-		}
-		if hasAux[op] {
-			pc++
-		}
-	}
-	return nil
 }

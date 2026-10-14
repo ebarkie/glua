@@ -370,7 +370,13 @@ func (ex *executor) slowOp() error {
 		return ex.errorf("attempt to index a %s value", typeName(obj))
 
 	case opNewTable:
-		ex.stack[st.base+a] = tableValue(NewTable(b, c))
+		narr := int(ex.aux())
+		st.pc++ // skip the aux word
+		nhash := 0
+		if b > 0 {
+			nhash = 1 << (b - 1)
+		}
+		ex.stack[st.base+a] = tableValue(NewTable(narr, nhash))
 
 	case opClosure:
 		np := p.protos[decBx(i)]
@@ -393,10 +399,10 @@ func (ex *executor) slowOp() error {
 		if err != nil {
 			return err
 		}
-		ex.jumpAux(lt)
+		ex.jumpAux(lt == (c != 0))
 
 	case opEqKJmp:
-		ex.jumpAux(rawEqual(regs[a], p.k[b]))
+		ex.jumpAux(rawEqual(regs[a], p.k[b]) == (c != 0))
 
 	case opForPrep:
 		return ex.forPrep(i)

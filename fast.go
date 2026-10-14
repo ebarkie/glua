@@ -200,7 +200,7 @@ dispatch:
 				}
 			}
 
-		case opLtJmp, opLtKJmp: // if R[A] < R[B] (or K[B]) fall through, else jump by the aux word
+		case opLtJmp, opLtKJmp: // test R[A] < R[B] (or K[B]); fall through when it equals C, else jump by the aux word
 			x, y := &regs[uint8(i>>8)], &regs[uint8(i>>16)]
 			if uint8(i) == opLtKJmp {
 				y = kAt(k, uint32(uint8(i>>16)))
@@ -214,13 +214,13 @@ dispatch:
 				e = exSlowOp // mixed numbers compare exactly in the driver; strings and metamethods too
 				break dispatch
 			}
-			if lt {
+			if lt == (i>>24 != 0) { // C is the polarity: fall through when the test equals it
 				pc = unsafe.Add(pc, 4)
 			} else {
 				pc = unsafe.Add(pc, (int(int32(*(*uint32)(pc)))+1)*4)
 			}
 
-		case opEqKJmp: // if R[A] == K[B] fall through, else jump by the aux word
+		case opEqKJmp: // test R[A] == K[B]; fall through when it equals C, else jump by the aux word
 			x, y := &regs[uint8(i>>8)], kAt(k, uint32(uint8(i>>16)))
 			var eq bool
 			switch {
@@ -245,7 +245,7 @@ dispatch:
 				e = exSlowOp // long strings: memequal is a call
 				break dispatch
 			}
-			if eq {
+			if eq == (i>>24 != 0) {
 				pc = unsafe.Add(pc, 4)
 			} else {
 				pc = unsafe.Add(pc, (int(int32(*(*uint32)(pc)))+1)*4)
@@ -345,13 +345,10 @@ dispatch:
 				break dispatch
 			}
 
-		case opSetField, opNewTable, opReturn, opClosure:
-			e = exSlowOp // allocation, writes and general returns are done by the driver
-			break dispatch
-
-		default: // opBad and unused values. Listing all 256 would not drop the range check: the compiler
-			// merges them into one run, and the switch then fails the jump-table density test.
-			e = exBadOp
+		default: // everything else is done by the driver, which also rejects opBad. Listing all 256
+			// values would not drop the range check: the compiler merges the unused ones into one run,
+			// and the switch then fails the jump-table density test.
+			e = exSlowOp
 			break dispatch
 		}
 	}

@@ -56,7 +56,7 @@ func progFib(n int64) *Proto {
 // local t = {x = 1}; local s = 0; for i = 1, n do s = s + t.x end; return s
 func progFieldRead(n int64) *Proto {
 	a := newAsm("fieldread", 0, 7)
-	a.abc(opNewTable, 0, 0, 1)
+	a.newTable(0, 0, 1)
 	a.loadI(1, 1)
 	a.field(opSetField, 0, int(a.kstr("x")), 1)
 	a.loadI(1, 0)
