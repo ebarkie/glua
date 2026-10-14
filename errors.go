@@ -36,17 +36,31 @@ func (e *Error) Error() string {
 // Unwrap returns the Go error behind e, if any.
 func (e *Error) Unwrap() error { return e.cause }
 
-// where reports the current position as source:pc. Lines arrive with the compiler.
+// where reports the current position as source:line, from the instruction at pc-1.
 func (ex *executor) where() string {
 	if ex.st.cl == nil {
 		return ""
 	}
-	return fmt.Sprintf("%s:pc%d", ex.st.cl.p.source, ex.st.pc-1)
+	p := ex.st.cl.p
+	return fmt.Sprintf("%s:%d", p.source, p.lineAt(ex.st.pc-1))
 }
 
-// errorf raises an ordinary, catchable runtime error at the current position.
+// errorf raises an ordinary, catchable runtime error at the current position. As in C Lua,
+// the position is part of the error value, which pcall returns.
 func (ex *executor) errorf(format string, args ...any) error {
-	return &Error{Value: String(fmt.Sprintf(format, args...)), where: ex.where()}
+	return &Error{Value: String(ex.where() + ": " + fmt.Sprintf(format, args...))}
+}
+
+// typeError raises "attempt to <what> a <type> value", naming where the value came from
+// when it is in register reg of the current frame (reg < 0: not in a register).
+func (ex *executor) typeError(what string, v Value, reg int) error {
+	info := ""
+	if reg >= 0 {
+		if vi := ex.st.cl.p.varInfo(ex.st.pc-1, reg); vi != "" {
+			info = " (" + vi + ")"
+		}
+	}
+	return ex.errorf("attempt to %s a %s value%s", what, typeName(v), info)
 }
 
 // terminal raises an error that pcall cannot catch: limits, context cancellation, host depth.

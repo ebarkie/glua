@@ -1,0 +1,42 @@
+index a nil global	runtime error: index a nil global:1: attempt to index a nil value (global 'x')
+index a nil field	runtime error: index a nil field:2: attempt to index a nil value (field 'a')
+index a nil local	runtime error: index a nil local:2: attempt to index a nil value (local 'a')
+index a nil upvalue	runtime error: index a nil upvalue:2: attempt to index a nil value (upvalue 'u')
+index with a computed key	runtime error: index with a computed key:3: attempt to index a nil value (field '?')
+index with a constant key through a register	runtime error: index with a constant key through a register:2: attempt to index a nil value (field 'a b')
+integer index	runtime error: integer index:2: attempt to index a nil value (field 'integer index')
+assign to a field of nil	runtime error: assign to a field of nil:2: attempt to index a nil value (local 't')
+assign to a global's field	runtime error: assign to a global's field:1: attempt to index a nil value (global 'g')
+call a nil global	runtime error: call a nil global:1: attempt to call a nil value (global 'undefinedfn')
+call a nil field	runtime error: call a nil field:2: attempt to call a nil value (field 'go')
+call a nil method	runtime error: call a nil method:2: attempt to call a nil value (method 'method')
+call a number	runtime error: call a number:2: attempt to call a number value (local 'n')
+arithmetic on nil	runtime error: arithmetic on nil:2: attempt to perform arithmetic on a nil value (local 'a')
+arithmetic on a field	runtime error: arithmetic on a field:2: attempt to perform arithmetic on a nil value (field 'x')
+arithmetic on a table	runtime error: arithmetic on a table:1: attempt to perform arithmetic on a table value
+arithmetic on a non-numeric string	runtime error: arithmetic on a non-numeric string:2: attempt to add a 'string' with a 'number'
+unary minus on nil	runtime error: unary minus on nil:2: attempt to perform arithmetic on a nil value (local 'x')
+length of nil	runtime error: length of nil:2: attempt to get length of a nil value (local 'x')
+length of a number	runtime error: length of a number:1: attempt to get length of a number value
+bitwise on a float	runtime error: bitwise on a float:1: number has no integer representation
+bitwise on nil	runtime error: bitwise on nil:2: attempt to perform bitwise operation on a nil value (local 'z')
+concatenate nil	runtime error: concatenate nil:2: attempt to concatenate a nil value (local 'x')
+concatenate a table global	runtime error: concatenate a table global:2: attempt to concatenate a table value (global 't')
+concatenate both bad	runtime error: concatenate both bad:2: attempt to concatenate a table value (local 'a')
+compare number with nil	runtime error: compare number with nil:1: attempt to compare number with nil
+compare two tables	runtime error: compare two tables:1: attempt to compare two table values
+compare string with number	runtime error: compare string with number:1: attempt to compare string with number
+integer division by zero	runtime error: integer division by zero:2: attempt to divide by zero
+modulo by zero	runtime error: modulo by zero:2: attempt to perform 'n%0'
+for loop with a string start	runtime error: for loop with a string start:1: bad 'for' initial value (number expected, got string)
+for loop with a nil limit	runtime error: for loop with a nil limit:1: bad 'for' limit (number expected, got nil)
+for loop with a zero step	runtime error: for loop with a zero step:1: 'for' step is zero
+error on a later line	runtime error: error on a later line:4: attempt to perform arithmetic on a nil value
+nil in a nested function	runtime error: nil in a nested function:3: attempt to index a nil value (global 'missing')
+generic for over nil	runtime error: generic for over nil:1: attempt to call a nil value (for iterator 'for iterator')
+global in a field chain	runtime error: global in a field chain:1: attempt to index a nil value (global 'a')
+upvalue arithmetic	runtime error: upvalue arithmetic:2: attempt to perform arithmetic on a nil value (upvalue 'n')
+index a boolean through a global table	runtime error: index a boolean through a global table:2: attempt to index a boolean value (field 'debug')
+bitwise on a numeric string	runtime error: bitwise on a numeric string:1: attempt to perform bitwise operation on a string value (constant '3')
+bitwise not on a string	runtime error: bitwise not on a string:2: attempt to perform bitwise operation on a string value (local 's')
+float for loop with a bad step	runtime error: float for loop with a bad step:1: bad 'for' step (number expected, got string)

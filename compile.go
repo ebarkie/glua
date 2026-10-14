@@ -103,6 +103,7 @@ type fstate struct {
 	bl      *cblock
 	line    int
 	tbc     []int // registers of active to-be-closed variables
+	open    []int // indices into p.locvars of the active locals, for their end pc
 	target  int   // pc of the last jump target: no peephole across it
 }
 
@@ -117,6 +118,7 @@ type cblock struct {
 	parent  *cblock
 	nactive int // registers active when the block was entered
 	ntbc    int // len(fs.tbc) when the block was entered
+	nlocs   int // len(fs.open) when the block was entered
 	loop    bool
 	breaks  []int
 	labels  map[string]labelPos
@@ -157,6 +159,7 @@ func (c *compiler) function(node *syntax.FunctionExpr, parent *fstate) *Proto {
 			d.index = uint8(parent.regOf[u.Var])
 		}
 		fs.p.upvals = append(fs.p.upvals, d)
+		fs.p.upnames = append(fs.p.upnames, u.Name)
 	}
 	fs.enterBlock(false)
 	if node.IsVararg {
@@ -283,6 +286,8 @@ func (fs *fstate) freeRegOpt(r int) {
 func (fs *fstate) activate(v *syntax.Var, r int) {
 	fs.regOf[v] = r
 	fs.nactive = r + 1
+	fs.p.locvars = append(fs.p.locvars, locVar{name: v.Name, reg: r, startpc: fs.pc(), endpc: -1})
+	fs.open = append(fs.open, len(fs.p.locvars)-1)
 }
 
 // constants
@@ -1238,7 +1243,7 @@ func (fs *fstate) table(n *syntax.TableExpr) expdesc {
 // statements
 
 func (fs *fstate) enterBlock(loop bool) *cblock {
-	b := &cblock{parent: fs.bl, nactive: fs.nactive, ntbc: len(fs.tbc), loop: loop, labels: map[string]labelPos{}}
+	b := &cblock{parent: fs.bl, nactive: fs.nactive, ntbc: len(fs.tbc), nlocs: len(fs.open), loop: loop, labels: map[string]labelPos{}}
 	fs.bl = b
 	return b
 }
@@ -1255,6 +1260,10 @@ func (fs *fstate) leaveBlock() {
 		fs.abc(opClose, b.nactive, 0, 0)
 		fs.tbc = fs.tbc[:b.ntbc]
 	}
+	for _, i := range fs.open[b.nlocs:] {
+		fs.p.locvars[i].endpc = fs.pc()
+	}
+	fs.open = fs.open[:b.nlocs]
 	fs.nactive = b.nactive
 	fs.freereg = b.nactive
 	fs.bl = b.parent

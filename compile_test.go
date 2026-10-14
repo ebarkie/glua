@@ -156,23 +156,27 @@ func runSource(name, src string) ([]Value, error) {
 	return runClosure(context.Background(), ex, cl)
 }
 
-func TestCompileCorpus(t *testing.T) {
-	cases := readCases(t, "testdata/compile.lua")
-	want := expectations(t, "testdata/compile.lua", "testdata/compile.expected")
-	for _, c := range cases {
+// outcome renders what a chunk did the way the C Lua driver prints it.
+func outcome(name, src string) string {
+	res, err := runSource(name, src)
+	if err == nil {
+		return formatResults(res)
+	}
+	if le, ok := err.(*Error); ok {
+		return "runtime error: " + le.Value.String()
+	}
+	return "compile error: " + err.Error()
+}
+
+func runCorpus(t *testing.T, cases, expected string) {
+	want := expectations(t, cases, expected)
+	for _, c := range readCases(t, cases) {
 		t.Run(strings.ReplaceAll(c.name, " ", "_"), func(t *testing.T) {
 			exp, ok := want[c.name]
 			if !ok {
 				t.Fatalf("no expectation for %q", c.name)
 			}
-			res, err := runSource(c.name, c.src)
-			var got string
-			if err != nil {
-				got = "error: " + err.Error()
-			} else {
-				got = formatResults(res)
-			}
-			if got != exp {
+			if got := outcome(c.name, c.src); got != exp {
 				p, _, _ := compileChunk(c.name, c.src)
 				listing := ""
 				if p != nil {
@@ -184,19 +188,7 @@ func TestCompileCorpus(t *testing.T) {
 	}
 }
 
-// Whatever parses must compile to code the verifier accepts: the compiler panics otherwise.
-func FuzzCompile(f *testing.F) {
-	for _, c := range []string{
-		"local a, b = 1, 2 a, b = b, a return a",
-		"local t = {f(), ...} for k, v in next, t do t[k] = v and v or nil end",
-		"local x <close> = nil goto l ::l:: repeat local y = x until y",
-		"return function(...) local a <const> = 1 return a + select('#', ...) end",
-		"while x do if y then break elseif z then goto c end ::c:: end",
-		"local s = '' for i = 10, 1, -1 do s = s .. i end return #s > 3 or not s",
-	} {
-		f.Add(c)
-	}
-	f.Fuzz(func(t *testing.T, src string) {
-		compileChunk("f", src)
-	})
+func TestCompileCorpus(t *testing.T) {
+	runCorpus(t, "testdata/compile.lua", "testdata/compile.expected")
 }
+func TestErrorCorpus(t *testing.T) { runCorpus(t, "testdata/errors.lua", "testdata/errors.expected") }

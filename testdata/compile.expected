@@ -39,3 +39,4 @@ upvalue _ENV	7
 nested functions and varargs in closures	3
 string escapes and long strings	str:610962 | str:4142 | str:6c696e65 | str:4869
 float formatting through tostring	1e+15 | 1e+16 | 9.2233720368548e+18 | -0.0 | inf | -inf | 3.0 | 0.1
+for loops over numeric strings	6.0 | 6

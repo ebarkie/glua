@@ -19,10 +19,19 @@ type Proto struct {
 	maxstack uint8
 	vararg   bool
 	lines    []int32 // source line of each code word
+	upnames  []string
+	locvars  []locVar // for messages: which register holds which local, from where to where
 	source   string
 	name     string
 
 	handles []unique.Handle[string] // keep canonical constant strings alive as long as the proto
+}
+
+// locVar is a local variable's name and register over the range of code where it is active.
+type locVar struct {
+	name           string
+	reg            int
+	startpc, endpc int
 }
 
 // upvalDesc says where a closure's capture comes from when CLOSURE runs.

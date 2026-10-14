@@ -139,9 +139,9 @@ func (ex *executor) slowOp() error {
 		}
 
 	case opAdd, opSub, opMul, opDiv, opMod, opPow, opIDiv, opBAnd, opBOr, opBXor, opShl, opShr:
-		return ex.arithOp(op, a, *ex.reg(b), *ex.reg(c))
+		return ex.arithOp(op, a, *ex.reg(b), *ex.reg(c), b, c)
 	case opAddK, opSubK, opMulK, opDivK, opModK, opPowK, opIDivK, opBAndK, opBOrK, opBXorK, opShlK, opShrK:
-		return ex.arithOp(op-(opAddK-opAdd), a, *ex.reg(b), p.k[c])
+		return ex.arithOp(op-(opAddK-opAdd), a, *ex.reg(b), p.k[c], b, -1)
 	case opUnm:
 		x := *ex.reg(b)
 		if n, ok := toNumber(x); ok {
@@ -152,17 +152,20 @@ func (ex *executor) slowOp() error {
 			*ex.reg(a) = r
 			return nil
 		}
-		return ex.errorf("attempt to perform arithmetic on a %s value", typeName(x))
+		if x.isString() {
+			return ex.errorf("attempt to unm a 'string' with a 'string'")
+		}
+		return ex.typeError("perform arithmetic on", x, b)
 	case opBNot:
 		x := *ex.reg(b)
-		if n, ok := toNumber(x); ok {
+		if n, ok := x, x.isNumber(); ok {
 			if v, ok := toIntExact(n); ok {
 				*ex.reg(a) = Int(^v)
 				return nil
 			}
 			return ex.errorf("number has no integer representation")
 		}
-		return ex.errorf("attempt to perform bitwise operation on a %s value", typeName(x))
+		return ex.typeError("perform bitwise operation on", x, b)
 	case opNot:
 		*ex.reg(a) = Bool(!ex.reg(b).truthy())
 	case opLen:
@@ -173,7 +176,7 @@ func (ex *executor) slowOp() error {
 		case x.isObj(kindTable):
 			*ex.reg(a) = Int(int64((*Table)(x.p).Len()))
 		default:
-			return ex.errorf("attempt to get length of a %s value", typeName(x))
+			return ex.typeError("get length of", x, b)
 		}
 	case opConcat:
 		return ex.concat(a, b)
@@ -319,6 +322,24 @@ func (ex *executor) openCount(from int) (int, error) {
 // maxSizeHint caps the array size a NEWTABLE preallocates; a larger table grows as it fills.
 const maxSizeHint = 1 << 16
 
+// arithName names arithmetic operators as the string library's metamethods report them.
+var arithName = map[uint8]string{
+	opAdd: "add", opSub: "sub", opMul: "mul", opMod: "mod", opPow: "pow", opDiv: "div", opIDiv: "idiv",
+}
+
+// objReg returns the register that holds the table operand of the indexing instruction at
+// pc-1, or -1 for GETGLOBAL and SETGLOBAL.
+func (ex *executor) objReg() int {
+	i := ex.instr(ex.st.pc - 1)
+	switch uint8(i) {
+	case opGetTable, opGetIndex, opGetField, opSelf:
+		return decB(i)
+	case opSetTable, opSetIndex, opSetField:
+		return decA(i)
+	}
+	return -1
+}
+
 // asCell checks that v is a cell. The compiler guarantees it, but the VM trusts only what
 // the verifier checks, and the verifier cannot follow what a register holds.
 func (ex *executor) asCell(v Value) (*cell, error) {
@@ -384,12 +405,9 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				}
 			}
 			return ex.errorf("no field '%s' on %s", name, ti.rt.Name())
-		case obj.isString():
-			// strings index the string library through their metatable, which comes with the library
-			return ex.errorf("attempt to index a string value")
 		default:
 			if hops == 0 {
-				return ex.errorf("attempt to index a %s value", typeName(obj))
+				return ex.typeError("index", obj, ex.objReg())
 			}
 			return ex.errorf("attempt to index a %s value ('__index')", typeName(obj))
 		}
@@ -429,7 +447,7 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			return nil
 		default:
 			if hops == 0 {
-				return ex.errorf("attempt to index a %s value", typeName(obj))
+				return ex.typeError("index", obj, ex.objReg())
 			}
 			return ex.errorf("attempt to index a %s value ('__newindex')", typeName(obj))
 		}
@@ -483,33 +501,46 @@ func (ex *executor) finishOp(fn, n int) error {
 	return nil
 }
 
-// arithOp does R[dst] = x op y for numbers and numeric strings.
-func (ex *executor) arithOp(op uint8, dst int, x, y Value) error {
-	a, ok1 := toNumber(x)
-	b, ok2 := toNumber(y)
+// arithOp does R[dst] = x op y for numbers and numeric strings. rx and ry are the
+// operands' registers, or -1 for a constant.
+func (ex *executor) arithOp(op uint8, dst int, x, y Value, rx, ry int) error {
+	conv := toNumber
+	switch op {
+	case opBAnd, opBOr, opBXor, opShl, opShr:
+		conv = func(v Value) (Value, bool) { return v, v.isNumber() } // no string coercion, as in C Lua 5.4
+	}
+	a, ok1 := conv(x)
+	b, ok2 := conv(y)
 	if ok1 && ok2 {
 		r, err := numArith(op, a, b)
 		switch err {
 		case arithDivZero:
 			if op == opMod {
-				return ex.errorf("attempt to perform 'n%%%%0'")
+				return ex.errorf("attempt to perform 'n%%0'")
 			}
-			return ex.errorf("attempt to perform 'n//0'")
+			return ex.errorf("attempt to divide by zero")
 		case arithNoInt:
 			return ex.errorf("number has no integer representation")
 		}
 		*ex.reg(dst) = r
 		return nil
 	}
-	bad := x
+	bad, reg := x, rx
 	if ok1 {
-		bad = y
+		bad, reg = y, ry
 	}
 	switch op {
 	case opBAnd, opBOr, opBXor, opShl, opShr:
-		return ex.errorf("attempt to perform bitwise operation on a %s value", typeName(bad))
+		if bad.isNumber() { // it is the integer conversion that failed
+			return ex.errorf("number has no integer representation")
+		}
+		return ex.typeError("perform bitwise operation on", bad, reg)
 	}
-	return ex.errorf("attempt to perform arithmetic on a %s value", typeName(bad))
+	if x.isString() || y.isString() {
+		// in C Lua the string library's metamethods do this arithmetic, and report the failure
+		return ex.errorf("attempt to %s a '%s' with a '%s'", arithName[op], typeName(x), typeName(y))
+	}
+	return ex.typeError("perform arithmetic on", bad, reg)
 }
 
 // lessThan compares two values exactly, as Lua's < does without metamethods.
@@ -553,16 +584,24 @@ func (ex *executor) compareError(x, y Value) error {
 func (ex *executor) concat(a, n int) error {
 	regs := ex.stack[ex.st.base+a : ex.st.base+a+n]
 	size := 0
-	for _, v := range regs {
+	bad := -1
+	for j, v := range regs {
 		switch {
 		case v.isString():
 			size += int(v.n & lenMask)
 		case v.isNumber():
 			size += len(v.String())
 		default:
-			bad := v
-			return ex.errorf("attempt to concatenate a %s value", typeName(bad))
+			bad = j
 		}
+	}
+	if bad >= 0 {
+		// C Lua concatenates from the right, pair by pair, and reports the left operand of the
+		// first bad pair when it is bad, else the right one
+		if bad == n-1 && n >= 2 && !regs[n-2].isString() && !regs[n-2].isNumber() {
+			bad = n - 2
+		}
+		return ex.typeError("concatenate", regs[bad], a+bad)
 	}
 	var sb strings.Builder
 	sb.Grow(size)
@@ -586,7 +625,10 @@ func (ex *executor) callValue(fn, nargs int) error {
 	case v.isObj(kindGoFn):
 		return ex.callGo((*goFunc)(v.p), fn, nargs)
 	}
-	return ex.errorf("attempt to call a %s value", typeName(v))
+	if uint8(ex.instr(ex.st.pc-1)) == opTForCall {
+		return ex.errorf("attempt to call a %s value (for iterator 'for iterator')", typeName(v))
+	}
+	return ex.typeError("call", v, fn-ex.st.base)
 }
 
 // pushLua starts a call of cl at stack[fn] with nargs arguments as a new frame of the loop.
@@ -796,8 +838,8 @@ func (ex *executor) metamethod(v Value, event string) Value {
 	return Value{}
 }
 
-// forPrep prepares a loop that fast did not: float values, a float limit, or a step that
-// is not positive.
+// forPrep prepares a loop that fast did not: float values, a float limit, numeric strings,
+// or a step that is not positive. It follows C Lua's forprep, checks in the same order.
 func (ex *executor) forPrep(i uint32) error {
 	st := &ex.st
 	a := st.base + decA(i)
@@ -809,11 +851,11 @@ func (ex *executor) forPrep(i uint32) error {
 		if s == 0 {
 			return ex.errorf("'for' step is zero")
 		}
-		lim, ok := forLimit(limit, s)
+		lim, ok, isNum := forLimit(limit, s)
+		if !isNum {
+			return ex.errorf("bad 'for' limit (number expected, got %s)", typeName(limit))
+		}
 		if !ok {
-			if !limit.isNumber() {
-				return ex.errorf("'for' limit must be a number")
-			}
 			skip()
 			return nil
 		}
@@ -832,17 +874,20 @@ func (ex *executor) forPrep(i uint32) error {
 		r[3] = init
 		return nil
 	}
-	fi, ok1 := init.Float()
-	fl, ok2 := limit.Float()
-	fs, ok3 := step.Float()
-	switch {
-	case !ok1:
-		return ex.errorf("'for' initial value must be a number")
-	case !ok2:
-		return ex.errorf("'for' limit must be a number")
-	case !ok3:
-		return ex.errorf("'for' step must be a number")
-	case fs == 0:
+	// a float loop: every value becomes a float; strings are converted
+	fl, ok := forFloat(limit)
+	if !ok {
+		return ex.errorf("bad 'for' limit (number expected, got %s)", typeName(limit))
+	}
+	fs, ok := forFloat(step)
+	if !ok {
+		return ex.errorf("bad 'for' step (number expected, got %s)", typeName(step))
+	}
+	fi, ok := forFloat(init)
+	if !ok {
+		return ex.errorf("bad 'for' initial value (number expected, got %s)", typeName(init))
+	}
+	if fs == 0 {
 		return ex.errorf("'for' step is zero")
 	}
 	if (fs > 0 && fl < fi) || (fs < 0 && fi < fl) {
@@ -853,37 +898,46 @@ func (ex *executor) forPrep(i uint32) error {
 	return nil
 }
 
-// forLimit converts a loop limit to an integer for an integer loop with step s. ok is
-// false when the loop cannot run at all, or the limit is not a number.
-func forLimit(limit Value, s int64) (int64, bool) {
-	switch limit.p {
-	case tInt():
-		return int64(limit.n), true
-	case tFloat():
-		f := math.Float64frombits(limit.n)
-		if f != f {
-			return 0, false
-		}
-		if s > 0 {
-			f = math.Floor(f)
-			if f >= 0x1p63 {
-				return math.MaxInt64, true
-			}
-			if f < -0x1p63 {
-				return 0, false
-			}
-		} else {
-			f = math.Ceil(f)
-			if f < -0x1p63 {
-				return math.MinInt64, true
-			}
-			if f >= 0x1p63 {
-				return 0, false
-			}
-		}
-		return int64(f), true
+// forFloat converts a loop value to a float, accepting numeric strings.
+func forFloat(v Value) (float64, bool) {
+	if n, ok := toNumber(v); ok {
+		return n.Float()
 	}
 	return 0, false
+}
+
+// forLimit converts a loop limit to an integer for an integer loop with step s. ok is false
+// when the loop cannot run at all; isNum is false when the limit is not a number.
+func forLimit(limit Value, s int64) (lim int64, ok, isNum bool) {
+	limit, isNum = toNumber(limit)
+	if !isNum {
+		return 0, false, false
+	}
+	if limit.p == tInt() {
+		return int64(limit.n), true, true
+	}
+	f := math.Float64frombits(limit.n)
+	if f != f {
+		return 0, false, true
+	}
+	if s > 0 {
+		f = math.Floor(f)
+		if f >= 0x1p63 {
+			return math.MaxInt64, true, true
+		}
+		if f < -0x1p63 {
+			return 0, false, true
+		}
+	} else {
+		f = math.Ceil(f)
+		if f < -0x1p63 {
+			return math.MinInt64, true, true
+		}
+		if f >= 0x1p63 {
+			return 0, false, true
+		}
+	}
+	return int64(f), true, true
 }
 
 // forLoop steps a float loop.

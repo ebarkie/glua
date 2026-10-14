@@ -240,3 +240,8 @@ line]], "\u{48}\z
        i"
 --== float formatting through tostring
 return 1e15, 1e16, 2^63, -0.0, 1/0, -1/0, 3.0, 0.1
+--== for loops over numeric strings
+local s, t = 0, 0
+for i = "1", "3" do s = s + i end
+for i = 1, "3" do t = t + i end
+return s, t
