@@ -513,3 +513,40 @@ func TestSingleAllocationCap(t *testing.T) {
 		t.Fatalf("got %v, want ErrAlloc", err)
 	}
 }
+
+// After a terminal error the closers still run, on a grace budget: a closer that loops
+// forever is stopped, and the terminal error stands.
+func TestCloseAfterTerminalError(t *testing.T) {
+	src := `
+		done = false
+		local a <close> = setmetatable({}, {__close = function() done = true end})
+		local b <close> = setmetatable({}, {__close = function() while true do end end})
+		while true do end`
+	p, _, err := compileChunk("t", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGlobals()
+	ex := newExecutor()
+	ex.maxSteps = 10_000
+	_, err = runClosure(context.Background(), ex, &Closure{p: p, env: g})
+	if !errors.Is(err, ErrSteps) {
+		t.Fatalf("got %v, want ErrSteps", err)
+	}
+	// b's closer used up the grace budget, so a's closer is abandoned
+	if g.Get(String("done")).Truthy() {
+		t.Error("a's closer ran after b's breached the grace budget")
+	}
+	src2 := `
+		done = false
+		local a <close> = setmetatable({}, {__close = function() done = true end})
+		while true do end`
+	p, _, _ = compileChunk("t", src2)
+	g = testGlobals()
+	ex = newExecutor()
+	ex.maxSteps = 10_000
+	runClosure(context.Background(), ex, &Closure{p: p, env: g})
+	if !g.Get(String("done")).Truthy() {
+		t.Error("a closer did not run after a terminal error")
+	}
+}

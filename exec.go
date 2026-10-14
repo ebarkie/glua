@@ -145,6 +145,14 @@ func (ex *executor) run(cl *Closure, fn, nargs int) error {
 	err := ex.drive(nf)
 	if le, ok := err.(*Error); ok {
 		ex.captureTrace(le, nf) // the error leaves this run uncaught
+		// close what this run left open, with the error
+		if le.terminal {
+			ex.closeTerminal(fn, le)
+		} else if v, cerr := ex.closeOnError(fn, le.Value); cerr != nil {
+			err = cerr
+		} else if !same(&v, &le.Value) {
+			le.Value, le.cause = v, nil // a closer replaced the error
+		}
 	}
 	st.nf = nf // on an error this is the unwinding: it never crosses a goEntry frame
 	return err
@@ -262,7 +270,7 @@ func (ex *executor) drive(nf0 int) error {
 			return nil
 		}
 		if err != nil {
-			if ex.unwind(err, nf0) {
+			if err = ex.unwind(err, nf0); err == nil {
 				continue
 			}
 			return err

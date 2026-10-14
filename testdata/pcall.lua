@@ -86,3 +86,25 @@ return ok, v, captured
 local function inner() error("uncaught here") end
 local function outer() inner() end
 outer()
+--== closers run with the error, newest first
+local log = ""
+local function c(name, fail)
+  return setmetatable({}, {__close = function(_, e)
+    log = log .. name .. ":" .. (e == nil and "nil" or e) .. " "
+    if fail then error(name .. " failed", 0) end
+  end})
+end
+local r1 = {pcall(function() local a <close> = c("a") local b <close> = c("b") error("boom", 0) end)}
+local l1 = log; log = ""
+local r2 = {pcall(function() local a <close> = c("a") local b <close> = c("b", true) error("boom", 0) end)}
+local l2 = log; log = ""
+local r3 = {pcall(function() local a <close> = c("a", true) return 1 end)}
+local l3 = log; log = ""
+local r4 = {xpcall(function() local a <close> = c("a") error("boom", 0) end, function(m) return "h:" .. m end)}
+local l4 = log; log = ""
+local r5 = {pcall(function() for i in function(_, k) if not k then return 1 end end, nil, nil, c("it") do error("in loop", 0) end end)}
+return r1[2], l1, r2[2], l2, r3[2], l3, r4[2], l4, r5[2], log
+--== closers when an error leaves the chunk
+local function c(name) return setmetatable({}, {__close = function(_, e) error(name .. " replaced " .. e, 0) end}) end
+local x <close> = c("x")
+error("original", 0)

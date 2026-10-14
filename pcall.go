@@ -1,6 +1,7 @@
 package glua
 
 import (
+	"context"
 	"fmt"
 	"unsafe"
 )
@@ -211,10 +212,10 @@ func (ex *executor) callHandler(h, msg Value) (Value, error) {
 // unwind looks for a catch frame of the current run, above nf0, that stops err. If it finds
 // one it either starts the xpcall handler or unwinds to it, and reports true; the driver
 // then carries on. Terminal errors are never caught.
-func (ex *executor) unwind(err error, nf0 int) bool {
+func (ex *executor) unwind(err error, nf0 int) error {
 	le, ok := err.(*Error)
 	if !ok || le.terminal {
-		return false
+		return err
 	}
 	st := &ex.st
 	value := le.Value
@@ -230,14 +231,13 @@ func (ex *executor) unwind(err error, nf0 int) bool {
 		if fr&frCatch != 0 {
 			fn := ex.frameFuncSlot(f, base, cl) - 1 // pcall's slot, below the protected function
 			if fr&frHandler != 0 && !inHandler {
-				return ex.startHandler(f, fn, value) == nil
+				return ex.startHandler(f, fn, value)
 			}
-			ex.unwindTo(f, base, fn, value)
-			return true
+			return ex.unwindTo(f, base, fn, value)
 		}
 		base -= int(fr >> 32 & 0xffffff)
 	}
-	return false
+	return err
 }
 
 // frameFuncSlot returns the stack index of frame f's function as its caller placed it.
@@ -250,20 +250,67 @@ func (ex *executor) frameFuncSlot(f, base int, cl *Closure) int {
 
 // unwindTo pops every frame down to and including catch frame f, whose base is base, and
 // leaves false and value as the results of the pcall at stack[fn].
-func (ex *executor) unwindTo(f, base, fn int, value Value) {
+func (ex *executor) unwindTo(f, base, fn int, value Value) error {
 	st := &ex.st
 	fr := ex.pframes[f]
-	ex.dropTBC(fn)
+	value, err := ex.closeOnError(fn, value)
+	if err != nil {
+		return err // a terminal error while closing
+	}
 	st.nf = f
 	st.base = base - int(fr>>32&0xffffff)
 	st.cl = (*Closure)(ex.stack[st.base-1].p)
 	st.pc = int(uint32(fr))
 	ex.stack[fn], ex.stack[fn+1] = Bool(false), value
 	ex.adjustResults(ex.instr(st.pc-1), fn, 2)
+	return nil
 }
 
-// dropTBC forgets the to-be-closed variables at stack index level and above. Closing them
-// with the error comes with milestone 1's to-be-closed variables.
+// closeOnError calls the __close metamethods of the to-be-closed variables at stack index
+// level and above, newest first, each with the error value. A closer that fails replaces
+// the error for the closers after it and for the result, as in C Lua. The closers run
+// synchronously, while the failing frames are still in place.
+func (ex *executor) closeOnError(level int, value Value) (Value, error) {
+	for len(ex.tbc) > 0 && ex.tbc[len(ex.tbc)-1] >= level {
+		r := ex.tbc[len(ex.tbc)-1]
+		ex.tbc = ex.tbc[:len(ex.tbc)-1]
+		v := ex.stack[r]
+		h := ex.metamethod(v, "__close")
+		if h.IsNil() {
+			continue
+		}
+		if _, err := ex.callSync(h, []Value{v, value}); err != nil {
+			le, ok := err.(*Error)
+			if !ok || le.terminal {
+				ex.dropTBC(level)
+				return value, err
+			}
+			value = le.Value
+		}
+	}
+	return value, nil
+}
+
+// closeTerminal runs the closers at level and above after a terminal error. Go closers
+// always run. Lua closers share one grace budget of 1,024 steps and 4 KB; a second breach
+// abandons the rest. The terminal error itself stands.
+func (ex *executor) closeTerminal(level int, le *Error) {
+	if len(ex.tbc) == 0 || ex.tbc[len(ex.tbc)-1] < level || ex.st.cl == nil {
+		return
+	}
+	steps, ticks, alloc := ex.steps, ex.st.ticks, ex.allocLeft
+	ex.steps, ex.st.ticks, ex.allocLeft = 0, tickQuantum, 4<<10
+	ctx := ex.ctx
+	if ctx.Err() != nil {
+		ex.ctx = context.WithoutCancel(ctx) // let the closers run after a cancellation
+	}
+	ex.closeOnError(level, le.Value)
+	ex.dropTBC(level)
+	ex.ctx = ctx
+	ex.steps, ex.st.ticks, ex.allocLeft = steps, ticks, alloc
+}
+
+// dropTBC forgets the to-be-closed variables at stack index level and above.
 func (ex *executor) dropTBC(level int) {
 	for len(ex.tbc) > 0 && ex.tbc[len(ex.tbc)-1] >= level {
 		ex.tbc = ex.tbc[:len(ex.tbc)-1]
@@ -278,10 +325,12 @@ func (ex *executor) startHandler(f, fn int, msg Value) error {
 	if !h.isObj(kindLuaFn) {
 		r, err := ex.callHandler(h, msg)
 		if err != nil {
+			if le, ok := err.(*Error); ok && le.terminal {
+				return err
+			}
 			r = String(errorInErrorHandling)
 		}
-		ex.unwindFrom(f, r)
-		return nil
+		return ex.unwindFrom(f, r)
 	}
 	st := &ex.st
 	slot := max(st.base+int(st.cl.p.maxstack), ex.top)
@@ -297,14 +346,14 @@ func (ex *executor) startHandler(f, fn int, msg Value) error {
 }
 
 // unwindFrom unwinds from the current frame to catch frame f with the result value.
-func (ex *executor) unwindFrom(f int, value Value) {
+func (ex *executor) unwindFrom(f int, value Value) error {
 	st := &ex.st
 	base := st.base
 	for g := st.nf - 1; g > f; g-- {
 		base -= int(ex.pframes[g] >> 32 & 0xffffff)
 	}
 	cl := (*Closure)(ex.stack[base-1].p)
-	ex.unwindTo(f, base, ex.frameFuncSlot(f, base, cl)-1, value)
+	return ex.unwindTo(f, base, ex.frameFuncSlot(f, base, cl)-1, value)
 }
 
 // luaError is the built-in error(message [, level]).

@@ -943,8 +943,7 @@ func (ex *executor) frameReturned(fn, n int) (done bool, err error) {
 		if n > 0 {
 			r = ex.stack[fn]
 		}
-		ex.unwindFrom(handlerFor, r)
-		return false, nil
+		return false, ex.unwindFrom(handlerFor, r)
 	case fr&frCont != 0:
 		return false, ex.finishOp(fn, n)
 	case fr&frCatch != 0: // a protected call returned: true, then its results

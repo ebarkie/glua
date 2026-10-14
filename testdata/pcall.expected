@@ -13,3 +13,5 @@ runtime errors inside pcall have positions	str:72756e74696d65206572726f727320696
 stack overflow is catchable	false | str:737461636b206f766572666c6f7720697320636174636861626c653a313a20737461636b206f766572666c6f77
 xpcall handler sees the error object	false | str:646f6e65 | str:766961206d657461
 uncaught error from a nested function	runtime error: uncaught error from a nested function:1: uncaught here
+closers run with the error, newest first	str:626f6f6d | str:623a626f6f6d20613a626f6f6d20 | str:62206661696c6564 | str:623a626f6f6d20613a62206661696c656420 | str:61206661696c6564 | str:613a6e696c20 | str:683a626f6f6d | str:613a683a626f6f6d20 | str:696e206c6f6f70 | str:69743a696e206c6f6f7020
+closers when an error leaves the chunk	runtime error: x replaced original
