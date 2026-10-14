@@ -1047,7 +1047,7 @@ func (fs *fstate) ref(ref syntax.Ref, name string) expdesc {
 	switch ref.Kind {
 	case syntax.RefLocal:
 		if v, ok := fs.consts[ref.Var]; ok {
-			return expdesc{k: eK, val: v}
+			return constExp(v)
 		}
 		if ref.Var.Cell() {
 			return expdesc{k: eCell, info: fs.regOf[ref.Var]}
@@ -1055,7 +1055,7 @@ func (fs *fstate) ref(ref syntax.Ref, name string) expdesc {
 		return expdesc{k: eLocal, info: fs.regOf[ref.Var]}
 	case syntax.RefUpval:
 		if v, ok := fs.constOf(ref.Var); ok {
-			return expdesc{k: eK, val: v}
+			return constExp(v)
 		}
 		if ref.Var.Cell() {
 			return expdesc{k: eUpCell, info: ref.Upval.Index}
@@ -1072,6 +1072,21 @@ func (fs *fstate) ref(ref syntax.Ref, name string) expdesc {
 	key := expdesc{k: eK, val: String(name)}
 	fs.indexed(&env, &key)
 	return env
+}
+
+// constExp is the expression of a compile-time constant's value, as C Lua's const2exp: nil
+// and the booleans have kinds of their own, which conditions rely on.
+func constExp(v Value) expdesc {
+	switch {
+	case v.IsNil():
+		return expdesc{k: eNil}
+	case v.p == tBool():
+		if v.n != 0 {
+			return expdesc{k: eTrue}
+		}
+		return expdesc{k: eFalse}
+	}
+	return expdesc{k: eK, val: v}
 }
 
 // constOf finds a compile-time constant local of an enclosing function.

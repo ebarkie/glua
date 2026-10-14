@@ -349,10 +349,13 @@ func (p *parser) exprStat(line int) Stmt {
 			if !p.test(Comma) {
 				break
 			}
+			p.enter() // C Lua recurses once per target, values included
 			targets = append(targets, p.suffixedExpr())
 		}
 		p.checkNext(Assign)
-		return &AssignStmt{Line: line, Targets: targets, Values: p.exprList(), TargetLines: lines}
+		s := &AssignStmt{Line: line, Targets: targets, Values: p.exprList(), TargetLines: lines}
+		p.level -= len(targets) - 1
+		return s
 	}
 	switch e.(type) {
 	case *CallExpr, *MethodCallExpr:

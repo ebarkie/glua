@@ -50,3 +50,4 @@ many arguments and results	11 | 20 | 20
 deep recursion without tail calls	5000
 methods with varargs	106 | 100
 index with an assigned _ENV and a temporary key	str:6b
+constant false and nil in conditions	str:6e6f74462c54 | false | 2 | nil | true | false

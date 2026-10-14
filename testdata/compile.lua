@@ -303,3 +303,14 @@ local g = function(m) m[f[1]] = _G[f[1]] or f[1] end
 local m = {}
 g(m)
 return m.k
+--== constant false and nil in conditions
+local F <const> = false
+local N <const> = nil
+local T <const> = true
+local r = {}
+if F then r[#r + 1] = "F" end
+if N then r[#r + 1] = "N" end
+if not F then r[#r + 1] = "notF" end
+if T then r[#r + 1] = "T" end
+if not T then r[#r + 1] = "notT" end
+return table.concat(r, ","), (F and 1), (N or 2), (F or N), not N, (T and F)
