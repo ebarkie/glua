@@ -92,16 +92,9 @@ func bindType(rt reflect.Type) uint64 {
 		default:
 			continue
 		}
-		name, rw := snakeCase(sf.Name), false
-		if tag, ok := sf.Tag.Lookup("lua"); ok {
-			n, opt, _ := strings.Cut(tag, ",")
-			if n == "-" {
-				continue
-			}
-			if n != "" {
-				name = n
-			}
-			rw = opt == "rw"
+		name, rw, skip := fieldName(sf)
+		if skip {
+			continue
 		}
 		h := unique.Make(name)
 		ti.handles = append(ti.handles, h)
@@ -135,4 +128,21 @@ func snakeCase(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// fieldName returns the Lua name of a struct field: snake_case, or the name its lua tag
+// gives. rw reports a writable field, and skip one tagged "-".
+func fieldName(sf reflect.StructField) (name string, rw, skip bool) {
+	name = snakeCase(sf.Name)
+	if tag, ok := sf.Tag.Lookup("lua"); ok {
+		n, opt, _ := strings.Cut(tag, ",")
+		if n == "-" {
+			return "", false, true
+		}
+		if n != "" {
+			name = n
+		}
+		rw = opt == "rw"
+	}
+	return name, rw, false
 }

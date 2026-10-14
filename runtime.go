@@ -121,6 +121,7 @@ type options struct {
 	recover  bool
 	hardened bool
 	checked  *bool // tests choose the loop
+	converts []convertReg
 }
 
 type namedValue struct {
@@ -238,6 +239,11 @@ func New(opts ...Option) (*Runtime, error) {
 	}
 	if bad := rt.libs & (LibOS | LibIO); bad != 0 {
 		return nil, fmt.Errorf("glua: %s is not available yet", bad)
+	}
+	for _, c := range o.converts {
+		if err := c.register(); err != nil {
+			return nil, err
+		}
 	}
 	var err error
 	if rt.run, rt.init, err = resolveLimits(o.limits, o.hardened); err != nil {

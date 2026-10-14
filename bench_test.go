@@ -79,10 +79,12 @@ func BenchmarkSourceFastFieldRead(b *testing.B) { benchSource(b, srcFieldRead, f
 
 // privateFunc1 is a typed function on an executor of its own, as a private VM has.
 func privateFunc1[A, R any](ex *executor, cl *Closure) func(context.Context, A) (R, error) {
-	enc, _ := encoderFor[A]()
-	dec := decoderFor[R]()
+	enc, _, _ := encoderFor[A]()
+	dec, _ := decoderFor[R]()
 	return func(ctx context.Context, a A) (r R, err error) {
-		ex.stack[1] = enc(a)
+		if ex.stack[1], err = enc(a); err != nil {
+			return r, err
+		}
 		if err = ex.call(ctx, cl, 0, 1); err == nil {
 			r, err = dec(ex.stack[0])
 		}
