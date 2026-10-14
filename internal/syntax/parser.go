@@ -37,7 +37,7 @@ func parse(source, src string, skipComment bool) (fn *FunctionExpr, err error) {
 	p.funcs = append(p.funcs, fn)
 	fn.Body = p.block()
 	p.check(EOF)
-	fn.EndLine = p.tok.EndLine
+	fn.EndLine, fn.CloseLine = p.tok.EndLine, p.tok.EndLine
 	return fn, nil
 }
 
@@ -211,7 +211,7 @@ func (p *parser) statement() Stmt {
 		p.next()
 		name := p.name()
 		p.checkNext(DColon)
-		return &LabelStmt{Line: line, Name: name}
+		return &LabelStmt{Line: line, Name: name, AfterLine: p.tok.EndLine}
 	case Return:
 		p.next()
 		var vals []Expr
@@ -339,17 +339,19 @@ func (p *parser) exprStat(line int) Stmt {
 	e := p.suffixedExpr()
 	if p.tok.Kind == Assign || p.tok.Kind == Comma {
 		targets := []Expr{e}
+		var lines []int
 		for {
 			if !assignable(targets[len(targets)-1]) {
 				p.syntaxError("syntax error")
 			}
+			lines = append(lines, p.tok.EndLine)
 			if !p.test(Comma) {
 				break
 			}
 			targets = append(targets, p.suffixedExpr())
 		}
 		p.checkNext(Assign)
-		return &AssignStmt{Line: line, Targets: targets, Values: p.exprList()}
+		return &AssignStmt{Line: line, Targets: targets, Values: p.exprList(), TargetLines: lines}
 	}
 	switch e.(type) {
 	case *CallExpr, *MethodCallExpr:
@@ -397,6 +399,7 @@ func (p *parser) body(method bool, line int) *FunctionExpr {
 	p.funcs = p.funcs[:len(p.funcs)-1]
 	fn.EndLine = p.tok.Line
 	p.checkMatch(End, Function, line)
+	fn.CloseLine = p.errLine()
 	return fn
 }
 

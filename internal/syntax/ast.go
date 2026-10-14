@@ -62,6 +62,7 @@ type (
 
 	FunctionExpr struct {
 		Line, EndLine int
+		CloseLine     int      // line of the token after the closing 'end', where C Lua reports pending gotos
 		Params        []string // a method's "self" comes first
 		IsVararg      bool
 		Body          *Block
@@ -100,10 +101,13 @@ type Field struct {
 }
 
 type (
-	// AssignStmt is Targets = Values. Each target is a NameExpr or IndexExpr.
+	// AssignStmt is Targets = Values. Each target is a NameExpr or IndexExpr. TargetLines
+	// has, per target, the line of the ',' or '=' after it, where C Lua reports an
+	// assignment to a const variable.
 	AssignStmt struct {
 		Line            int
 		Targets, Values []Expr
+		TargetLines     []int
 	}
 
 	// CallStmt is a call used as a statement.
@@ -186,9 +190,12 @@ type (
 		Label string
 	}
 
+	// LabelStmt is ::Name::. AfterLine is the line of the token after it, where C Lua
+	// reports a duplicate label or a goto that jumps into a local's scope.
 	LabelStmt struct {
-		Line int
-		Name string
+		Line      int
+		Name      string
+		AfterLine int
 	}
 )
 

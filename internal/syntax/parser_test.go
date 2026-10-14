@@ -264,6 +264,9 @@ func FuzzParser(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, src string) {
-		Parse("t", src) // must not panic or hang
+		fn, err := Parse("t", src) // must not panic or hang
+		if err == nil {
+			Resolve("t", fn)
+		}
 	})
 }
