@@ -245,3 +245,9 @@ local s, t = 0, 0
 for i = "1", "3" do s = s + i end
 for i = 1, "3" do t = t + i end
 return s, t
+--== string coercions in arithmetic
+return "0x10" + 0, "1e2" + 0, " 0x1p4 " * 1, "10" // "3", "7" % "4", "2" ^ "10", "10" / "4", - " 3 "
+--== number formatting in concatenation
+return 1e100 .. "", 2^63 .. "", -0.0 .. "", 1/0 .. "", 3 .. "", 3.0 .. "", 123456789012 .. "", 0.1 + 0.2 .. ""
+--== string comparison
+return "a\0b" < "a\0c", "" < "a", "abc" == "ab" .. "c", "Z" < "a", "10" < "9", "\xff" > "a"

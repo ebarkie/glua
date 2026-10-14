@@ -40,3 +40,6 @@ nested functions and varargs in closures	3
 string escapes and long strings	str:610962 | str:4142 | str:6c696e65 | str:4869
 float formatting through tostring	1e+15 | 1e+16 | 9.2233720368548e+18 | -0.0 | inf | -inf | 3.0 | 0.1
 for loops over numeric strings	6.0 | 6
+string coercions in arithmetic	16 | 100.0 | 16.0 | 3 | 3 | 1024.0 | 2.5 | -3
+number formatting in concatenation	str:31652b313030 | str:392e32323333373230333638353438652b3138 | str:2d302e30 | str:696e66 | str:33 | str:332e30 | str:313233343536373839303132 | str:302e33
+string comparison	true | true | true | true | true | true

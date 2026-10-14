@@ -45,3 +45,41 @@ func strToNumber(s string) (Value, bool) {
 	}
 	return Float(f), true
 }
+
+// strToIntBase converts s to an integer in base 2..36, as C Lua's tonumber(s, base) does:
+// optional surrounding whitespace and a sign, digits and letters of either case, no fraction.
+// The value wraps around on overflow.
+func strToIntBase(s string, base int) (int64, bool) {
+	s = strings.Trim(s, " \f\n\r\t\v")
+	neg := false
+	if s != "" && (s[0] == '-' || s[0] == '+') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	if s == "" {
+		return 0, false
+	}
+	var n uint64
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		var d int
+		switch {
+		case c >= '0' && c <= '9':
+			d = int(c - '0')
+		case c >= 'a' && c <= 'z':
+			d = int(c-'a') + 10
+		case c >= 'A' && c <= 'Z':
+			d = int(c-'A') + 10
+		default:
+			return 0, false
+		}
+		if d >= base {
+			return 0, false
+		}
+		n = n*uint64(base) + uint64(d)
+	}
+	if neg {
+		n = -n
+	}
+	return int64(n), true
+}
