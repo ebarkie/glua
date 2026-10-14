@@ -206,6 +206,7 @@ type CallStats struct {
 // New makes a Runtime. It reports bad options: a value that cannot be converted, a duplicate
 // name, a syntax error in a source module.
 func New(opts ...Option) (*Runtime, error) {
+	used.Store(true)
 	var o options
 	for _, opt := range opts {
 		opt.apply(&o)
