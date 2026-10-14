@@ -606,7 +606,8 @@ func (ex *executor) finishOp(fn, n int) error {
 		*ex.reg(decA(i) + total - 2) = r
 		return ex.concatRange(decA(i), total-1)
 	case opClose:
-		st.pc-- // close the next variable
+		ex.top = int(ex.cont[st.nf]) // as it was before the closer ran
+		st.pc--                      // close the next variable
 		return nil
 	default:
 		return ex.errorf("cannot resume %s", opName(op))
@@ -1031,7 +1032,12 @@ func (ex *executor) markTBC(r int) error {
 		return nil
 	}
 	if ex.metamethod(v, "__close").IsNil() {
-		return ex.errorf("variable got a non-closable value")
+		p, reg := ex.st.cl.p, r-ex.st.base
+		name := p.localName(reg, ex.st.pc)
+		if name == "" {
+			name = "?"
+		}
+		return ex.errorf("variable '%s' got a non-closable value", name)
 	}
 	ex.tbc = append(ex.tbc, r)
 	return nil
@@ -1049,19 +1055,16 @@ func (ex *executor) closeTo(level int) error {
 		if err != nil {
 			return err
 		}
-		if h.isObj(kindLuaFn) {
-			return ex.callMeta("__close", h, args...)
+		if !h.isObj(kindLuaFn) {
+			// a Go closer runs from the trampoline, so that it can yield like a Lua one
+			args = append([]Value{h}, args...)
+			h = luaFnValue(trampoline)
 		}
-		fn := max(ex.st.base+int(ex.st.cl.p.maxstack), ex.top)
-		if err := ex.ensure(fn + 1 + len(args) + stackSlack); err != nil {
-			return err
+		for len(ex.cont) <= ex.st.nf {
+			ex.cont = append(ex.cont, 0)
 		}
-		ex.stack[fn] = h
-		copy(ex.stack[fn+1:], args)
-		ex.st.hi = max(ex.st.hi, fn+1+len(args))
-		if _, err := ex.callGoRaw((*goFunc)(h.p), fn, len(args)); err != nil {
-			return err
-		}
+		ex.cont[ex.st.nf] = int32(ex.top) // the end of a RETURN's open results, for after the call
+		return ex.callMeta("__close", h, args...)
 	}
 	return nil
 }

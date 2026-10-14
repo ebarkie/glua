@@ -309,6 +309,16 @@ func coWrap(c *Call) error {
 		}
 		if !ok {
 			v := vals[0]
+			if co.status == coDead {
+				// as C Lua's auxwrap: close the coroutine's variables, whose error wins
+				errv, err := c.ex.closeCoroutine(co)
+				if err != nil {
+					return err
+				}
+				if errv != nil {
+					v = *errv
+				}
+			}
 			if v.isString() {
 				// as C Lua's auxwrap: add the position of the caller
 				if pos := c.ex.whereLevel(c, 1); pos != "" {
@@ -333,7 +343,19 @@ func coClose(c *Call) error {
 	case coNormal:
 		return fmt.Errorf("cannot close a normal coroutine")
 	}
-	ex := c.ex
+	errv, err := c.ex.closeCoroutine(co)
+	if err != nil {
+		return err
+	}
+	if errv != nil {
+		return c.ReturnValues(Bool(false), *errv)
+	}
+	return c.ReturnValues(Bool(true))
+}
+
+// closeCoroutine kills a suspended or dead coroutine: it closes the variables the coroutine
+// left open, and returns the error the coroutine died with, or the one its closers raised.
+func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 	var errv *Value
 	if co.errVal != nil {
 		v := co.errVal.Value
@@ -370,7 +392,7 @@ func coClose(c *Call) error {
 		co.threadState = ex.saveThread()
 		ex.loadThread(saved)
 		if cerr != nil {
-			return cerr
+			return nil, cerr
 		}
 		if !same(&v, &value) {
 			errv = &v
@@ -379,10 +401,7 @@ func coClose(c *Call) error {
 	co.status = coDead
 	co.errVal = nil
 	co.stack, co.pframes = nil, nil
-	if errv != nil {
-		return c.ReturnValues(Bool(false), *errv)
-	}
-	return c.ReturnValues(Bool(true))
+	return errv, nil
 }
 
 // coroutineLib returns the coroutine library table.

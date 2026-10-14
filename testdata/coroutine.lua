@@ -126,3 +126,29 @@ local r1, r2, v = f1(nil)
 local g = coroutine.wrap(function() return pcall(pcall, coroutine.yield, 5) end)
 local y = g()
 return r1, r2, v[1], y, g(6)
+--== closers that yield on return
+local function func2close(f) return setmetatable({}, {__close = f}) end
+local function foo2 ()
+  local x <close> = func2close(coroutine.yield)
+  local extra <close> = func2close(coroutine.yield)
+  return table.unpack({1, 2, 3}, 1, 5)
+end
+local co = coroutine.wrap(foo2)
+local a = select("#", co())
+local b = select("#", co())
+local r = table.pack(co())
+return a, b, r.n, r[1], r[3], r[5]
+--== an error in a wrapped coroutine closes its variables
+local x, y = false, false
+local co = coroutine.wrap(function ()
+  local xv <close> = setmetatable({}, {__close = function () x = true end})
+  local yv <close> = setmetatable({}, {__close = function (_, e) y = e; error("closer") end})
+  coroutine.yield(1)
+  error("body")
+end)
+co()
+local ok, e = pcall(co)
+return ok, e, x, y
+--== a variable that gets a non-closable value
+local function g() local a, b <close> = 1, {} end
+return pcall(g)
