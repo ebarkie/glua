@@ -136,6 +136,9 @@ func (t *Table) freeze() {
 			t.flags |= bit
 		}
 	}
+	if h := t.Get(String("__index")); h.isObj(kindTable) {
+		t.index = (*Table)(h.p)
+	}
 	t.flags |= tabFrozen
 }
 

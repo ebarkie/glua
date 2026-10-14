@@ -103,10 +103,16 @@ func (ex *executor) slowOp() error {
 	case opGetIndex:
 		return ex.index(op, *ex.reg(b), Int(int64(c)), a)
 	case opGetField:
+		if ex.constField(*ex.reg(b), c, a) {
+			return nil
+		}
 		return ex.index(op, *ex.reg(b), p.k[c], a)
 	case opSelf:
 		obj := *ex.reg(b)
 		*ex.reg(a + 1) = obj
+		if ex.constField(obj, c, a) {
+			return nil
+		}
 		return ex.index(op, obj, p.k[c], a)
 	case opSetTable:
 		return ex.newindex(op, *ex.reg(a), *ex.reg(b), *ex.reg(c))
@@ -451,8 +457,8 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 		case obj.isObj(kindTable):
 			t := (*Table)(obj.p)
 			v, slot := t.getSlot(key)
-			if slot >= 0 && hops == 0 && (op == opGetField || op == opGetGlobal || op == opSelf) {
-				learn(&st.cl.p.hints[ex.aux()], slot)
+			if slot >= 0 && hops <= 1 && (op == opGetField || op == opGetGlobal || op == opSelf) {
+				learn(&st.cl.p.hints[ex.aux()], slot) // in the object, or one __index hop away
 			}
 			if !v.IsNil() || t.meta == nil {
 				*ex.reg(dst) = v
@@ -464,6 +470,9 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				*ex.reg(dst) = Value{}
 				ex.skipAux(op)
 				return nil
+			}
+			if hops == 0 && h.isObj(kindTable) && t.meta.flags&tabFrozen == 0 {
+				t.meta.index = (*Table)(h.p) // for the hot loop's inline hop
 			}
 			if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
 				return ex.callMeta("__index", h, obj, key)
@@ -1323,4 +1332,36 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 	}
 	ex.st.hi = max(ex.st.hi, base+4+c)
 	return true, ex.tick() // a call ticks
+}
+
+// constField does R[dst] = obj[K[kc]] for GETFIELD and SELF, when obj is a table and the
+// key is in it or one cached __index hop away, with the key's compile-time hash. It learns
+// the site's hint and reports whether it was done; the general index does the rest.
+func (ex *executor) constField(obj Value, kc, dst int) bool {
+	if !obj.isObj(kindTable) {
+		return false
+	}
+	p := ex.st.cl.p
+	key, h := p.k[kc], p.khash[kc]
+	t := (*Table)(obj.p)
+	for hops := 0; hops < 2; hops++ {
+		if idx := t.findNode(&key, h); idx >= 0 && !t.nodes[idx].v.IsNil() {
+			learn(&p.hints[ex.aux()], idx)
+			*ex.reg(dst) = t.nodes[idx].v
+			ex.st.pc++ // the aux word
+			return true
+		}
+		if t.meta == nil {
+			if hops > 0 {
+				return false
+			}
+			*ex.reg(dst) = Value{}
+			ex.st.pc++
+			return true
+		}
+		if t = t.meta.index; t == nil {
+			return false // not cached yet, or not a table: the general index
+		}
+	}
+	return false
 }

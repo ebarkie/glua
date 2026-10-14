@@ -22,6 +22,10 @@ type Table struct {
 	nodes []node // length is zero or a power of two; linear probing from hash & mask
 	used  int    // nodes holding a key, deleted ones included
 	meta  *Table
+	// index caches this table's __index when it is a table and this table serves as a
+	// metatable, for the hot loop's inline hop. Writing a key that starts with "__" clears
+	// it; the driver fills it for a mutable metatable, and Freeze for a frozen one.
+	index *Table
 	flags uint8
 }
 
@@ -47,10 +51,29 @@ var cachedEvents = map[string]uint8{
 	"__len": tabNoLen, "__call": tabNoCall, "__close": tabNoClose,
 }
 
+// eventBit is cachedEvents[event], without a map lookup.
+func eventBit(event string) uint8 {
+	switch event {
+	case "__index":
+		return tabNoIndex
+	case "__newindex":
+		return tabNoNewIndex
+	case "__eq":
+		return tabNoEq
+	case "__len":
+		return tabNoLen
+	case "__call":
+		return tabNoCall
+	case "__close":
+		return tabNoClose
+	}
+	return 0
+}
+
 // metaGet returns the metamethod event of the metatable mt, using and filling the cache of
 // absent metamethods.
 func (mt *Table) metaGet(event string) Value {
-	bit := cachedEvents[event]
+	bit := eventBit(event)
 	if mt.flags&bit != 0 {
 		return Value{}
 	}
@@ -153,8 +176,9 @@ func (t *Table) Set(key, val Value) {
 
 // set assigns t[key] = val for a normalised key.
 func (t *Table) set(key, val Value) {
-	if t.flags&tabAbsent != 0 && key.isString() && strings.HasPrefix(key.str(), "__") {
+	if (t.flags&tabAbsent != 0 || t.index != nil) && key.isString() && strings.HasPrefix(key.str(), "__") {
 		t.flags &^= tabAbsent // a metamethod may have appeared
+		t.index = nil
 	}
 	if key.p == tInt() {
 		i := int64(key.n) - 1
