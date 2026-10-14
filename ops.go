@@ -57,9 +57,16 @@ func (ex *executor) slowOp() error {
 	case opGetUpval:
 		*ex.reg(a) = st.cl.up[b]
 	case opGetUpCell:
-		*ex.reg(a) = st.cl.up[b].cell().v
+		cl, err := ex.asCell(st.cl.up[b])
+		if err != nil {
+			return err
+		}
+		*ex.reg(a) = cl.v
 	case opSetUpCell:
-		cl := st.cl.up[b].cell()
+		cl, err := ex.asCell(st.cl.up[b])
+		if err != nil {
+			return err
+		}
 		if cl.frozen {
 			return ex.errorf("attempt to assign to frozen upvalue")
 		}
@@ -67,9 +74,16 @@ func (ex *executor) slowOp() error {
 	case opNewCell:
 		*ex.reg(a) = cellValue(&cell{v: *ex.reg(a)})
 	case opGetCell:
-		*ex.reg(a) = ex.reg(b).cell().v
+		cl, err := ex.asCell(*ex.reg(b))
+		if err != nil {
+			return err
+		}
+		*ex.reg(a) = cl.v
 	case opSetCell:
-		cl := ex.reg(a).cell()
+		cl, err := ex.asCell(*ex.reg(a))
+		if err != nil {
+			return err
+		}
 		if cl.frozen {
 			return ex.errorf("attempt to assign to frozen upvalue")
 		}
@@ -98,15 +112,22 @@ func (ex *executor) slowOp() error {
 	case opSetField:
 		return ex.newindex(op, *ex.reg(a), p.k[b], *ex.reg(c))
 	case opNewTable:
-		nhash := 0
+		// the sizes are hints: clamp them, so that no instruction can ask for a huge allocation
+		nhash, narr := 0, min(int(ex.aux()), maxSizeHint)
 		if b > 0 {
-			nhash = 1 << (b - 1)
+			nhash = 1 << min(b-1, 16)
 		}
-		*ex.reg(a) = tableValue(NewTable(int(ex.aux()), nhash))
+		*ex.reg(a) = tableValue(NewTable(narr, nhash))
 	case opSetList:
 		n := b
 		if n == 0 {
-			n = ex.top - (st.base + a) - 1
+			var err error
+			if n, err = ex.openCount(st.base + a + 1); err != nil {
+				return err
+			}
+		}
+		if !ex.reg(a).isObj(kindTable) {
+			return ex.errorf("internal error: SETLIST on a %s value", typeName(*ex.reg(a)))
 		}
 		t := (*Table)(ex.reg(a).p)
 		if t.Frozen() {
@@ -232,24 +253,26 @@ func (ex *executor) slowOp() error {
 			return ex.tick()
 		}
 
-	case opCall:
+	case opCall, opTailCall:
 		fn := st.base + a
 		nargs := b - 1
 		if b == 0 {
-			nargs = ex.top - fn - 1
+			var err error
+			if nargs, err = ex.openCount(fn + 1); err != nil {
+				return err
+			}
+		}
+		if op == opTailCall {
+			return ex.tailCall(fn, nargs)
 		}
 		return ex.callValue(fn, nargs)
-	case opTailCall:
-		fn := st.base + a
-		nargs := b - 1
-		if b == 0 {
-			nargs = ex.top - fn - 1
-		}
-		return ex.tailCall(fn, nargs)
 	case opReturn:
 		n := b - 1
 		if b == 0 {
-			n = ex.top - (st.base + a)
+			var err error
+			if n, err = ex.openCount(st.base + a); err != nil {
+				return err
+			}
 		}
 		return ex.doReturn(st.base+a, n)
 	case opReturn0:
@@ -281,6 +304,28 @@ func (ex *executor) slowOp() error {
 	}
 	ex.skipAux(op)
 	return nil
+}
+
+// openCount returns the length of the open list that starts at stack index from and ends
+// at top. The instruction before must have set top; the compiler guarantees it, and this
+// check keeps mutated code from reading outside the stack.
+func (ex *executor) openCount(from int) (int, error) {
+	if ex.top < from || ex.top > len(ex.stack) {
+		return 0, ex.errorf("internal error: no open list for %s", opName(uint8(ex.instr(ex.st.pc-1))))
+	}
+	return ex.top - from, nil
+}
+
+// maxSizeHint caps the array size a NEWTABLE preallocates; a larger table grows as it fills.
+const maxSizeHint = 1 << 16
+
+// asCell checks that v is a cell. The compiler guarantees it, but the VM trusts only what
+// the verifier checks, and the verifier cannot follow what a register holds.
+func (ex *executor) asCell(v Value) (*cell, error) {
+	if !v.isObj(kindCell) {
+		return nil, ex.errorf("internal error: %s value where a cell belongs", typeName(v))
+	}
+	return v.cell(), nil
 }
 
 func envValue(cl *Closure) Value {

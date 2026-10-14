@@ -130,6 +130,9 @@ func testGlobals() *Table {
 	g := NewTable(0, 4)
 	g.Set(String("setmetatable"), goFnValue(&goFunc{name: "setmetatable", f: func(c *Call) error {
 		t := c.Value(0)
+		if !t.isObj(kindTable) || !(c.Value(1).IsNil() || c.Value(1).isObj(kindTable)) {
+			return c.Errorf("bad argument to 'setmetatable'")
+		}
 		if mt := c.Value(1); mt.IsNil() {
 			(*Table)(t.p).meta = nil
 		} else {

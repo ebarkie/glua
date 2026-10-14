@@ -34,6 +34,7 @@ func TestVerifyRejects(t *testing.T) {
 		{"call arguments", mk(0, 2, nil, iABC(opCall, 0, 3, 1)), "register 2 not below"},
 		{"call results", mk(0, 2, nil, iABC(opCall, 0, 1, 4)), "register 2 not below"},
 		{"concat of one", mk(0, 2, nil, iABC(opConcat, 0, 1, 0)), "fewer than two operands"},
+		{"backward conditional jump", mk(0, 2, nil, iABC(opReturn0, 0, 0, 0), iABC(opTestJmp, 0, 0, 1), uint32(0xfffffffd)), "conditional jump backwards"},
 		{"bad polarity", mk(0, 2, nil, iABC(opLtJmp, 0, 1, 2), 0, iABC(opReturn0, 0, 0, 0)), "polarity 2"},
 		{"missing aux", mk(0, 2, str, iABC(opGetField, 0, 1, 0)), "missing aux word"},
 		{"vararg prep mismatch", mk(1, 2, nil, iABC(opVarargPrep, 0, 0, 0)), "0 fixed parameters, the prototype has 1"},

@@ -1,6 +1,9 @@
 package glua
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // GoFunc is the one native signature for host functions. Everything else adapts to it.
 type GoFunc func(c *Call) error
@@ -38,6 +41,11 @@ func (c *Call) Value(i int) Value {
 func (c *Call) ReturnValues(vs ...Value) error {
 	c.res = append(c.res[:0], vs...)
 	return nil
+}
+
+// Errorf returns an error with a formatted message, for a host function to return.
+func (c *Call) Errorf(format string, args ...any) error {
+	return fmt.Errorf(format, args...)
 }
 
 // return1 sets a single result without the variadic slice.
@@ -82,7 +90,10 @@ func (ex *executor) hostCall() error {
 	fn := ex.st.base + decA(i)
 	nargs := decB(i) - 1
 	if decB(i) == 0 {
-		nargs = ex.top - fn - 1
+		var err error
+		if nargs, err = ex.openCount(fn + 1); err != nil {
+			return err
+		}
 	}
 	return ex.callGo((*goFunc)(ex.stack[fn].p), fn, nargs)
 }

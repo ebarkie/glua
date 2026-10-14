@@ -160,6 +160,11 @@ func (v *verifier) instr(pc int) error {
 		if c > 1 {
 			return fail("polarity %d is not 0 or 1", c)
 		}
+		// conditional jumps do not tick, so they may only go forward: every loop must go
+		// through a JMP, JMPX, FORLOOP or TFORLOOP, which charge the step budget
+		if int32(aux) < 0 {
+			return fail("conditional jump backwards")
+		}
 	case opForPrep, opForLoop, opTForPrep, opTForLoop:
 		if op == opTForLoop {
 			return reg(a + 4)
