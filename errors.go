@@ -126,7 +126,7 @@ func (ex *executor) where() string {
 		return ""
 	}
 	p := ex.st.cl.p
-	return fmt.Sprintf("%s:%d", p.source, p.lineAt(ex.st.pc-1))
+	return fmt.Sprintf("%s:%d", p.source, p.lineAt(max(ex.st.pc-1, 0))) // a call ticks before its first instruction
 }
 
 // errorf raises an ordinary, catchable runtime error at the current position. As in C Lua,

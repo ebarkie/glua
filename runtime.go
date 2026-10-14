@@ -498,9 +498,9 @@ func isName(s string) bool {
 func hostValue(name string, v any) (Value, error) {
 	switch x := v.(type) {
 	case GoFunc:
-		return goFnValue(&goFunc{name: name, f: x}), nil
+		return goFnValue(&goFunc{name: name, f: x, host: true}), nil
 	case func(*Call) error:
-		return goFnValue(&goFunc{name: name, f: x}), nil
+		return goFnValue(&goFunc{name: name, f: x, host: true}), nil
 	case Members:
 		t := NewTable(0, len(x))
 		keys := make([]string, 0, len(x))

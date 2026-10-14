@@ -530,7 +530,9 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 				}
 				return ex.errorf("table index is NaN")
 			}
-			t.set(k, val)
+			if err := ex.tableSet(t, k, val); err != nil {
+				return err
+			}
 			ex.skipAux(op)
 			return nil
 		case obj.isObj(kindUser):
@@ -790,7 +792,7 @@ func (ex *executor) concatRange(a, total int) error {
 				size += len(v.String())
 			}
 		}
-		if err := ex.charge(size); err != nil {
+		if err := ex.produce(size); err != nil {
 			return err
 		}
 		var sb strings.Builder

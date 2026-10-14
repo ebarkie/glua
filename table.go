@@ -355,3 +355,6 @@ func (t *Table) Frozen() bool { return t.flags&tabFrozen != 0 }
 
 // tableValue returns t as a Value.
 func tableValue(t *Table) Value { return Value{p: unsafe.Pointer(t), n: kindTable << 56} }
+
+// memSize is the bytes t's array and hash parts take.
+func (t *Table) memSize() int { return cap(t.arr)*16 + len(t.nodes)*32 }

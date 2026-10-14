@@ -54,13 +54,7 @@ func (c *Call) rawSet(t *Table, key, val Value) error {
 		}
 		return c.libErrorf("table index is NaN")
 	}
-	if !val.IsNil() && k.p == tInt() && int64(k.n) == int64(len(t.arr))+1 {
-		if err := c.ex.charge(16); err != nil {
-			return err
-		}
-	}
-	t.set(k, val)
-	return nil
+	return c.ex.tableSet(t, k, val)
 }
 
 // length is #v with __len, from library code, as luaL_len: the result must be an integer.
@@ -156,7 +150,7 @@ func tabConcat(c *Call) error {
 			break
 		}
 	}
-	if err := c.ex.charge(b.Len()); err != nil {
+	if err := c.ex.produce(b.Len()); err != nil {
 		return err
 	}
 	return c.ReturnValues(String(b.String()))

@@ -109,9 +109,10 @@ type executor struct {
 	warnOn     bool      // warn("@on") was called
 	rand       [4]uint64 // math.random's state, per entry
 	randSeeded bool
-	randSeed   *uint64 // the RandSeed option, if set
-	hostCalls  int     // Go functions running: a panic now is the host's, not the VM's
-	fatal      error   // the terminal error of this entry, which stands once raised
+	randSeed   *uint64   // the RandSeed option, if set
+	hostCalls  int       // Go functions running: a panic now is the host's, not the VM's
+	fatal      error     // the terminal error of this entry, which stands once raised
+	ectx       *entryCtx // the context host functions of this entry see, made on first use
 
 	running, poisoned bool
 }
@@ -160,6 +161,10 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	if ctx.Err() != nil {
 		return ctxError(ctx) // a cancelled context never runs script code
 	}
+	parent := ex.inherit(ctx)
+	if ex.maxHostDepth < 0 {
+		return ErrHostDepth
+	}
 	ex.running, ex.ctx, ex.types = true, ctx, ex.planSet()
 	q := min(tickQuantum, ex.maxSteps)
 	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q) // budgets are set here only: nested entries share them
@@ -189,6 +194,10 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	}()
 	err = ex.run(cl, fn, nargs)
 	completed = true
+	if parent != nil {
+		parent.usedSteps.Add(ex.maxSteps - ex.steps - int64(max(ex.st.ticks, 0)))
+		parent.usedAlloc.Add(max(ex.maxAlloc-ex.allocLeft, 0))
+	}
 	if le, ok := err.(*Error); ok && le.terminal {
 		ex.poisoned = true // a terminal error may leave closers half run: start the next entry afresh
 	}
@@ -238,7 +247,7 @@ func (ex *executor) reset() {
 	ex.ctx, ex.top, ex.depth = nil, 0, 0
 	ex.tbc = ex.tbc[:0]
 	clear(ex.goErrs)
-	ex.co, ex.nny, ex.fatal = nil, 0, nil
+	ex.co, ex.nny, ex.fatal, ex.ectx = nil, 0, nil, nil
 	ex.randSeeded = false
 }
 
@@ -301,6 +310,9 @@ func (ex *executor) moveStack(size int) {
 		ex.stack = s
 		return
 	}
+	if ex.running && size > len(ex.stack) {
+		ex.allocLeft -= int64(size-len(ex.stack)) * 16 // the stack is capped; an overdraft fails the next charge
+	}
 	s := make([]Value, size)
 	copy(s, ex.stack)
 	clear(ex.stack) // the old stack may stay reachable from a stale pointer; leave nothing in it
@@ -321,13 +333,58 @@ func (ex *executor) charge(n int) error {
 	return nil
 }
 
+// produce charges a library function for making n bytes: n to the allocation budget, and
+// one step per 64 bytes.
+func (ex *executor) produce(n int) error {
+	if err := ex.charge(n); err != nil {
+		return err
+	}
+	return ex.spend(n / 64)
+}
+
+// spend takes k steps at once, for library work in proportion to its size.
+func (ex *executor) spend(k int) error {
+	if k <= 0 {
+		return nil
+	}
+	ex.st.ticks -= k
+	if ex.st.ticks >= 0 {
+		return nil
+	}
+	need := int64(-ex.st.ticks)
+	if need > ex.steps {
+		ex.steps, ex.st.ticks = 0, -1
+		return ex.terminal(ErrSteps)
+	}
+	ex.steps -= need
+	ex.st.ticks = 0
+	if ex.ctx.Err() != nil {
+		return ex.terminal(ctxError(ex.ctx))
+	}
+	return nil
+}
+
+// tableSet does t[k] = v for Lua code, charging what the table grows by. A table already
+// half the size of the largest single allocation may not grow further.
+func (ex *executor) tableSet(t *Table, k, v Value) error {
+	before := t.memSize()
+	if before >= maxAlloc/2 && t.Get(k).IsNil() && !v.IsNil() {
+		return ex.terminal(ErrAlloc)
+	}
+	t.set(k, v)
+	if after := t.memSize(); after > before {
+		return ex.charge(after - before)
+	}
+	return nil
+}
+
 // refill runs when the tick counter expires: at most once per 1,024 back-edges and calls.
 // The tick that brought us here has already happened, so it is paid for out of the new quantum.
 //
 //go:noinline
 func (ex *executor) refill() error {
 	if ex.ctx.Err() != nil { // never Done(): it allocates a channel on a fresh context
-		return ctxError(ex.ctx)
+		return ex.terminal(ctxError(ex.ctx))
 	}
 	if ex.steps == 0 {
 		return ex.terminal(ErrSteps)
@@ -372,7 +429,11 @@ func (ex *executor) drive(nf0 int) error {
 			if len(ex.pframes) >= ex.frameLimit() {
 				err = ex.errorf("stack overflow")
 			} else {
-				ex.pframes = append(ex.pframes, make([]uint64, min(len(ex.pframes), ex.frameLimit()-len(ex.pframes)))...)
+				grow := min(len(ex.pframes), ex.frameLimit()-len(ex.pframes))
+				if err = ex.charge(grow * 8); err != nil {
+					break
+				}
+				ex.pframes = append(ex.pframes, make([]uint64, grow)...)
 				ex.st.pc--
 			}
 		case exTick:

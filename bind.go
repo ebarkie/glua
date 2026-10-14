@@ -764,7 +764,7 @@ func customize(gp *typeInfo, o *typeOptions) (*typeInfo, error) {
 			if !isName(m.name) {
 				return nil, bad("method name '%s' is not a Lua name", m.name)
 			}
-			ti.methods[m.name] = goFnValue(&goFunc{name: m.name, qualname: gp.rt.Name() + ":" + m.name, f: m.f})
+			ti.methods[m.name] = goFnValue(&goFunc{name: m.name, qualname: gp.rt.Name() + ":" + m.name, f: m.f, host: true})
 		}
 	}
 	if len(o.meta) > 0 {
@@ -774,7 +774,7 @@ func customize(gp *typeInfo, o *typeOptions) (*typeInfo, error) {
 			if !strings.HasPrefix(m.name, "__") {
 				return nil, bad("metamethod name '%s' does not start with __", m.name)
 			}
-			mt.Set(String(m.name), goFnValue(&goFunc{name: m.name, f: m.f}))
+			mt.Set(String(m.name), goFnValue(&goFunc{name: m.name, f: m.f, host: true}))
 		}
 		mt.freeze()
 		ti.meta = mt

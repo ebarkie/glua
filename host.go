@@ -3,6 +3,7 @@ package glua
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 )
 
 // GoFunc is the one native signature for host functions. Everything else adapts to it.
@@ -30,8 +31,66 @@ func (c *Call) reset() {
 	c.unwinding, c.argErr = false, nil
 }
 
-// Context returns the context of the outermost entry from Go.
-func (c *Call) Context() context.Context { return c.ex.ctx }
+// Context returns the context of the outermost entry from Go. It carries what is left of
+// the entry's budgets: a Script called with it from the host function shares them.
+func (c *Call) Context() context.Context {
+	ex := c.ex
+	e := ex.ectx
+	if e == nil {
+		e = &entryCtx{Context: ex.ctx}
+		ex.ectx = e
+	}
+	e.steps.Store(ex.steps + int64(max(ex.st.ticks, 0)))
+	e.alloc.Store(ex.allocLeft)
+	e.depth.Store(int64(ex.maxHostDepth - ex.depth))
+	return e
+}
+
+// entryCtx is the context host functions see: the entry's own, carrying what was left of its
+// budgets when Context was last called. Entries made with it take at most that, and report
+// what they used, which the entry pays when the host function returns. The fields are
+// atomic because a host function may hand the context to another goroutine.
+type entryCtx struct {
+	context.Context
+	steps, alloc, depth  atomic.Int64
+	usedSteps, usedAlloc atomic.Int64
+}
+
+type budgetKey struct{}
+
+func (e *entryCtx) Value(k any) any {
+	if k == (budgetKey{}) {
+		return e
+	}
+	return e.Context.Value(k)
+}
+
+// inherit limits an entry made with ctx to what its parent entry had left, if ctx came from
+// a host function's Call. It returns the parent's context, or nil.
+func (ex *executor) inherit(ctx context.Context) *entryCtx {
+	e, _ := ctx.Value(budgetKey{}).(*entryCtx)
+	if e == nil {
+		return nil
+	}
+	ex.maxSteps = min(ex.maxSteps, e.steps.Load())
+	ex.maxAlloc = min(ex.maxAlloc, e.alloc.Load())
+	ex.maxHostDepth = min(ex.maxHostDepth, int(e.depth.Load())-1)
+	return e
+}
+
+// payBorrowed charges the entry for what nested entries made with its Context used.
+func (ex *executor) payBorrowed() error {
+	e := ex.ectx
+	if s := e.usedSteps.Swap(0); s > 0 {
+		if err := ex.spend(int(min(s, 1<<62))); err != nil {
+			return err
+		}
+	}
+	if a := e.usedAlloc.Swap(0); a > 0 {
+		return ex.charge(int(min(a, maxAlloc)))
+	}
+	return nil
+}
 
 // Len returns the number of arguments.
 func (c *Call) Len() int { return c.nargs }
@@ -137,6 +196,9 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	ex.nny--
 	ex.depth--
 	st.cl, st.base, st.pc = cl, base, pc
+	if ex.ectx != nil && err == nil {
+		err = ex.payBorrowed()
+	}
 	if ex.fatal != nil && err != errYield {
 		err = ex.fatal // a terminal error stands, whatever the function did with it
 	}
@@ -149,6 +211,14 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 		return 0, ex.hostError(err)
 	}
 	n := len(c.res)
+	for _, v := range c.res { // what the host made for the script counts toward its budget
+		if g.host && (v.isString() || v.isObj(kindTable)) {
+			if err := ex.chargeResult(v); err != nil {
+				c.reset()
+				return 0, err
+			}
+		}
+	}
 	if err := ex.ensure(fn + n); err != nil {
 		return 0, err
 	}
@@ -169,4 +239,13 @@ func invokeGo(g *goFunc, c *Call) (err error) {
 		}
 	}()
 	return g.f(c)
+}
+
+// chargeResult charges a string or a table a host function returned. Library functions
+// charge for what they make themselves.
+func (ex *executor) chargeResult(v Value) error {
+	if v.isString() {
+		return ex.charge(int(v.n & lenMask))
+	}
+	return ex.charge(64 + (*Table)(v.p).memSize())
 }

@@ -140,7 +140,7 @@ func encodeReflect(rv reflect.Value, depth int) (Value, error) {
 		if rv.IsNil() {
 			return Value{}, nil
 		}
-		return goFnValue(&goFunc{name: "?", f: rv.Interface().(GoFunc)}), nil
+		return goFnValue(&goFunc{name: "?", f: rv.Interface().(GoFunc), host: true}), nil
 	case durationType:
 		return Float(time.Duration(rv.Int()).Seconds()), nil
 	case timeType:

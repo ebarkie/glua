@@ -91,7 +91,7 @@ func strMap(c *Call, fname string, lo, hi byte, delta int) error {
 	if err != nil {
 		return err
 	}
-	if err := c.ex.charge(len(s)); err != nil {
+	if err := c.ex.produce(len(s)); err != nil {
 		return err
 	}
 	b := []byte(s)
@@ -108,7 +108,7 @@ func strReverse(c *Call) error {
 	if err != nil {
 		return err
 	}
-	if err := c.ex.charge(len(s)); err != nil {
+	if err := c.ex.produce(len(s)); err != nil {
 		return err
 	}
 	b := make([]byte, len(s))
@@ -138,7 +138,7 @@ func strRep(c *Call) error {
 	if total > maxAlloc || total < 0 || n > maxAlloc {
 		return c.libErrorf("resulting string too large")
 	}
-	if err := c.ex.charge(int(total)); err != nil {
+	if err := c.ex.produce(int(total) + int(n)); err != nil { // the copies, and a step per 64 pieces
 		return err
 	}
 	var sb strings.Builder
@@ -148,11 +148,6 @@ func strRep(c *Call) error {
 			sb.WriteString(sep)
 		}
 		sb.WriteString(s)
-		if i&63 == 0 {
-			if err := c.ex.tick(); err != nil {
-				return err
-			}
-		}
 	}
 	return c.ReturnValues(String(sb.String()))
 }
@@ -363,7 +358,7 @@ done:
 		return c.ReturnValues(c.Value(0), Int(n)) // the original string, as C Lua returns it
 	}
 	b.WriteString(src[s:])
-	if err := c.ex.charge(b.Len()); err != nil {
+	if err := c.ex.produce(b.Len()); err != nil {
 		return err
 	}
 	return c.ReturnValues(String(b.String()), Int(n))
@@ -597,7 +592,7 @@ func strFormat(c *Call) error {
 			return c.libErrorf("resulting string too large")
 		}
 	}
-	if err := c.ex.charge(b.Len()); err != nil {
+	if err := c.ex.produce(b.Len()); err != nil {
 		return err
 	}
 	return c.ReturnValues(String(b.String()))

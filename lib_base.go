@@ -284,7 +284,9 @@ func baseRawSet(c *Call) error {
 		}
 		return c.libErrorf("table index is NaN")
 	}
-	t.set(k, c.Value(2))
+	if err := c.ex.tableSet(t, k, c.Value(2)); err != nil {
+		return err
+	}
 	return c.ReturnValues(c.Value(0))
 }
 
