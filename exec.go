@@ -437,7 +437,12 @@ func (ex *executor) drive(nf0 int) error {
 				ex.st.pc--
 			}
 		case exTick:
-			err = ex.refill()
+			// the tick comes after a back-edge's jump or a call's frame push: pc is the next
+			// instruction, which is where an error belongs, while positions read pc-1
+			ex.st.pc++
+			if err = ex.refill(); err == nil {
+				ex.st.pc--
+			}
 		default:
 			err = ex.errorf("bad opcode %d", uint8(ex.instr(ex.st.pc-1)))
 		}
