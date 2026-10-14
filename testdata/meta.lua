@@ -59,3 +59,27 @@ return a, b, c, d
 local seen
 local t = setmetatable({}, {__index = function(tt, k) seen = k; return k * 2 end})
 return t[21], seen
+--== metamethods that are not functions
+local callable = setmetatable({}, {__call = function(self, a, b) return "called" end})
+local t = setmetatable({}, {__add = "x", __lt = callable, __len = true, __concat = 1, __unm = callable})
+local r = {}
+r[#r + 1] = select(2, pcall(function() return t + 1 end))
+r[#r + 1] = t < t
+r[#r + 1] = select(2, pcall(function() return #t end))
+r[#r + 1] = select(2, pcall(function() return t .. "a" end))
+r[#r + 1] = -t
+local e = setmetatable({}, {__eq = {}})
+r[#r + 1] = select(2, pcall(function() return e == setmetatable({}, getmetatable(e)) end))
+local mt = {__close = function() end}
+r[#r + 1] = select(2, pcall(function() local x <close> = setmetatable({}, mt); mt.__close = 3 end))
+mt.__close = function() end
+r[#r + 1] = select(2, pcall(function() local x <close> = setmetatable({}, mt); mt.__close = nil end))
+mt.__close = function() end
+r[#r + 1] = select(2, pcall(function() local x <close> = setmetatable({}, mt); mt.__close = 4; error("e") end))
+local seen
+mt.__close = setmetatable({}, {__call = function(s, o, err) seen = err end})
+do local x <close> = setmetatable({}, mt) end
+r[#r + 1] = tostring(seen)
+local g = setmetatable({}, {__concat = setmetatable({}, {__call = gofirst})})
+r[#r + 1] = type(g .. "x")
+return table.unpack(r)

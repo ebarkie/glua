@@ -282,10 +282,14 @@ func (ex *executor) closeOnError(level int, value Value) (Value, error) {
 		ex.tbc = ex.tbc[:len(ex.tbc)-1]
 		v := ex.stack[r]
 		h := ex.metamethod(v, "__close")
-		if h.IsNil() {
-			continue
+		var err error
+		if !h.isObj(kindLuaFn) && !h.isObj(kindGoFn) && ex.metamethod(h, "__call").IsNil() {
+			// C Lua names neither the position nor the metamethod here
+			err = &Error{Value: String("attempt to call a " + typeName(h) + " value")}
+		} else {
+			_, err = ex.callSync(h, []Value{v, value})
 		}
-		if _, err := ex.callSync(h, []Value{v, value}); err != nil {
+		if err != nil {
 			le, ok := err.(*Error)
 			if !ok || le.terminal {
 				ex.dropTBC(level)

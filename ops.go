@@ -175,7 +175,7 @@ func (ex *executor) slowOp() error {
 			return nil
 		}
 		if h := ex.metamethod(x, "__unm"); !h.IsNil() {
-			return ex.callMeta(h, x, x)
+			return ex.callMeta("__unm", h, x, x)
 		}
 		if x.isString() {
 			return ex.errorf("attempt to unm a 'string' with a 'string'")
@@ -191,7 +191,7 @@ func (ex *executor) slowOp() error {
 			return ex.intError(b)
 		}
 		if h := ex.metamethod(x, "__bnot"); !h.IsNil() {
-			return ex.callMeta(h, x, x)
+			return ex.callMeta("__bnot", h, x, x)
 		}
 		return ex.typeError("perform bitwise operation on", x, b)
 	case opNot:
@@ -203,7 +203,7 @@ func (ex *executor) slowOp() error {
 			*ex.reg(a) = Int(int64(x.n & lenMask))
 		default:
 			if h := ex.metamethod(x, "__len"); !h.IsNil() {
-				return ex.callMeta(h, x, x)
+				return ex.callMeta("__len", h, x, x)
 			}
 			if x.isObj(kindTable) {
 				*ex.reg(a) = Int(int64((*Table)(x.p).Len()))
@@ -231,7 +231,7 @@ func (ex *executor) slowOp() error {
 		x, y := *ex.reg(a), *ex.reg(b)
 		if eq := rawEqual(x, y); !eq {
 			if h := ex.eqMeta(x, y); !h.IsNil() {
-				return ex.callMeta(h, x, y)
+				return ex.callMeta("__eq", h, x, y)
 			}
 		}
 		ex.jumpAux(rawEqual(x, y) == (c != 0))
@@ -260,7 +260,7 @@ func (ex *executor) slowOp() error {
 				h = ex.metamethod(y, event)
 			}
 			if !h.IsNil() {
-				return ex.callMeta(h, x, y)
+				return ex.callMeta(event, h, x, y)
 			}
 		}
 		var r bool
@@ -460,7 +460,7 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				return nil
 			}
 			if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
-				return ex.callMeta(h, obj, key)
+				return ex.callMeta("__index", h, obj, key)
 			}
 			obj = h
 		case obj.isString() && ex.strMeta != nil:
@@ -469,7 +469,7 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				return ex.typeError("index", obj, ex.objReg())
 			}
 			if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
-				return ex.callMeta(h, obj, key)
+				return ex.callMeta("__index", h, obj, key)
 			}
 			obj = h
 		case obj.isObj(kindUser):
@@ -506,7 +506,7 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 				if old := t.Get(key); old.IsNil() {
 					if h := t.meta.metaGet("__newindex"); !h.IsNil() {
 						if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
-							return ex.callMeta(h, obj, key, val)
+							return ex.callMeta("__newindex", h, obj, key, val)
 						}
 						obj = h
 						continue
@@ -536,10 +536,31 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 	return ex.errorf("'__newindex' chain too long; possibly a loop")
 }
 
-// callMeta calls a metamethod for the instruction at pc-1. A Lua handler runs in a
+// metaCallee resolves the metamethod h of event to a function to call, as luaD_call does: a
+// value that is not a function is called through its __call, with itself as the first argument.
+func (ex *executor) metaCallee(event string, h Value, args []Value) (Value, []Value, error) {
+	for range maxIndexHops {
+		if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
+			return h, args, nil
+		}
+		tm := ex.metamethod(h, "__call")
+		if tm.IsNil() {
+			return Value{}, nil, ex.errorf("attempt to call a %s value (metamethod '%s')", typeName(h), event[2:])
+		}
+		args = append([]Value{h}, args...)
+		h = tm
+	}
+	return Value{}, nil, ex.errorf("'__call' chain too long; possibly a loop")
+}
+
+// callMeta calls the metamethod h of event for the instruction at pc-1. A Lua handler runs in a
 // continuation frame, and finishOp completes the instruction when it returns. A Go handler
 // runs here, and the instruction is completed at once.
-func (ex *executor) callMeta(h Value, args ...Value) error {
+func (ex *executor) callMeta(event string, h Value, args ...Value) error {
+	h, args, err := ex.metaCallee(event, h, args)
+	if err != nil {
+		return err
+	}
 	st := &ex.st
 	fn := max(st.base+int(st.cl.p.maxstack), ex.top) // above the frame and any open list
 	if err := ex.ensure(fn + 1 + len(args) + stackSlack); err != nil {
@@ -629,7 +650,7 @@ func (ex *executor) arithOp(op uint8, dst int, x, y Value, rx, ry int) error {
 		return nil
 	}
 	if h := ex.binMeta(x, y, arithEvent[op]); !h.IsNil() {
-		return ex.callMeta(h, x, y)
+		return ex.callMeta(arithEvent[op], h, x, y)
 	}
 	bad, reg := x, rx
 	if ok1 {
@@ -711,20 +732,25 @@ func (ex *executor) concatRange(a, total int) error {
 				}
 				return ex.typeError("concatenate", regs[bad], a+bad)
 			}
+			h, args, err := ex.metaCallee("__concat", h, []Value{x, y})
+			if err != nil {
+				return err
+			}
 			if h.isObj(kindLuaFn) {
 				for len(ex.cont) <= ex.st.nf {
 					ex.cont = append(ex.cont, 0)
 				}
 				ex.cont[ex.st.nf] = int32(total)
-				return ex.callMeta(h, x, y)
+				return ex.callMeta("__concat", h, args...)
 			}
 			fn := max(ex.st.base+int(ex.st.cl.p.maxstack), ex.top)
-			if err := ex.ensure(fn + 3 + stackSlack); err != nil {
+			if err := ex.ensure(fn + 1 + len(args) + stackSlack); err != nil {
 				return err
 			}
-			ex.stack[fn], ex.stack[fn+1], ex.stack[fn+2] = h, x, y
-			ex.st.hi = max(ex.st.hi, fn+3)
-			n, err := ex.callGoRaw((*goFunc)(h.p), fn, 2)
+			ex.stack[fn] = h
+			copy(ex.stack[fn+1:], args)
+			ex.st.hi = max(ex.st.hi, fn+1+len(args))
+			n, err := ex.callGoRaw((*goFunc)(h.p), fn, len(args))
 			if err != nil {
 				return err
 			}
@@ -1019,20 +1045,22 @@ func (ex *executor) closeTo(level int) error {
 		r := ex.tbc[len(ex.tbc)-1]
 		ex.tbc = ex.tbc[:len(ex.tbc)-1]
 		v := ex.stack[r]
-		h := ex.metamethod(v, "__close")
-		switch {
-		case h.isObj(kindLuaFn):
-			return ex.callMeta(h, v, Value{})
-		case h.isObj(kindGoFn):
-			fn := max(ex.st.base+int(ex.st.cl.p.maxstack), ex.top)
-			if err := ex.ensure(fn + 3 + stackSlack); err != nil {
-				return err
-			}
-			ex.stack[fn], ex.stack[fn+1], ex.stack[fn+2] = h, v, Value{}
-			ex.st.hi = max(ex.st.hi, fn+3)
-			if _, err := ex.callGoRaw((*goFunc)(h.p), fn, 2); err != nil {
-				return err
-			}
+		h, args, err := ex.metaCallee("__close", ex.metamethod(v, "__close"), []Value{v, {}})
+		if err != nil {
+			return err
+		}
+		if h.isObj(kindLuaFn) {
+			return ex.callMeta("__close", h, args...)
+		}
+		fn := max(ex.st.base+int(ex.st.cl.p.maxstack), ex.top)
+		if err := ex.ensure(fn + 1 + len(args) + stackSlack); err != nil {
+			return err
+		}
+		ex.stack[fn] = h
+		copy(ex.stack[fn+1:], args)
+		ex.st.hi = max(ex.st.hi, fn+1+len(args))
+		if _, err := ex.callGoRaw((*goFunc)(h.p), fn, len(args)); err != nil {
+			return err
 		}
 	}
 	return nil
