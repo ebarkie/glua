@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1" # the race detector needs cgo; the library itself does not
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test with -race
+        run: go test -race ./...
+      - name: Test with checkptr
+        run: go test -gcflags=all=-d=checkptr ./...
+
+  cross:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux/arm64
+          - linux/loong64
+          - linux/ppc64le
+          - linux/ppc64
+          - linux/riscv64
+          - linux/s390x
+          - linux/mips64le
+          - freebsd/amd64
+          - darwin/arm64
+          - windows/arm64
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build and vet
+        run: |
+          export GOOS=${TARGET%/*} GOARCH=${TARGET#*/}
+          go build ./...
+          go vet ./...
+          go test -exec true ./... # compile the tests for the target without running them
+        env:
+          TARGET: ${{ matrix.target }}
