@@ -143,6 +143,16 @@ func (ex *executor) pcallValue(g *goFunc, fn, nargs int) error {
 		switch {
 		case v.isObj(kindLuaFn):
 			return ex.pushLua((*Closure)(v.p), slot, nargs, flags)
+		case v.isObj(kindGoFn) && ((*goFunc)(v.p) == builtinPcall || (*goFunc)(v.p) == builtinXpcall):
+			// a protected call of pcall: through the trampoline, a Lua frame for this catch
+			// whose call of pcall pushes the inner one, so that both can yield
+			if err := ex.ensure(slot + nargs + 2); err != nil {
+				return err
+			}
+			copy(ex.stack[slot+1:slot+2+nargs], ex.stack[slot:slot+1+nargs])
+			ex.stack[slot] = luaFnValue(trampoline)
+			ex.st.hi = max(ex.st.hi, slot+2+nargs)
+			return ex.pushLua(trampoline, slot, nargs+1, flags)
 		case v.isObj(kindGoFn):
 			n, err := ex.callGoRaw((*goFunc)(v.p), slot, nargs)
 			if err == errYield && flags&frHandler == 0 {
@@ -434,6 +444,9 @@ func (ex *executor) whereLevel(c *Call, level int) string {
 		cl = (*Closure)(ex.stack[base-1].p)
 		pc = int(uint32(fr))
 		nf--
+	}
+	if cl.p == trampoline.p {
+		return "" // a coroutine's Go body, called from Go as far as Lua can tell
 	}
 	return fmt.Sprintf("%s:%d", cl.p.source, cl.p.lineAt(pc-1))
 }

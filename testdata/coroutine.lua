@@ -101,3 +101,28 @@ local function f()
   return b
 end
 return f()
+--== Go functions as coroutine bodies
+local co = coroutine.create(pcall)
+local r1 = {coroutine.resume(co, function(a) local b = coroutine.yield(a + 1); error(b) end, 10)}
+local r2 = {coroutine.resume(co, "boom")}
+local w = coroutine.wrap(coroutine.yield)
+local y = w(1, 2)
+local z = w(3)
+local e = coroutine.wrap(error)
+return r1[1], r1[2], r2[1], r2[2], r2[3], coroutine.status(co), y, z, pcall(e, "x")
+--== yielding inside pcall of pcall
+local f = function (s, i) return coroutine.yield(i) end
+local f1 = coroutine.wrap(function ()
+  return xpcall(pcall, function (...) return ... end,
+    function ()
+      local s = 0
+      for i in f, nil, 1 do pcall(function () s = s + i end) end
+      error({s})
+    end)
+end)
+f1()
+for i = 1, 10 do assert(f1(i) == i) end
+local r1, r2, v = f1(nil)
+local g = coroutine.wrap(function() return pcall(pcall, coroutine.yield, 5) end)
+local y = g()
+return r1, r2, v[1], y, g(6)

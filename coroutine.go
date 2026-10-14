@@ -69,6 +69,16 @@ func (ex *executor) loadThread(t threadState) {
 	ex.stack, ex.pframes, ex.nvar, ex.cont, ex.tbc, ex.st, ex.top = t.stack, t.pframes, t.nvar, t.cont, t.tbc, t.st, t.top
 }
 
+// trampoline is function(f, ...) return f(...) end, the body of a coroutine whose
+// function is a Go function.
+var trampoline = func() *Closure {
+	p, _, err := compileChunk("=coroutine", "return function(f, ...) return f(...) end")
+	if err != nil {
+		panic(err)
+	}
+	return &Closure{p: p.protos[0]}
+}()
+
 // newCoroutine creates a coroutine for function f, charging its stack to the budget.
 func (ex *executor) newCoroutine(f Value) (*coroutine, error) {
 	if err := ex.charge(initStack*16 + 4<<10); err != nil {
@@ -121,13 +131,10 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		f := co.fn
 		co.fn = Value{}
 		if !f.isObj(kindLuaFn) {
-			// a Go function body runs to completion: it cannot yield
-			res, cerr := ex.callSync(f, args)
-			co.status = coDead
-			if cerr != nil {
-				return ex.coFailed(co, cerr)
-			}
-			return res, true, nil
+			// a Go body starts from a Lua trampoline, so that it is called as Lua calls it:
+			// pcall runs as a catch frame that can yield, and yield itself can be the body
+			args = append([]Value{f}, args...)
+			f = luaFnValue(trampoline)
 		}
 		if err := ex.ensure(1 + len(args) + stackSlack); err != nil {
 			return nil, false, err
