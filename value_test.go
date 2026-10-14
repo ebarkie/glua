@@ -336,3 +336,21 @@ func TestCheckValueRejects(t *testing.T) {
 		}
 	}
 }
+
+// Hashing must never form a pointer past the end of a string. checkptr, on in race builds,
+// catches one; this exercises every length around the 8-byte block size.
+func TestHashStringInBounds(t *testing.T) {
+	seen := map[uint64]bool{}
+	for n := range 40 {
+		s := strings.Repeat("x", n)
+		v := String(strings.Clone(s))
+		h := hashString(v.p, n)
+		if h != hashString(String(s).p, n) {
+			t.Fatalf("length %d: equal strings hash differently", n)
+		}
+		seen[h] = true
+	}
+	if len(seen) < 39 {
+		t.Errorf("only %d distinct hashes for 40 lengths", len(seen))
+	}
+}

@@ -27,15 +27,18 @@ func mix(a, b uint64) uint64 {
 
 // hashString is a seeded hash of the bytes of s. hash/maphash is not used because its seed
 // cannot be set, and SetHashSeed needs one that can.
+//
+// It reads through offsets that stay inside the string: advancing p past the last block
+// would make a pointer one past the allocation, which invariant 3 forbids.
 func hashString(p unsafe.Pointer, n int) uint64 {
 	h := hashSeed ^ uint64(n)*m1
-	for ; n >= 8; n -= 8 {
-		h = mix(h^*(*uint64)(p), m2)
-		p = unsafe.Add(p, 8)
+	i := 0
+	for ; i+8 <= n; i += 8 {
+		h = mix(h^*(*uint64)(unsafe.Add(p, i)), m2)
 	}
 	var tail uint64
-	for i := range n {
-		tail |= uint64(*(*byte)(unsafe.Add(p, i))) << (8 * i)
+	for j := 0; i+j < n; j++ {
+		tail |= uint64(*(*byte)(unsafe.Add(p, i+j))) << (8 * j)
 	}
 	return mix(h^tail, m1^hashSeed)
 }
