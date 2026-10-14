@@ -1,0 +1,4 @@
+# Stack accesses per hot opcode in (*executor).fast, outside write-barrier slow paths.
+# Opcodes not listed must have none. Written by go run ./bench/asmgate -update.
+amd64-v1 opGetField 9
+amd64-v3 opGetField 9

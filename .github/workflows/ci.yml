@@ -74,3 +74,14 @@ jobs:
           go test -exec true ./... # compile the tests for the target without running them
         env:
           TARGET: ${{ matrix.target }}
+
+  asmgate:
+    name: Hot-loop machine code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check calls, jump table and spills in (*executor).fast
+        run: go run ./bench/asmgate

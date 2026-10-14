@@ -77,11 +77,11 @@ dispatch:
 			setBool(&regs[uint8(i>>8)], 1)
 
 		case opGetUpval:
-			setValue(&regs[uint8(i>>8)], &cl.up[uint8(i>>16)])
+			setValue(&regs[uint8(i>>8)], (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(uint8(i>>16))*16))) // index verified
 
 		case opGetField: // R[A] = R[B][K[C]]; the aux word is the site number
 			obj, key := &regs[uint8(i>>16)], kAt(k, i>>24)
-			hint := atomic.LoadUint32(&cl.p.hints[*(*uint32)(pc)])
+			hint := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) // site verified
 			slot := hint & hintSlotMask
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
 				t := (*Table)(obj.p)
@@ -95,7 +95,7 @@ dispatch:
 				}
 				if hint == megamorphic && len(t.nodes) > 0 {
 					// the site has given up on its hint: probe inline with the hash computed at compile time
-					h, mask := cl.p.khash[i>>24], uint64(len(t.nodes)-1)
+					h, mask := *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.khash)), uintptr(i>>24)*8)), uint64(len(t.nodes)-1)
 					for j := uint64(0); j < 8; j++ {
 						nd := &t.nodes[(h+j)&mask]
 						if same(&nd.k, key) {
@@ -112,7 +112,7 @@ dispatch:
 					}
 				}
 			} else if obj.n>>56 == kindUser && !isScalar(obj.p) { // both halves: an integer can carry these bits
-				ti := (*ex.types)[obj.n&typeIDMask]
+				ti := (*ex.types)[uint32(obj.n)] // the type ID: below 2^32, so no 48-bit mask constant ties up a register
 				if int(slot) < len(ti.fields) && same(&ti.fields[slot].key, key) {
 					fd, d := &ti.fields[slot], &regs[uint8(i>>8)]
 					p := unsafe.Add(obj.p, fd.off)
@@ -357,6 +357,8 @@ dispatch:
 	}
 
 	// indices, never addresses: nothing outside this function may hold a pointer into the stack
+	// stack0 is recomputed rather than kept: one live register less in the loop
+	stack0 = unsafe.Pointer(unsafe.SliceData(ex.stack))
 	ex.st.cl = cl
 	ex.st.base = int((uintptr(unsafe.Pointer(regs)) - uintptr(stack0)) / 16)
 	ex.st.pc = int((uintptr(pc) - uintptr(unsafe.Pointer(unsafe.SliceData(cl.p.code)))) / 4)

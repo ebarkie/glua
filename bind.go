@@ -112,6 +112,9 @@ func bindType(rt reflect.Type) uint64 {
 	next := append(append(make([]*typeInfo, 0, len(cur)+1), cur...), ti)
 	types.Store(&next)
 	id := uint64(len(next) - 1)
+	if id >= 1<<32 {
+		panic("glua: too many bound types") // the loop reads the ID as 32 bits
+	}
 	typeIDs[rt] = id
 	return id
 }
