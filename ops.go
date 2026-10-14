@@ -519,9 +519,9 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			k, ok := normKey(key)
 			if !ok {
 				if key.IsNil() {
-					return ex.errorf("index is nil")
+					return ex.errorf("table index is nil")
 				}
-				return ex.errorf("index is NaN")
+				return ex.errorf("table index is NaN")
 			}
 			t.set(k, val)
 			ex.skipAux(op)

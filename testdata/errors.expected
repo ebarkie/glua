@@ -43,3 +43,4 @@ float for loop with a bad step	runtime error: float for loop with a bad step:1: 
 call a table without __call	runtime error: call a table without __call:2: attempt to call a table value (local 't')
 call through a __call that is not callable	runtime error: call through a __call that is not callable:2: attempt to call a number value (local 't')
 stack overflow	runtime error: stack overflow:1: stack overflow
+assign with a nil key	runtime error: assign with a nil key:2: table index is nil

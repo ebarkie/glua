@@ -127,3 +127,6 @@ t()
 --== stack overflow
 local function f() return 1 + f() end
 return f()
+--== assign with a nil key
+local t, k = {}, nil
+t[k] = 1

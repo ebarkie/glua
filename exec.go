@@ -2,6 +2,7 @@ package glua
 
 import (
 	"context"
+	"io"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -96,10 +97,31 @@ type executor struct {
 	maxAlloc     int64 // bytes one entry may allocate
 	allocLeft    int64 // what is left of it in the current entry
 
-	checked   bool // run the bounds-checked loop
-	hostCalls int  // Go functions running: a panic now is the host's, not the VM's
+	checked   bool      // run the bounds-checked loop
+	output    io.Writer // where print and warn write; nil discards
+	warnOn    bool      // warn("@on") was called
+	hostCalls int       // Go functions running: a panic now is the host's, not the VM's
 
 	running, poisoned bool
+}
+
+// write sends text from print or warn to the output.
+func (ex *executor) write(s string) error {
+	if ex.output == nil {
+		return nil
+	}
+	_, err := io.WriteString(ex.output, s)
+	return err
+}
+
+// runBase returns the frame index of the goEntry frame of the current run.
+func (ex *executor) runBase() int {
+	for f := ex.st.nf - 1; f > 0; f-- {
+		if ex.pframes[f]&frGoEntry != 0 {
+			return f
+		}
+	}
+	return 0
 }
 
 // defaultChecked selects the loop new executors run. The checked loop is the default until

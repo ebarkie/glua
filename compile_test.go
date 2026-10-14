@@ -125,42 +125,14 @@ func expectations(t *testing.T, cases, expected string) map[string]string {
 	return want
 }
 
-// testGlobals returns a globals table with the few library functions the cases use before
-// the libraries exist.
+// testGlobals returns a globals table with the libraries that exist so far, and gofirst,
+// a Go function that returns its first argument, for metamethods written in Go.
 func testGlobals() *Table {
-	g := NewTable(0, 4)
-	g.Set(String("setmetatable"), goFnValue(&goFunc{name: "setmetatable", f: func(c *Call) error {
-		t := c.Value(0)
-		if !t.isObj(kindTable) || !(c.Value(1).IsNil() || c.Value(1).isObj(kindTable)) {
-			return c.Errorf("bad argument to 'setmetatable'")
-		}
-		if mt := c.Value(1); mt.IsNil() {
-			(*Table)(t.p).meta = nil
-		} else {
-			(*Table)(t.p).meta = (*Table)(mt.p)
-		}
-		return c.ReturnValues(t)
-	}}))
-	g.Set(String("pcall"), goFnValue(builtinPcall))
-	g.Set(String("xpcall"), goFnValue(builtinXpcall))
-	g.Set(String("error"), goFnValue(builtinError))
+	g := NewTable(0, 32)
+	openBase(g)
 	g.Set(String("coroutine"), tableValue(coroutineLib()))
 	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
-		return c.ReturnValues(c.Value(0)) // a metamethod written in Go
-	}}))
-	g.Set(String("next"), goFnValue(&goFunc{name: "next", f: func(c *Call) error {
-		t := c.Value(0)
-		if !t.isObj(kindTable) {
-			return c.Errorf("bad argument to 'next'")
-		}
-		k, v, ok := (*Table)(t.p).Next(c.Value(1))
-		if !ok {
-			return c.Errorf("invalid key to 'next'")
-		}
-		if k.IsNil() {
-			return c.ReturnValues(Value{})
-		}
-		return c.ReturnValues(k, v)
+		return c.ReturnValues(c.Value(0))
 	}}))
 	return g
 }
@@ -251,3 +223,5 @@ func TestCheckedLoopGenerated(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }
+
+func TestBaseCorpus(t *testing.T) { runCorpus(t, "testdata/base.lua", "testdata/base.expected") }
