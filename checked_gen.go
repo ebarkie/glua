@@ -4,6 +4,7 @@ package glua
 
 import (
 	"math"
+	"math/bits"
 	"sync/atomic"
 	"unsafe"
 )
@@ -227,10 +228,12 @@ dispatch:
 			case same(x, y):
 				eq = x.p != tFloat() || x.n<<1 <= 0x7ff<<53 // the same bits are equal, unless they are a NaN
 			case isScalar(x.p):
-				if (x.p == tInt() || x.p == tFloat()) && (y.p == tInt() || y.p == tFloat()) {
-					e = exSlowOp // 1 == 1.0 and 0.0 == -0.0: exact compare in the driver
+				if x.p == tFloat() && y.p == tFloat() {
+					eq = math.Float64frombits(x.n) == math.Float64frombits(y.n) // 0.0 == -0.0
+				} else if x.p != y.p && (x.p == tInt() || x.p == tFloat()) && (y.p == tInt() || y.p == tFloat()) {
+					e = exSlowOp // 1 == 1.0: an exact compare of an integer with a float, in the driver
 					break dispatch
-				}
+				} // otherwise: two different integers or booleans, or different kinds: not equal
 			case x.n != y.n || x.n>>56 != kindString:
 				// different kinds, lengths or objects. Tables and userdata with __eq are not constants.
 			case x.n&lenMask <= 32: // equal length behind different pointers: compare inline
@@ -412,6 +415,23 @@ dispatch:
 					if v := &t.arr[idx]; v.p != nil || t.meta == nil {
 						setValue(&regs[uint8(i>>8)], v)
 						continue
+					}
+				} else if len(t.nodes) > 0 {
+					// an integer key in the hash part, as t[0] is: probe inline, hashing as hashWord does
+					hi, lo := bits.Mul64((idx+1^2<<62)*hashMul, m2^hashSeed)
+					h, mask := hi^lo, uint64(len(t.nodes)-1)
+					for j := uint64(0); j < 4; j++ {
+						nd := &t.nodes[(h+j)&mask]
+						if nd.k.p == tInt() && nd.k.n == idx+1 {
+							if nd.v.p == nil && t.meta != nil {
+								break
+							}
+							setValue(&regs[uint8(i>>8)], &nd.v)
+							continue dispatch
+						}
+						if nd.k.p == nil {
+							break
+						}
 					}
 				}
 			}
