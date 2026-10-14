@@ -167,7 +167,11 @@ dispatch:
 			} else if x.p == tFloat() && y.p == tFloat() {
 				setFloat(d, math.Float64frombits(x.n)-math.Float64frombits(y.n))
 			} else if isNum(x) && isNum(y) {
-				setFloat(d, toFloat(x)-toFloat(y))
+				r := toFloat(x) - toFloat(y)
+				if y.n == 0 && uint8(i) == opSubK {
+					r = toFloat(x) + 0 // as C Lua's x + (-0): -0.0 - 0 is +0.0
+				}
+				setFloat(d, r)
 			} else {
 				e = exSlowOp
 				break dispatch

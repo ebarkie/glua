@@ -141,7 +141,13 @@ func (ex *executor) slowOp() error {
 	case opAdd, opSub, opMul, opDiv, opMod, opPow, opIDiv, opBAnd, opBOr, opBXor, opShl, opShr:
 		return ex.arithOp(op, a, *ex.reg(b), *ex.reg(c), b, c)
 	case opAddK, opSubK, opMulK, opDivK, opModK, opPowK, opIDivK, opBAndK, opBOrK, opBXorK, opShlK, opShrK:
-		return ex.arithOp(op-(opAddK-opAdd), a, *ex.reg(b), p.k[c], b, -1)
+		x, k := *ex.reg(b), p.k[c]
+		if op == opSubK && k.p == tInt() && k.n == 0 && x.p == tFloat() {
+			// C Lua computes x - 0 as x + (-0), its ADDI instruction: -0.0 - 0 is +0.0
+			*ex.reg(a) = Float(math.Float64frombits(x.n) + 0)
+			return nil
+		}
+		return ex.arithOp(op-(opAddK-opAdd), a, x, k, b, -1)
 	case opUnm:
 		x := *ex.reg(b)
 		if n, ok := toNumber(x); ok {
@@ -163,7 +169,7 @@ func (ex *executor) slowOp() error {
 				*ex.reg(a) = Int(^v)
 				return nil
 			}
-			return ex.errorf("number has no integer representation")
+			return ex.intError(b)
 		}
 		return ex.typeError("perform bitwise operation on", x, b)
 	case opNot:
@@ -321,6 +327,18 @@ func (ex *executor) openCount(from int) (int, error) {
 
 // maxSizeHint caps the array size a NEWTABLE preallocates; a larger table grows as it fills.
 const maxSizeHint = 1 << 16
+
+// intError reports a number that has no integer representation, named after register
+// reg when it is one (reg < 0: a constant).
+func (ex *executor) intError(reg int) error {
+	info := ""
+	if reg >= 0 {
+		if vi := ex.st.cl.p.varInfo(ex.st.pc-1, reg); vi != "" {
+			info = " (" + vi + ")"
+		}
+	}
+	return ex.errorf("number%s has no integer representation", info)
+}
 
 // arithName names arithmetic operators as the string library's metamethods report them.
 var arithName = map[uint8]string{
@@ -515,12 +533,22 @@ func (ex *executor) arithOp(op uint8, dst int, x, y Value, rx, ry int) error {
 		r, err := numArith(op, a, b)
 		switch err {
 		case arithDivZero:
+			msg := "attempt to divide by zero"
 			if op == opMod {
-				return ex.errorf("attempt to perform 'n%%0'")
+				msg = "attempt to perform 'n%0'"
 			}
-			return ex.errorf("attempt to divide by zero")
+			if x.isString() || y.isString() {
+				// C Lua does this arithmetic inside the string library's metamethod, a C
+				// function, so the error has no position
+				return &Error{Value: String(msg)}
+			}
+			return ex.errorf("%s", msg)
 		case arithNoInt:
-			return ex.errorf("number has no integer representation")
+			reg := ry
+			if _, ok := toIntExact(a); !ok {
+				reg = rx
+			}
+			return ex.intError(reg)
 		}
 		*ex.reg(dst) = r
 		return nil
@@ -532,7 +560,7 @@ func (ex *executor) arithOp(op uint8, dst int, x, y Value, rx, ry int) error {
 	switch op {
 	case opBAnd, opBOr, opBXor, opShl, opShr:
 		if bad.isNumber() { // it is the integer conversion that failed
-			return ex.errorf("number has no integer representation")
+			return ex.intError(reg)
 		}
 		return ex.typeError("perform bitwise operation on", bad, reg)
 	}

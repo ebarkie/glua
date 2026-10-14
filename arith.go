@@ -43,10 +43,7 @@ func numArith(op uint8, a, b Value) (Value, arithError) {
 		if op == opDiv {
 			return Float(x / y), arithOK
 		}
-		if y == 2 {
-			return Float(x * x), arithOK
-		}
-		return Float(math.Pow(x, y)), arithOK
+		return Float(luaPow(x, y)), arithOK
 	}
 	if a.p == tInt() && b.p == tInt() {
 		x, y := int64(a.n), int64(b.n)
@@ -110,12 +107,47 @@ func intMod(x, y int64) int64 {
 }
 
 // floatMod follows C Lua's luai_nummod: fmod, then adjusted to the sign of the divisor.
+// Where C's fmod gives NaN it computes (x*y)/(x*y), so the NaN is the one the hardware
+// produces, sign included, as in C.
 func floatMod(x, y float64) float64 {
+	if y == 0 || math.IsInf(x, 0) || x != x || y != y {
+		return (x * y) / (x * y)
+	}
 	m := math.Mod(x, y)
-	if m*y < 0 {
+	if (m > 0 && y < 0) || (m < 0 && y != m && y > 0) {
 		m += y
 	}
 	return m
+}
+
+// zero is a variable, so that zero/zero is computed by the hardware, not by the compiler.
+var zero float64
+
+// luaPow is C Lua's luai_numpow: x*x for an exponent of 2, else C's pow. A NaN operand
+// passes through, and an invalid operation gives the hardware's NaN; the sign of a NaN from
+// pow differs between C libraries anyway. Powers of two are computed exactly, as a correctly
+// rounded pow does; math.Pow is not correctly rounded and can be off in the last bit elsewhere.
+func luaPow(x, y float64) float64 {
+	switch {
+	case y == 2:
+		return x * x
+	case y == 0 || x == 1:
+		return 1
+	case x != x:
+		return x
+	case y != y:
+		return y
+	}
+	if frac, exp := math.Frexp(x); frac == 0.5 && x > 0 {
+		if e := float64(exp-1) * y; e == math.Trunc(e) && e >= -1074 && e <= 1023 {
+			return math.Ldexp(1, int(e))
+		}
+	}
+	r := math.Pow(x, y)
+	if r != r {
+		return zero / zero
+	}
+	return r
 }
 
 // shiftLeft shifts x left by n bits, or right by -n bits, logically; 64 or more gives 0.

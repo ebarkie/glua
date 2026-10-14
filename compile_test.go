@@ -176,7 +176,8 @@ func runCorpus(t *testing.T, cases, expected string) {
 			if !ok {
 				t.Fatalf("no expectation for %q", c.name)
 			}
-			if got := outcome(c.name, c.src); got != exp {
+			// the sign of a NaN differs between C libraries and CPUs, so it is not compared
+			if got := outcome(c.name, c.src); nanSign.Replace(got) != nanSign.Replace(exp) {
 				p, _, _ := compileChunk(c.name, c.src)
 				listing := ""
 				if p != nil {
@@ -188,7 +189,11 @@ func runCorpus(t *testing.T, cases, expected string) {
 	}
 }
 
+var nanSign = strings.NewReplacer("-nan", "nan")
+
 func TestCompileCorpus(t *testing.T) {
 	runCorpus(t, "testdata/compile.lua", "testdata/compile.expected")
 }
 func TestErrorCorpus(t *testing.T) { runCorpus(t, "testdata/errors.lua", "testdata/errors.expected") }
+
+func TestArithCorpus(t *testing.T) { runCorpus(t, "testdata/arith.lua", "testdata/arith.expected") }
