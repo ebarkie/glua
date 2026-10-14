@@ -43,3 +43,9 @@ for loops over numeric strings	6.0 | 6
 string coercions in arithmetic	16 | 100.0 | 16.0 | 3 | 3 | 1024.0 | 2.5 | -3
 number formatting in concatenation	str:31652b313030 | str:392e32323333373230333638353438652b3138 | str:2d302e30 | str:696e66 | str:33 | str:332e30 | str:313233343536373839303132 | str:302e33
 string comparison	true | true | true | true | true | true
+__call metamethods	str:63 | 10 | 20 | str:63 | false | 30 | str:63 | 1 | 6
+varargs through calls	3 | 0 | 2 | 1 | str:656e64 | str:61 | str:62
+vararg in the middle of expressions	6 | 2 | 5
+many arguments and results	11 | 20 | 20
+deep recursion without tail calls	5000
+methods with varargs	106 | 100

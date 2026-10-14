@@ -251,3 +251,48 @@ return "0x10" + 0, "1e2" + 0, " 0x1p4 " * 1, "10" // "3", "7" % "4", "2" ^ "10",
 return 1e100 .. "", 2^63 .. "", -0.0 .. "", 1/0 .. "", 3 .. "", 3.0 .. "", 123456789012 .. "", 0.1 + 0.2 .. ""
 --== string comparison
 return "a\0b" < "a\0c", "" < "a", "abc" == "ab" .. "c", "Z" < "a", "10" < "9", "\xff" > "a"
+--== __call metamethods
+local log = {}
+local callable = setmetatable({name = "c"}, {__call = function(self, a, b) return self.name, a, b end})
+local chained = setmetatable({}, {__call = callable})
+local function tail() return callable(1, 2) end
+local counter = setmetatable({n = 0}, {__call = function(self, _, last)
+  if last == nil then return 1 end
+  if last < 3 then return last + 1 end
+end})
+local s = 0
+for i in counter do s = s + i end
+local a, b, c = callable(10, 20)
+local d, e, f = chained(30)
+local g, h = tail()
+return a, b, c, d, e == callable, f, g, h, s
+--== varargs through calls
+local function count(...) return #{...} end
+local function pass(...) return ... end
+local function mid(...) return {..., "end"} end
+local function deep(n, ...) if n == 0 then return ... end return deep(n - 1, ...) end
+local t = mid(1, 2, 3)
+return count(pass(1, nil, 3)), count(), #t, t[1], t[2], deep(1000, "a", "b")
+--== vararg in the middle of expressions
+local function f(...)
+  local x = ... + 1
+  local t = {..., 10}
+  return x, #t, (...)
+end
+return f(5, 6, 7)
+--== many arguments and results
+local function many(...) return ... end
+local a1, a2, a3, a4, a5, a6, a7, a8, a9, a10 = many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+local t = {many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)}
+return a1 + a10, #t, t[20]
+--== deep recursion without tail calls
+local function depth(n) if n == 0 then return 0 end return 1 + depth(n - 1) end
+return depth(5000)
+--== methods with varargs
+local obj = {base = 100}
+function obj:sum(...)
+  local s = self.base
+  for _, v in next, {...} do s = s + v end
+  return s
+end
+return obj:sum(1, 2, 3), obj.sum(obj)

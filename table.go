@@ -13,8 +13,8 @@ type node struct {
 	k, v Value
 }
 
-// Table is a Lua table: an array part for the keys 1..n and an open-addressing hash part
-// of our own. Go maps are not used: they rehash the key on every access and cannot
+// Table is a Lua table: an array part for the keys 1..n, which may hold nils, and an
+// open-addressing hash part of our own. Go maps are not used: they rehash the key on every access and cannot
 // support next() without side tables. Table methods are raw: they never run metamethods.
 type Table struct {
 	arr   []Value
@@ -63,7 +63,9 @@ func (mt *Table) metaGet(event string) Value {
 func NewTable(narr, nhash int) *Table {
 	t := &Table{}
 	if narr > 0 {
-		t.arr = make([]Value, 0, narr)
+		// like C Lua, the array part has its full size from the start, nils included, so
+		// that {1, nil, 3} has length 3
+		t.arr = make([]Value, narr)
 	}
 	if nhash > 0 {
 		t.nodes = make([]node, nodeSize(nhash))
@@ -188,6 +190,26 @@ func (t *Table) appendArr(val Value) {
 		}
 		t.arr = append(t.arr, t.nodes[idx].v)
 		t.nodes[idx].v = Value{} // leaves a deleted key behind; the next rehash drops it
+	}
+}
+
+// growArray makes the array part n slots long, moving any keys 1..n from the hash part
+// into it, as C Lua's luaH_resizearray does.
+func (t *Table) growArray(n int) {
+	if n <= len(t.arr) {
+		return
+	}
+	old := len(t.arr)
+	t.arr = append(t.arr, make([]Value, n-old)...)
+	if len(t.nodes) == 0 {
+		return
+	}
+	for i := old; i < n; i++ {
+		k := Int(int64(i) + 1)
+		if idx := t.findNode(&k, hashValue(k)); idx >= 0 {
+			t.arr[i] = t.nodes[idx].v
+			t.nodes[idx].v = Value{} // a deleted key; the next rehash drops it
+		}
 	}
 }
 

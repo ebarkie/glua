@@ -271,8 +271,11 @@ dispatch:
 
 		case opForLoop:
 			a := uint8(i >> 8)
-			if regs[a+2].p != tInt() {
-				e = exSlowOp // a float loop
+			// the counter and index are written through .n alone, so all three must carry the
+			// integer tag: the verifier cannot prove that a FORPREP ran, and an object's n
+			// changed this way would forge another kind
+			if regs[a].p != tInt() || regs[a+1].p != tInt() || regs[a+2].p != tInt() {
+				e = exSlowOp // a float loop, or registers no FORPREP prepared
 				break dispatch
 			}
 			if cnt := regs[a+1].n; cnt > 0 {

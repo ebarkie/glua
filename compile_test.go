@@ -140,6 +140,20 @@ func testGlobals() *Table {
 		}
 		return c.ReturnValues(t)
 	}}))
+	g.Set(String("next"), goFnValue(&goFunc{name: "next", f: func(c *Call) error {
+		t := c.Value(0)
+		if !t.isObj(kindTable) {
+			return c.Errorf("bad argument to 'next'")
+		}
+		k, v, ok := (*Table)(t.p).Next(c.Value(1))
+		if !ok {
+			return c.Errorf("invalid key to 'next'")
+		}
+		if k.IsNil() {
+			return c.ReturnValues(Value{})
+		}
+		return c.ReturnValues(k, v)
+	}}))
 	return g
 }
 

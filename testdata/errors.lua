@@ -118,3 +118,12 @@ local s = "1"
 return ~s
 --== float for loop with a bad step
 for i = 1.0, 2, "x" do end
+--== call a table without __call
+local t = {}
+t()
+--== call through a __call that is not callable
+local t = setmetatable({}, {__call = 1})
+t()
+--== stack overflow
+local function f() return 1 + f() end
+return f()

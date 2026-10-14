@@ -72,6 +72,9 @@ func (ex *executor) slowOp() error {
 		}
 		cl.v = *ex.reg(a)
 	case opNewCell:
+		if err := ex.charge(24); err != nil {
+			return err
+		}
 		*ex.reg(a) = cellValue(&cell{v: *ex.reg(a)})
 	case opGetCell:
 		cl, err := ex.asCell(*ex.reg(b))
@@ -117,6 +120,9 @@ func (ex *executor) slowOp() error {
 		if b > 0 {
 			nhash = 1 << min(b-1, 16)
 		}
+		if err := ex.charge(64 + narr*16 + nodeSize(nhash)*32); err != nil {
+			return err
+		}
 		*ex.reg(a) = tableValue(NewTable(narr, nhash))
 	case opSetList:
 		n := b
@@ -133,9 +139,19 @@ func (ex *executor) slowOp() error {
 		if t.Frozen() {
 			return ex.errorf("attempt to modify a frozen table")
 		}
-		off := int64(ex.aux())
-		for j := 1; j <= n; j++ {
-			t.set(Int(off+int64(j)), ex.stack[st.base+a+j])
+		off := int(ex.aux())
+		if off <= len(t.arr) {
+			// as C Lua: the list goes in the array part, nils included. The compiler always
+			// continues where the last SETLIST stopped, so this grows by at most the list.
+			if err := ex.charge(max(off+n-len(t.arr), 0) * 16); err != nil {
+				return err
+			}
+			t.growArray(off + n)
+			copy(t.arr[off:off+n], ex.stack[st.base+a+1:st.base+a+1+n])
+		} else {
+			for j := 1; j <= n; j++ {
+				t.set(Int(int64(off+j)), ex.stack[st.base+a+j])
+			}
 		}
 
 	case opAdd, opSub, opMul, opDiv, opMod, opPow, opIDiv, opBAnd, opBOr, opBXor, opShl, opShr:
@@ -290,6 +306,9 @@ func (ex *executor) slowOp() error {
 		return ex.doReturn(st.base+a, 1)
 	case opClosure:
 		np := p.protos[decBx(i)]
+		if err := ex.charge(48 + 16*len(np.upvals)); err != nil {
+			return err
+		}
 		ncl := &Closure{p: np, up: make([]Value, len(np.upvals)), env: st.cl.env}
 		*ex.reg(a) = luaFnValue(ncl) // stored before the captures, so a local function can capture itself
 		for j, u := range np.upvals {
@@ -324,6 +343,10 @@ func (ex *executor) openCount(from int) (int, error) {
 	}
 	return ex.top - from, nil
 }
+
+// maxAlloc is the fixed cap on any single allocation made for a script, checked before the
+// allocation. It holds even with NoLimit: an allocation beyond it would take the process down.
+const maxAlloc = 1 << 30
 
 // maxSizeHint caps the array size a NEWTABLE preallocates; a larger table grows as it fills.
 const maxSizeHint = 1 << 16
@@ -631,6 +654,9 @@ func (ex *executor) concat(a, n int) error {
 		}
 		return ex.typeError("concatenate", regs[bad], a+bad)
 	}
+	if err := ex.charge(size); err != nil {
+		return err
+	}
 	var sb strings.Builder
 	sb.Grow(size)
 	for _, v := range regs {
@@ -644,19 +670,37 @@ func (ex *executor) concat(a, n int) error {
 	return nil
 }
 
-// callValue calls the value at stack[fn] with nargs arguments, for the CALL or TFORCALL at pc-1.
+// callValue calls the value at stack[fn] with nargs arguments, for the CALL or TFORCALL at
+// pc-1. A value that is not a function is called through its __call metamethod, with the
+// value inserted as the first argument, as C Lua's tryfuncTM does.
 func (ex *executor) callValue(fn, nargs int) error {
-	v := ex.stack[fn]
-	switch {
-	case v.isObj(kindLuaFn):
-		return ex.pushLua((*Closure)(v.p), fn, nargs, 0)
-	case v.isObj(kindGoFn):
-		return ex.callGo((*goFunc)(v.p), fn, nargs)
+	for hops := 0; ; hops++ {
+		v := ex.stack[fn]
+		switch {
+		case v.isObj(kindLuaFn):
+			return ex.pushLua((*Closure)(v.p), fn, nargs, 0)
+		case v.isObj(kindGoFn):
+			return ex.callGo((*goFunc)(v.p), fn, nargs)
+		}
+		h := ex.metamethod(v, "__call")
+		if h.IsNil() {
+			// the message names the register's variable, also after a __call hop, as C Lua does
+			if uint8(ex.instr(ex.st.pc-1)) == opTForCall {
+				return ex.errorf("attempt to call a %s value (for iterator 'for iterator')", typeName(v))
+			}
+			return ex.typeError("call", v, fn-ex.st.base)
+		}
+		if hops >= maxIndexHops {
+			return ex.errorf("stack overflow")
+		}
+		if err := ex.ensure(fn + nargs + 2); err != nil {
+			return err
+		}
+		copy(ex.stack[fn+2:fn+2+nargs], ex.stack[fn+1:fn+1+nargs])
+		ex.stack[fn+1], ex.stack[fn] = v, h
+		nargs++
+		ex.st.hi = max(ex.st.hi, fn+2+nargs)
 	}
-	if uint8(ex.instr(ex.st.pc-1)) == opTForCall {
-		return ex.errorf("attempt to call a %s value (for iterator 'for iterator')", typeName(v))
-	}
-	return ex.typeError("call", v, fn-ex.st.base)
 }
 
 // pushLua starts a call of cl at stack[fn] with nargs arguments as a new frame of the loop.
@@ -973,6 +1017,9 @@ func (ex *executor) forLoop(i uint32) error {
 	st := &ex.st
 	a := st.base + decA(i)
 	r := ex.stack[a : a+4]
+	if r[0].p != tFloat() || r[1].p != tFloat() || r[2].p != tFloat() {
+		return ex.errorf("internal error: FORLOOP without FORPREP")
+	}
 	idx, limit, step := math.Float64frombits(r[0].n), math.Float64frombits(r[1].n), math.Float64frombits(r[2].n)
 	idx += step
 	if (step > 0 && idx <= limit) || (step < 0 && limit <= idx) {

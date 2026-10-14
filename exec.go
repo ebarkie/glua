@@ -16,6 +16,7 @@ const (
 	defaultSteps = 10000000 // Limits.Steps default
 	defaultDepth = 10000    // Limits.CallDepth default
 	defaultHost  = 100      // Limits.HostDepth default
+	defaultAlloc = 64 << 20 // Limits.AllocBytes default
 	maxIndexHops = 2000     // fixed cap: __index and __newindex chains
 )
 
@@ -83,6 +84,8 @@ type executor struct {
 	maxSteps     int64
 	maxCallDepth int
 	maxHostDepth int
+	maxAlloc     int64 // bytes one entry may allocate
+	allocLeft    int64 // what is left of it in the current entry
 
 	running, poisoned bool
 }
@@ -94,6 +97,7 @@ func newExecutor() *executor {
 		maxSteps:     defaultSteps,
 		maxCallDepth: defaultDepth,
 		maxHostDepth: defaultHost,
+		maxAlloc:     defaultAlloc,
 	}
 }
 
@@ -109,6 +113,7 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	ex.running, ex.ctx, ex.types = true, ctx, types.Load()
 	q := min(tickQuantum, ex.maxSteps)
 	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q) // budgets are set here only: nested entries share them
+	ex.allocLeft = ex.maxAlloc
 	completed := false
 	defer func() {
 		ex.running = false
@@ -174,6 +179,20 @@ func (ex *executor) ensure(n int) error {
 	copy(s, ex.stack)
 	clear(ex.stack) // the old stack may stay reachable from a stale pointer; leave nothing in it
 	ex.stack = s
+	return nil
+}
+
+// charge takes n bytes from the entry's allocation budget, before the allocation. Running
+// out is a terminal error. Milestone 2 charges every allocation site; this covers the ones
+// that can grow without bound.
+func (ex *executor) charge(n int) error {
+	if n > maxAlloc {
+		return ex.terminal(ErrAlloc)
+	}
+	ex.allocLeft -= int64(n)
+	if ex.allocLeft < 0 {
+		return ex.terminal(ErrAlloc)
+	}
 	return nil
 }
 

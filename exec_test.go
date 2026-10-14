@@ -504,3 +504,12 @@ func TestStackGrowth(t *testing.T) {
 		t.Fatalf("got %v, stack %d", res[0], len(ex.stack))
 	}
 }
+
+// A string that doubles on every iteration runs out of the entry's allocation budget long
+// before the step limit, and fails with ErrAlloc instead of exhausting memory.
+func TestSingleAllocationCap(t *testing.T) {
+	_, err := runSource("t", `local s = "x" for i = 1, 100 do s = s .. s end return #s`)
+	if !errors.Is(err, ErrAlloc) {
+		t.Fatalf("got %v, want ErrAlloc", err)
+	}
+}
