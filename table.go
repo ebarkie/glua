@@ -299,6 +299,13 @@ func computeSizes(nums *[64]int, nint int) int {
 // appendArr adds val at the end of the array part, then moves any following integer
 // keys over from the hash part.
 func (t *Table) appendArr(val Value) {
+	if len(t.arr) == cap(t.arr) {
+		// double, as C Lua's rehash does: append grows large slices by only a quarter, which
+		// copies a growing array many more times
+		arr := make([]Value, len(t.arr), max(4, 2*cap(t.arr)))
+		copy(arr, t.arr)
+		t.arr = arr
+	}
 	t.arr = append(t.arr, val)
 	for len(t.nodes) > 0 {
 		next := Int(int64(len(t.arr)) + 1)
