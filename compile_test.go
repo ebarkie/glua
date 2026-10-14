@@ -135,6 +135,9 @@ func testGlobals() *Table {
 	g := NewTable(0, 32)
 	openBase(g)
 	testStrMeta = openString(g)
+	openTable(g)
+	openMath(g)
+	openUTF8(g)
 	g.Set(String("coroutine"), tableValue(coroutineLib()))
 	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
 		return c.ReturnValues(c.Value(0))
@@ -235,3 +238,5 @@ func TestBaseCorpus(t *testing.T) { runCorpus(t, "testdata/base.lua", "testdata/
 func TestStringCorpus(t *testing.T) {
 	runCorpus(t, "testdata/strings.lua", "testdata/strings.expected")
 }
+
+func TestLibsCorpus(t *testing.T) { runCorpus(t, "testdata/libs.lua", "testdata/libs.expected") }

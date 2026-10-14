@@ -97,10 +97,13 @@ type executor struct {
 	maxAlloc     int64 // bytes one entry may allocate
 	allocLeft    int64 // what is left of it in the current entry
 
-	checked   bool      // run the bounds-checked loop
-	output    io.Writer // where print and warn write; nil discards
-	warnOn    bool      // warn("@on") was called
-	hostCalls int       // Go functions running: a panic now is the host's, not the VM's
+	checked    bool      // run the bounds-checked loop
+	output     io.Writer // where print and warn write; nil discards
+	warnOn     bool      // warn("@on") was called
+	rand       [4]uint64 // math.random's state, per entry
+	randSeeded bool
+	randSeed   *uint64 // the RandSeed option, if set
+	hostCalls  int     // Go functions running: a panic now is the host's, not the VM's
 
 	running, poisoned bool
 }
@@ -218,6 +221,7 @@ func (ex *executor) reset() {
 	ex.tbc = ex.tbc[:0]
 	clear(ex.goErrs)
 	ex.co, ex.nny = nil, 0
+	ex.randSeeded = false
 }
 
 // release returns an executor to the pool, unless it ended abnormally or has grown large.

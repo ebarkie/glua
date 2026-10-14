@@ -679,11 +679,15 @@ func (ex *executor) lessEqual(x, y Value) (bool, error) {
 }
 
 func (ex *executor) compareError(x, y Value) error {
+	return ex.errorf("%s", compareMessage(x, y))
+}
+
+func compareMessage(x, y Value) string {
 	tx, ty := typeName(x), typeName(y)
 	if tx == ty {
-		return ex.errorf("attempt to compare two %s values", tx)
+		return "attempt to compare two " + tx + " values"
 	}
-	return ex.errorf("attempt to compare %s with %s", tx, ty)
+	return "attempt to compare " + tx + " with " + ty
 }
 
 // concat does R[a] = R[a] .. ... .. R[a+n-1].
