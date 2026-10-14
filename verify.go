@@ -219,7 +219,7 @@ func (p *Proto) disasm() string {
 			continue
 		}
 		info := &opTable[op]
-		fmt.Fprintf(&sb, "%4d  %-10s", pc, info.name)
+		fmt.Fprintf(&sb, "%4d  %-10s ", pc, info.name)
 		var args []string
 		show := func(kind operand, x int) {
 			switch kind {
@@ -252,7 +252,9 @@ func (p *Proto) disasm() string {
 			}
 		}
 		show(info.a, decA(i))
-		if info.wide {
+		if op == opLoadI || op == opLoadF {
+			args = append(args, fmt.Sprint(int16(decBx(i))))
+		} else if info.wide {
 			show(info.b, decBx(i))
 		} else {
 			show(info.b, decB(i))

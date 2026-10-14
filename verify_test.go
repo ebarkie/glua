@@ -71,17 +71,17 @@ func TestOpTableComplete(t *testing.T) {
 
 func TestDisasm(t *testing.T) {
 	got := progRule().disasm()
-	want := `   0  GETFIELD  R1 R0 K0("method") site0
-   2  EQKJMP    R1 K1("GET") 1 ->11
-   4  GETFIELD  R1 R0 K2("size") site1
-   6  LTKJMP    R1 K3(1000) 1 ->11
-   8  GETFIELD  R1 R0 K4("admin") site2
-  10  RETURN1   R1`
+	want := `   0  GETFIELD   R1 R0 K0("method") site0
+   2  EQKJMP     R1 K1("GET") 1 ->11
+   4  GETFIELD   R1 R0 K2("size") site1
+   6  LTKJMP     R1 K3(1000) 1 ->11
+   8  GETFIELD   R1 R0 K4("admin") site2
+  10  RETURN1    R1`
 	// the last RETURN1 and the false branch
 	if !strings.HasPrefix(got, want[:strings.LastIndex(want, "\n")]) {
 		t.Errorf("got\n%s", got)
 	}
-	if !strings.Contains(got, "LOADFALSE R1") {
+	if !strings.Contains(got, "LOADFALSE  R1") {
 		t.Errorf("got\n%s", got)
 	}
 }
