@@ -52,6 +52,7 @@ func FuzzVerifiedCode(f *testing.F) {
 			}
 		}()
 		ex := newExecutor()
+		ex.checked = false // the fast loop is the one that trusts the verifier
 		ex.maxSteps = 10_000
 		runClosure(context.Background(), ex, &Closure{p: p, env: testGlobals()})
 	})

@@ -2,6 +2,7 @@ package glua
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -95,8 +96,15 @@ type executor struct {
 	maxAlloc     int64 // bytes one entry may allocate
 	allocLeft    int64 // what is left of it in the current entry
 
+	checked   bool // run the bounds-checked loop
+	hostCalls int  // Go functions running: a panic now is the host's, not the VM's
+
 	running, poisoned bool
 }
+
+// defaultChecked selects the loop new executors run. The checked loop is the default until
+// milestone 4's fuzzing exit is met.
+var defaultChecked = true
 
 func newExecutor() *executor {
 	return &executor{
@@ -106,6 +114,7 @@ func newExecutor() *executor {
 		maxCallDepth: defaultDepth,
 		maxHostDepth: defaultHost,
 		maxAlloc:     defaultAlloc,
+		checked:      defaultChecked,
 	}
 }
 
@@ -125,8 +134,17 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	completed := false
 	defer func() {
 		ex.running = false
-		if !completed {
-			ex.poisoned = true // a panic or runtime.Goexit is passing through: never pool this one again
+		if completed {
+			return
+		}
+		ex.poisoned = true // a panic or runtime.Goexit is passing through: never pool this one again
+		if ex.hostCalls > 0 {
+			return // a host function's panic, or Goexit: it continues
+		}
+		// a panic inside the VM itself, such as a failed bounds check in the checked loop: a VM
+		// bug must not take the process down
+		if r := recover(); r != nil {
+			err = &PanicError{Value: r, Stack: debug.Stack()}
 		}
 	}()
 	err = ex.run(cl, fn, nargs)
@@ -239,7 +257,13 @@ func (ex *executor) refill() error {
 func (ex *executor) drive(nf0 int) error {
 	for {
 		var err error
-		switch ex.fast() {
+		var e exit
+		if ex.checked {
+			e = ex.checkedLoop()
+		} else {
+			e = ex.fast()
+		}
+		switch e {
 		case exReturn:
 			var done bool
 			if done, err = ex.frameReturned(ex.st.base-1, ex.st.nret); done {

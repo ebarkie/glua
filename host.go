@@ -141,7 +141,9 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	cl, base, pc := st.cl, st.base, st.pc // the host function may re-enter the VM
 	ex.depth++
 	ex.nny++
+	ex.hostCalls++
 	err := g.f(c)
+	ex.hostCalls--
 	ex.nny--
 	ex.depth--
 	st.cl, st.base, st.pc = cl, base, pc

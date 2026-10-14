@@ -51,6 +51,15 @@ func (e *Error) Error() string {
 	return msg
 }
 
+// PanicError is a panic recovered at the entry: one inside the VM itself, which the
+// checked loop turns bugs into, or, with RecoverPanics, one in a host function.
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+func (e *PanicError) Error() string { return fmt.Sprintf("glua: panic: %v", e.Value) }
+
 // Frame is one level of a traceback.
 type Frame struct {
 	Source   string // "" for Go code

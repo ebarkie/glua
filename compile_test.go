@@ -190,8 +190,24 @@ func outcome(name, src string) string {
 	return "compile error: " + err.Error()
 }
 
+// runCorpus runs a corpus under both loops: the checked one, the default, and the fast one.
 func runCorpus(t *testing.T, cases, expected string) {
 	want := expectations(t, cases, expected)
+	for _, checked := range []bool{true, false} {
+		name := "fast"
+		if checked {
+			name = "checked"
+		}
+		t.Run(name, func(t *testing.T) {
+			saved := defaultChecked
+			defaultChecked = checked
+			defer func() { defaultChecked = saved }()
+			runCases(t, cases, want)
+		})
+	}
+}
+
+func runCases(t *testing.T, cases string, want map[string]string) {
 	for _, c := range readCases(t, cases) {
 		t.Run(strings.ReplaceAll(c.name, " ", "_"), func(t *testing.T) {
 			exp, ok := want[c.name]
@@ -226,4 +242,12 @@ func TestPcallCorpus(t *testing.T) { runCorpus(t, "testdata/pcall.lua", "testdat
 
 func TestCoroutineCorpus(t *testing.T) {
 	runCorpus(t, "testdata/coroutine.lua", "testdata/coroutine.expected")
+}
+
+// The checked loop is generated from the fast one; it must be up to date.
+func TestCheckedLoopGenerated(t *testing.T) {
+	out, err := exec.Command("go", "run", "./internal/cmd/genloop", "-check").CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
 }

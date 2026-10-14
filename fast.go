@@ -6,8 +6,28 @@ import (
 	"unsafe"
 )
 
+//go:generate go run ./internal/cmd/genloop
+
+// The accessors below read through raw pointers: the verifier guarantees the indices. The
+// checked loop, generated from this file, uses the bounds-checked versions in checked.go.
+
 // kAt returns constant i of the constant array at k.
 func kAt(k unsafe.Pointer, i uint32) *Value { return (*Value)(unsafe.Add(k, uintptr(i)*16)) }
+
+// hintAt returns the hint word of site i of p.
+func hintAt(p *Proto, i uint32) *uint32 {
+	return (*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(p.hints)), uintptr(i)*4))
+}
+
+// upAt returns upvalue i of cl.
+func upAt(cl *Closure, i uint8) *Value {
+	return (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(i)*16))
+}
+
+// khashAt returns the hash of constant i of p.
+func khashAt(p *Proto, i uint32) uint64 {
+	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(p.khash)), uintptr(i)*8))
+}
 
 // isNum reports whether v is an integer or a float. Small enough to inline into fast.
 func isNum(v *Value) bool { return v.p == tInt() || v.p == tFloat() }
@@ -39,12 +59,20 @@ func numPair(x, y *Value) (a, b float64, ok bool) {
 //go:noinline
 func (ex *executor) fast() exit {
 	cl := ex.st.cl
+	//gen:fast
 	stack0 := unsafe.Pointer(unsafe.SliceData(ex.stack))
 	regs := (*[256]Value)(unsafe.Add(stack0, ex.st.base*16))
 	k := unsafe.Pointer(unsafe.SliceData(cl.p.k))
 	pc := unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.code)), ex.st.pc*4)
 	ex.st.limitAddr = uintptr(stack0) + uintptr(len(ex.stack)-stackSlack)*16 // a frame base at or above it cannot fit a [256]Value view
 	ex.st.hiAddr = uintptr(stack0) + uintptr(ex.st.hi)*16
+	//gen:checked
+	//	base := ex.st.base
+	//	regs := (*[256]Value)(ex.stack[base : base+256])
+	//	k := cl.p.k
+	//	code := cl.p.code
+	//	pc := ex.st.pc
+	//gen:end
 	var e exit
 
 dispatch:
@@ -77,11 +105,11 @@ dispatch:
 			setBool(&regs[uint8(i>>8)], 1)
 
 		case opGetUpval:
-			setValue(&regs[uint8(i>>8)], (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(uint8(i>>16))*16))) // index verified
+			setValue(&regs[uint8(i>>8)], upAt(cl, uint8(i>>16)))
 
 		case opGetField: // R[A] = R[B][K[C]]; the aux word is the site number
 			obj, key := &regs[uint8(i>>16)], kAt(k, i>>24)
-			hint := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) // site verified
+			hint := atomic.LoadUint32(hintAt(cl.p, *(*uint32)(pc)))
 			slot := hint & hintSlotMask
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
 				t := (*Table)(obj.p)
@@ -95,7 +123,7 @@ dispatch:
 				}
 				if hint == megamorphic && len(t.nodes) > 0 {
 					// the site has given up on its hint: probe inline with the hash computed at compile time
-					h, mask := *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.khash)), uintptr(i>>24)*8)), uint64(len(t.nodes)-1)
+					h, mask := khashAt(cl.p, i>>24), uint64(len(t.nodes)-1)
 					for j := uint64(0); j < 8; j++ {
 						nd := &t.nodes[(h+j)&mask]
 						if same(&nd.k, key) {
@@ -294,6 +322,7 @@ dispatch:
 			a := uint8(i >> 8)
 			fn := &regs[a]
 			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 && !(*Closure)(fn.p).p.vararg {
+				//gen:fast
 				if uintptr(unsafe.Pointer(fn)) >= ex.st.limitAddr {
 					e = exGrowStack
 					break dispatch
@@ -316,6 +345,30 @@ dispatch:
 				}
 				k = unsafe.Pointer(unsafe.SliceData(cl.p.k))
 				pc = unsafe.Pointer(unsafe.SliceData(cl.p.code))
+				//gen:checked
+				//				if base+int(a)+1+256 > len(ex.stack) {
+				//					e = exGrowStack
+				//					break dispatch
+				//				}
+				//				if ex.st.nf == len(ex.pframes) {
+				//					e = exGrowFrames
+				//					break dispatch
+				//				}
+				//				ex.pframes[ex.st.nf] = uint64(uint32(pc)) | uint64(a+1)<<32
+				//				ex.st.nf++
+				//				cl = (*Closure)(fn.p)
+				//				base += int(a) + 1
+				//				regs = (*[256]Value)(ex.stack[base : base+256])
+				//				for j := int(uint8(i>>16)) - 1; j < int(cl.p.nparams); j++ {
+				//					regs[uint8(j)] = Value{}
+				//				}
+				//				if top := base + int(cl.p.maxstack); top > ex.st.hi {
+				//					ex.st.hi = top
+				//				}
+				//				k = cl.p.k
+				//				code = cl.p.code
+				//				pc = 0
+				//gen:end
 				if ex.st.ticks--; ex.st.ticks < 0 {
 					e = exTick
 					break dispatch
@@ -334,7 +387,11 @@ dispatch:
 			if uint8(i) == opReturn1 {
 				r, n = regs[uint8(i>>8)], 1
 			}
+			//gen:fast
 			*(*Value)(unsafe.Add(unsafe.Pointer(regs), -16)) = r // the function slot is the result slot
+			//gen:checked
+			//			ex.stack[base-1] = r
+			//gen:end
 			ex.st.nf--
 			fr := ex.pframes[ex.st.nf]
 			if fr>>56 != 0 {
@@ -342,11 +399,21 @@ dispatch:
 				e = exReturn // a frame the VM started: Go entry, or a continuation
 				break dispatch
 			}
+			//gen:fast
 			regs = (*[256]Value)(unsafe.Add(unsafe.Pointer(regs), -int(fr>>32&0xffffff)*16))
 			cl = (*Closure)((*Value)(unsafe.Add(unsafe.Pointer(regs), -16)).p)
 			k = unsafe.Pointer(unsafe.SliceData(cl.p.k))
 			pc = unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.code)), int(uint32(fr))*4)
 			if want := *(*uint32)(unsafe.Add(pc, -4)) >> 24; want != 2 { // C of the CALL at pc-1
+				//gen:checked
+				//			base -= int(fr >> 32 & 0xffffff)
+				//			regs = (*[256]Value)(ex.stack[base : base+256])
+				//			cl = checkedCaller(&ex.stack[base-1])
+				//			k = cl.p.k
+				//			code = cl.p.code
+				//			pc = int(uint32(fr))
+				//			if want := code[pc-1] >> 24; want != 2 {
+				//gen:end
 				ex.st.nret = n
 				e = exResults // zero, several or an open number of results: the driver pads or drops
 				break dispatch
@@ -358,7 +425,7 @@ dispatch:
 		case opGetGlobal, opSetGlobal: // a field of the closure's globals table; the aux word is the site
 			t := cl.env
 			key := kAt(k, i>>16)
-			hint := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) // site verified
+			hint := atomic.LoadUint32(hintAt(cl.p, *(*uint32)(pc)))
 			slot := hint & hintSlotMask
 			if t != nil && int(slot) < len(t.nodes) {
 				nd := &t.nodes[slot]
@@ -382,7 +449,7 @@ dispatch:
 			obj, key := &regs[uint8(i>>8)], kAt(k, uint32(uint8(i>>16)))
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
 				t := (*Table)(obj.p)
-				slot := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) & hintSlotMask
+				slot := atomic.LoadUint32(hintAt(cl.p, *(*uint32)(pc))) & hintSlotMask
 				// a write hit also needs the table not frozen, and an old value or no metatable,
 				// because of __newindex. Keys starting with "__" go to the driver, which clears
 				// the table's cache of absent metamethods.
@@ -447,7 +514,7 @@ dispatch:
 			obj, key := &regs[uint8(i>>16)], kAt(k, i>>24)
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
 				t := (*Table)(obj.p)
-				slot := atomic.LoadUint32((*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.hints)), uintptr(*(*uint32)(pc))*4))) & hintSlotMask
+				slot := atomic.LoadUint32(hintAt(cl.p, *(*uint32)(pc))) & hintSlotMask
 				if int(slot) < len(t.nodes) {
 					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) {
 						a := uint8(i >> 8)
@@ -624,7 +691,7 @@ dispatch:
 			if uint8(i) == opGetCell {
 				c = &regs[uint8(i>>16)]
 			} else {
-				c = (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(uint8(i>>16))*16)) // index verified
+				c = upAt(cl, uint8(i>>16))
 			}
 			if c.n == kindCell<<56 && !isScalar(c.p) {
 				setValue(&regs[uint8(i>>8)], &(*cell)(c.p).v)
@@ -638,7 +705,7 @@ dispatch:
 			if uint8(i) == opSetCell {
 				c, v = &regs[uint8(i>>8)], &regs[uint8(i>>16)]
 			} else {
-				c, v = (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(uint8(i>>16))*16)), &regs[uint8(i>>8)]
+				c, v = upAt(cl, uint8(i>>16)), &regs[uint8(i>>8)]
 			}
 			if c.n == kindCell<<56 && !isScalar(c.p) && !(*cell)(c.p).frozen {
 				setValue(&(*cell)(c.p).v, v)
@@ -667,11 +734,17 @@ dispatch:
 	}
 
 	// indices, never addresses: nothing outside this function may hold a pointer into the stack
+	//gen:fast
 	// stack0 is recomputed rather than kept: one live register less in the loop
 	stack0 = unsafe.Pointer(unsafe.SliceData(ex.stack))
 	ex.st.cl = cl
 	ex.st.base = int((uintptr(unsafe.Pointer(regs)) - uintptr(stack0)) / 16)
 	ex.st.pc = int((uintptr(pc) - uintptr(unsafe.Pointer(unsafe.SliceData(cl.p.code)))) / 4)
 	ex.st.hi = int((ex.st.hiAddr - uintptr(stack0)) / 16)
+	//gen:checked
+	//	ex.st.cl = cl
+	//	ex.st.base = base
+	//	ex.st.pc = pc
+	//gen:end
 	return e
 }

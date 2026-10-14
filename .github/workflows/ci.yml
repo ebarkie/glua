@@ -85,3 +85,5 @@ jobs:
           go-version-file: go.mod
       - name: Check calls, jump table and spills in (*executor).fast
         run: go run ./bench/asmgate
+      - name: Check that the checked loop is generated from fast.go
+        run: go run ./internal/cmd/genloop -check

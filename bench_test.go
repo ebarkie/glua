@@ -13,6 +13,7 @@ import (
 
 func benchProgram(b *testing.B, p *Proto) {
 	ex := newExecutor()
+	ex.checked = defaultChecked && strings.HasPrefix(b.Name(), "BenchmarkChecked")
 	ex.maxSteps = math.MaxInt64
 	cl := closureOf(p)
 	ctx := context.Background()
@@ -25,8 +26,20 @@ func benchProgram(b *testing.B, p *Proto) {
 }
 
 func BenchmarkFloatLoop(b *testing.B) { benchProgram(b, progFloatLoop(1_000_000)) }
-func BenchmarkFib27(b *testing.B)     { benchProgram(b, progFib(27)) }
-func BenchmarkFieldRead(b *testing.B) { benchProgram(b, progFieldRead(1_000_000)) }
+
+// The same three programs on the checked loop, for the cost of bounds checks.
+func benchChecked(b *testing.B, p *Proto) {
+	saved := defaultChecked
+	defaultChecked = true
+	defer func() { defaultChecked = saved }()
+	benchProgram(b, p)
+}
+
+func BenchmarkCheckedFloatLoop(b *testing.B) { benchChecked(b, progFloatLoop(1_000_000)) }
+func BenchmarkCheckedFib27(b *testing.B)     { benchChecked(b, progFib(27)) }
+func BenchmarkCheckedFieldRead(b *testing.B) { benchChecked(b, progFieldRead(1_000_000)) }
+func BenchmarkFib27(b *testing.B)            { benchProgram(b, progFib(27)) }
+func BenchmarkFieldRead(b *testing.B)        { benchProgram(b, progFieldRead(1_000_000)) }
 
 // Boundary benchmarks: one op is one call from Go.
 
