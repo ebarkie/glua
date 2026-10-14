@@ -72,3 +72,10 @@ local s = ("ab"):rep(1000)
 return #s, s:sub(-4), #("x"):rep(10, ", ")
 --== tostring of numbers in string functions
 return ("x"):rep(3.0), (12):len(), (1.5):rep(2)
+--== format specification errors
+local aux = string.rep('0', 600)
+local r = {}
+for _, f in ipairs{"%100.3d", "%1"..aux..".3d", "%1.100d", "%"..aux.."d", "%010c", "%.10c", "%0.34s", "%#i", "%3.1p", "%0.s", "%10q", "%F", "%05d", "%-5.2s|", "%+.3f"} do
+  r[#r + 1] = select(2, pcall(string.format, f, 10))
+end
+return table.unpack(r)

@@ -447,6 +447,9 @@ const (
 	fmtFlagsC = "-"
 )
 
+// maxFormat is C Lua's MAX_FORMAT, the room for one conversion specification.
+const maxFormat = 32
+
 func strFormat(c *Call) error {
 	f, err := c.checkString(0, "format")
 	if err != nil {
@@ -468,19 +471,14 @@ func strFormat(c *Call) error {
 		if arg >= c.Len() { // as C Lua, before looking at the conversion
 			return c.argError(arg+1, "format", "no value")
 		}
-		// the spec: flags, width and precision, up to the conversion character
+		// the spec: flags, width and precision, up to the conversion character, spanned as
+		// C Lua's getformat does; checkSpec then checks their order for the conversion
 		start := i
-		for i < len(f) && strings.IndexByte("-+ #0", f[i]) >= 0 {
+		for i < len(f) && strings.IndexByte("-+#0 123456789.", f[i]) >= 0 {
 			i++
 		}
-		for i < len(f) && f[i] >= '0' && f[i] <= '9' {
-			i++
-		}
-		if i < len(f) && f[i] == '.' {
-			i++
-			for i < len(f) && f[i] >= '0' && f[i] <= '9' {
-				i++
-			}
+		if i-start+1 >= maxFormat-10 {
+			return c.libErrorf("invalid format (too long)")
 		}
 		if i >= len(f) {
 			return c.libErrorf("invalid conversion '%%%s' to 'format'", f[start:])
@@ -497,10 +495,12 @@ func strFormat(c *Call) error {
 					j++
 				}
 			}
-			digits()
-			if j < len(spec) && spec[j] == '.' && precision {
-				j++
+			if j >= len(spec) || spec[j] != '0' { // a width cannot start with '0'
 				digits()
+				if j < len(spec) && spec[j] == '.' && precision {
+					j++
+					digits()
+				}
 			}
 			if j != len(spec) {
 				return c.libErrorf("invalid conversion specification: '%%%s'", spec+string(conv))
@@ -540,7 +540,7 @@ func strFormat(c *Call) error {
 			default:
 				b.WriteString(fmt.Sprintf("%"+spec+string(conv), uint64(n)))
 			}
-		case 'a', 'A', 'e', 'E', 'f', 'F', 'g', 'G':
+		case 'a', 'A', 'e', 'E', 'f', 'g', 'G':
 			x, err := c.checkFloat(arg, "format")
 			if err != nil {
 				return err
