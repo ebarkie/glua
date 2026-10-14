@@ -90,6 +90,7 @@ type executor struct {
 	nny     int                      // Go calls and nested runs in progress: a yield cannot cross them
 	st      state
 	types   *[]*typeInfo
+	rt      *Runtime // nil for executors the tests make
 
 	maxSteps     int64
 	maxCallDepth int

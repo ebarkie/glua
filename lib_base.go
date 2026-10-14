@@ -274,6 +274,9 @@ func baseRawSet(c *Call) error {
 	if t.Frozen() {
 		return c.libErrorf("attempt to modify a frozen table")
 	}
+	if t.flags&tabGuarded != 0 && c.ex.reservedKey(c.Value(1)) {
+		return c.libErrorf("attempt to assign to reserved name '%s'", c.Value(1).str())
+	}
 	k, ok := normKey(c.Value(1))
 	if !ok {
 		if c.Value(1).IsNil() {

@@ -516,6 +516,9 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			if t.Frozen() {
 				return ex.errorf("attempt to modify a frozen table")
 			}
+			if t.flags&tabGuarded != 0 && ex.reservedKey(key) {
+				return ex.errorf("attempt to assign to reserved name '%s'", key.str())
+			}
 			k, ok := normKey(key)
 			if !ok {
 				if key.IsNil() {
@@ -1258,4 +1261,10 @@ func typeName(v Value) string {
 	default:
 		return k.String()
 	}
+}
+
+// reservedKey reports whether key is a name the host or the libraries define, which a
+// script cannot assign in its environment.
+func (ex *executor) reservedKey(key Value) bool {
+	return ex.rt != nil && key.isString() && ex.rt.reserved[key.str()]
 }

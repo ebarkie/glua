@@ -435,7 +435,7 @@ dispatch:
 						pc = unsafe.Add(pc, 4)
 						continue
 					}
-					if t.flags&tabFrozen == 0 && regs[uint8(i>>8)].p != nil { // a nil store may shrink: the driver
+					if t.flags&(tabFrozen|tabGuarded) == 0 && regs[uint8(i>>8)].p != nil { // a nil store may shrink: the driver
 						setValue(&nd.v, &regs[uint8(i>>8)])
 						pc = unsafe.Add(pc, 4)
 						continue
@@ -453,7 +453,7 @@ dispatch:
 				// a write hit also needs the table not frozen, and an old value or no metatable,
 				// because of __newindex. Keys starting with "__" go to the driver, which clears
 				// the table's cache of absent metamethods.
-				if int(slot) < len(t.nodes) && t.flags&tabFrozen == 0 && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
+				if int(slot) < len(t.nodes) && t.flags&(tabFrozen|tabGuarded) == 0 && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
 					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) && regs[uint8(i>>24)].p != nil {
 						setValue(&nd.v, &regs[uint8(i>>24)])
 						pc = unsafe.Add(pc, 4)

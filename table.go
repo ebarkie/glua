@@ -35,6 +35,7 @@ const (
 	tabNoLen
 	tabNoCall
 	tabNoClose
+	tabGuarded // an environment: the reserved names in it cannot be assigned
 
 	tabAbsent = tabNoIndex | tabNoNewIndex | tabNoEq | tabNoLen | tabNoCall | tabNoClose
 )

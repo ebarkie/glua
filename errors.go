@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"unsafe"
+
+	"github.com/folbricht/glua/internal/syntax"
 )
 
 var (
@@ -170,4 +173,45 @@ func (ex *executor) hostError(err error) error {
 
 func ctxError(ctx context.Context) error {
 	return context.Cause(ctx)
+}
+
+// SyntaxError is a chunk that does not compile.
+type SyntaxError struct {
+	Source    string
+	Line, Col int
+	Msg       string
+}
+
+func (e *SyntaxError) Error() string { return fmt.Sprintf("%s:%d: %s", e.Source, e.Line, e.Msg) }
+
+// syntaxError turns the compiler's error into a *SyntaxError.
+func syntaxError(err error) error {
+	if se, ok := err.(*syntax.Error); ok {
+		return &SyntaxError{Source: se.Source, Line: se.Line, Col: se.Col, Msg: se.Msg}
+	}
+	return err
+}
+
+// BindError is a binding that cannot work: a Go value or type that cannot be converted, a
+// duplicate or reserved name, a missing field. New, Load, Expr and FuncN return it, before
+// anything runs.
+type BindError struct {
+	Name   string
+	Type   reflect.Type
+	Reason string
+}
+
+func (e *BindError) Error() string {
+	var s string
+	switch {
+	case e.Name != "" && e.Type != nil:
+		s = fmt.Sprintf("glua: cannot bind '%s' (%s): ", e.Name, e.Type)
+	case e.Name != "":
+		s = fmt.Sprintf("glua: cannot bind '%s': ", e.Name)
+	case e.Type != nil:
+		s = fmt.Sprintf("glua: cannot bind %s: ", e.Type)
+	default:
+		s = "glua: cannot bind: "
+	}
+	return s + e.Reason
 }
