@@ -208,7 +208,7 @@ func encodeReflect(rv reflect.Value, depth int) (Value, error) {
 			if !ok {
 				return Value{}, fmt.Errorf("map key %v is not a valid table key", it.Key())
 			}
-			tab.set(nk, x)
+			tab.set(internKey(nk), x)
 		}
 		return tableValue(tab), nil
 	case reflect.Func:

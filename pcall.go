@@ -65,6 +65,12 @@ func protectedSync(c *Call, handler bool) error {
 
 // callSync calls f with args from Go code running on this executor and returns all results.
 func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
+	return ex.callSyncInto(nil, f, args)
+}
+
+// callSyncInto is callSync, appending the results to dst. A Lua function runs in a nested
+// run, which counts as a host re-entry.
+func (ex *executor) callSyncInto(dst []Value, f Value, args []Value) ([]Value, error) {
 	st := &ex.st
 	cl, base, pc := st.cl, st.base, st.pc
 	ex.nny++ // a nested run: it cannot yield
@@ -86,7 +92,12 @@ func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
 		var err error
 		switch {
 		case f.isObj(kindLuaFn):
+			if ex.depth >= ex.maxHostDepth {
+				return nil, ex.terminal(ErrHostDepth)
+			}
+			ex.depth++
 			err = ex.run((*Closure)(f.p), slot, len(args))
+			ex.depth--
 		case f.isObj(kindGoFn):
 			var n int
 			n, err = ex.callGoRaw((*goFunc)(f.p), slot, len(args))
@@ -103,7 +114,7 @@ func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return append([]Value(nil), ex.stack[slot:ex.top]...), nil
+		return append(dst, ex.stack[slot:ex.top]...), nil
 	}
 }
 
@@ -332,8 +343,8 @@ func (ex *executor) closeTerminal(level int, le *Error) {
 	if len(ex.tbc) == 0 || ex.tbc[len(ex.tbc)-1] < level || ex.st.cl == nil {
 		return
 	}
-	steps, ticks, alloc := ex.steps, ex.st.ticks, ex.allocLeft
-	ex.steps, ex.st.ticks, ex.allocLeft = 0, tickQuantum, 4<<10
+	steps, ticks, alloc, fatal := ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal
+	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal = 0, tickQuantum, 4<<10, nil
 	ctx := ex.ctx
 	if ctx.Err() != nil {
 		ex.ctx = context.WithoutCancel(ctx) // let the closers run after a cancellation
@@ -341,7 +352,7 @@ func (ex *executor) closeTerminal(level int, le *Error) {
 	ex.closeOnError(level, le.Value)
 	ex.dropTBC(level)
 	ex.ctx = ctx
-	ex.steps, ex.st.ticks, ex.allocLeft = steps, ticks, alloc
+	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal = steps, ticks, alloc, fatal
 }
 
 // dropTBC forgets the to-be-closed variables at stack index level and above.

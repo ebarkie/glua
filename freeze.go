@@ -2,6 +2,9 @@ package glua
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"unique"
 	"unsafe"
 )
 
@@ -13,6 +16,7 @@ import (
 // freezer collects the objects reachable from the values given to add.
 type freezer struct {
 	plans  *[]*typeInfo // the Runtime's view of bound types; nil for the process-wide one
+	intern bool         // give string keys the canonical pointers constants have
 	seen   map[unsafe.Pointer]bool
 	work   []freezeItem
 	tables []*Table
@@ -103,6 +107,9 @@ func (f *freezer) walk() error {
 // freeze makes what walk collected read-only.
 func (f *freezer) freeze() {
 	for _, t := range f.tables {
+		if f.intern {
+			t.internKeys()
+		}
 		t.freeze()
 	}
 	for _, c := range f.cells {
@@ -187,4 +194,46 @@ func (ti *typeInfo) writable() bool {
 		}
 	}
 	return false
+}
+
+// interned keeps canonical strings alive for keys that Go code puts in tables: library,
+// global, module and member names, and names given to Table.Set. The hot loop compares key
+// pointers, and the compiler gives constants these canonical pointers, so a key built in Go
+// is found inline only if it is interned. The registry is capped, so a host that builds
+// tables with endless distinct keys cannot make it grow without bound.
+var (
+	interned      sync.Map // string -> unique.Handle[string]
+	internedCount atomic.Int64
+)
+
+const (
+	maxInterned   = 1 << 16 // names in the registry
+	maxInternedSz = 64      // longest name interned, in bytes
+)
+
+// internKey returns k with the canonical pointer, if k is a short name and the registry
+// has room; otherwise k itself.
+func internKey(k Value) Value {
+	if !k.isString() || k.n&lenMask > maxInternedSz {
+		return k
+	}
+	s := k.str()
+	if h, ok := interned.Load(s); ok {
+		return String(h.(unique.Handle[string]).Value())
+	}
+	if !isName(s) || internedCount.Load() >= maxInterned {
+		return k
+	}
+	h := unique.Make(s)
+	if _, loaded := interned.LoadOrStore(s, h); !loaded {
+		internedCount.Add(1)
+	}
+	return String(h.Value())
+}
+
+// internKeys gives t's string keys their canonical pointers.
+func (t *Table) internKeys() {
+	for i := range t.nodes {
+		t.nodes[i].k = internKey(t.nodes[i].k)
+	}
 }

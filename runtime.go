@@ -421,13 +421,13 @@ func (rt *Runtime) buildLayer(o *options) error {
 		rt.sources[name] = m
 	}
 	fr := newFreezer()
-	fr.plans = rt.plans()
+	fr.plans, fr.intern = rt.plans(), true
 	fr.add(tableValue(g), "globals")
 	if err := fr.walk(); err != nil {
 		return &BindError{Reason: err.Error()}
 	}
 	fr.freeze()
-	if err := freezeValue(tableValue(rt.modules), "package.loaded"); err != nil {
+	if err := freezeValue(tableValue(rt.modules), "package.loaded"); err != nil { // the modules are frozen already
 		return &BindError{Reason: err.Error()}
 	}
 	if rt.strMeta != nil {

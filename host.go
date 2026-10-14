@@ -19,11 +19,15 @@ type Call struct {
 
 	fromLua bool    // called by the VM for Lua code, not by pcall or another Go function
 	fn      *goFunc // the function being called, for messages
+
+	unwinding bool  // Arg is panicking with argErr
+	argErr    error // the argument error Arg raised
 }
 
 func (c *Call) reset() {
 	clear(c.res[:cap(c.res)])
 	c.res = c.res[:0]
+	c.unwinding, c.argErr = false, nil
 }
 
 // Context returns the context of the outermost entry from Go.
@@ -56,37 +60,15 @@ func (c *Call) return1(v Value) {
 	c.res = append(c.res[:0], v)
 }
 
-// Invoke calls fn with args from inside a host function and returns its first result.
-// It shares the budgets of the outermost entry.
+// Invoke calls fn with args from inside a host function and returns its first result. It
+// shares the budgets of the outermost entry.
 func (c *Call) Invoke(fn Value, args ...Value) (Value, error) {
-	ex := c.ex
-	if !fn.isObj(kindLuaFn) {
-		return Value{}, ex.errorf("attempt to call a %s value", typeName(fn))
-	}
-	if ex.depth >= ex.maxHostDepth {
-		return Value{}, ex.terminal(ErrHostDepth)
-	}
-	st := &ex.st
-	cl, base, pc := st.cl, st.base, st.pc
-	slot := max(base+int(cl.p.maxstack), c.base+c.nargs) // first free slot above the calling Lua frame
-	if err := ex.ensure(slot + 1 + len(args)); err != nil {
+	var buf [1]Value
+	res, err := c.ex.callSyncInto(buf[:0], fn, args)
+	if err != nil || len(res) == 0 {
 		return Value{}, err
 	}
-	copy(ex.stack[slot+1:], args)
-	ex.depth++
-	ex.nny++
-	err := ex.run((*Closure)(fn.p), slot, len(args))
-	ex.nny--
-	ex.depth--
-	st.cl, st.base, st.pc = cl, base, pc
-	if err != nil {
-		return Value{}, err
-	}
-	var r Value
-	if ex.top > slot {
-		r = ex.stack[slot]
-	}
-	return r, nil
+	return res[0], nil
 }
 
 // hostCall calls the Go function of the CALL at pc-1.
@@ -150,11 +132,14 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	ex.depth++
 	ex.nny++
 	ex.hostCalls++
-	err := g.f(c)
+	err := invokeGo(g, c)
 	ex.hostCalls--
 	ex.nny--
 	ex.depth--
 	st.cl, st.base, st.pc = cl, base, pc
+	if ex.fatal != nil && err != errYield {
+		err = ex.fatal // a terminal error stands, whatever the function did with it
+	}
 	if err == errYield {
 		c.reset()
 		return 0, err // coroutine.yield: the caller records where the results go
@@ -171,4 +156,17 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	c.reset()
 	st.hi = max(st.hi, fn+n)
 	return n, nil
+}
+
+// invokeGo calls the host function g. An argument error that Arg raised by panic is
+// recovered here; any other panic passes through untouched, with its stack.
+func invokeGo(g *goFunc, c *Call) (err error) {
+	defer func() {
+		if c.unwinding {
+			recover()
+			c.unwinding = false
+			err = c.argErr
+		}
+	}()
+	return g.f(c)
 }

@@ -403,13 +403,19 @@ func TestMegamorphicSite(t *testing.T) {
 	a.field(opGetField, 1, 0, int(a.kstr("x")))
 	a.abc(opReturn1, 1, 0, 0)
 	p := a.done()
-	shapes := make([]*Table, 4)
-	for i := range shapes {
-		shapes[i] = NewTable(0, 4)
-		for j := range i {
-			shapes[i].Set(String(strings.Repeat("k", j+1)), Int(int64(j)))
+	// four shapes with x in four different slots, so that the site misses at every change
+	shapes := make([]*Table, 0, 4)
+	used := map[int]bool{}
+	for n := 0; len(shapes) < 4; n++ {
+		t := NewTable(0, 8)
+		for j := range n % 7 {
+			t.Set(String(strings.Repeat("k", j+1+n/7)), Int(int64(j)))
 		}
-		shapes[i].Set(String("x"), Int(int64(100+i)))
+		t.Set(String("x"), Int(int64(100+len(shapes))))
+		if _, slot := t.getSlot(String("x")); !used[slot] {
+			used[slot] = true
+			shapes = append(shapes, t)
+		}
 	}
 	var wg sync.WaitGroup
 	for g := range 2 {

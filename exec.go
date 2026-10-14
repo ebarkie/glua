@@ -111,6 +111,7 @@ type executor struct {
 	randSeeded bool
 	randSeed   *uint64 // the RandSeed option, if set
 	hostCalls  int     // Go functions running: a panic now is the host's, not the VM's
+	fatal      error   // the terminal error of this entry, which stands once raised
 
 	running, poisoned bool
 }
@@ -237,7 +238,7 @@ func (ex *executor) reset() {
 	ex.ctx, ex.top, ex.depth = nil, 0, 0
 	ex.tbc = ex.tbc[:0]
 	clear(ex.goErrs)
-	ex.co, ex.nny = nil, 0
+	ex.co, ex.nny, ex.fatal = nil, 0, nil
 	ex.randSeeded = false
 }
 

@@ -151,7 +151,11 @@ func (ex *executor) typeError(what string, v Value, reg int) error {
 
 // terminal raises an error that pcall cannot catch: limits, context cancellation, host depth.
 func (ex *executor) terminal(cause error) error {
-	return &Error{Value: String(cause.Error()), where: ex.where(), cause: cause, terminal: true}
+	err := &Error{Value: String(cause.Error()), where: ex.where(), cause: cause, terminal: true}
+	if ex.fatal == nil {
+		ex.fatal = err
+	}
+	return err
 }
 
 // hostError turns an error returned by a host function into a Lua error. The Go error is
