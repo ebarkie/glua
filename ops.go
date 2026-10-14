@@ -870,10 +870,10 @@ func (ex *executor) pushFrame(cl *Closure, fn, nargs, pc, callerBase int, flags 
 		return err
 	}
 	if st.nf == len(ex.pframes) {
-		if len(ex.pframes) >= ex.maxCallDepth {
+		if len(ex.pframes) >= ex.frameLimit() {
 			return ex.errorf("stack overflow")
 		}
-		ex.pframes = append(ex.pframes, make([]uint64, min(len(ex.pframes), ex.maxCallDepth-len(ex.pframes)))...)
+		ex.pframes = append(ex.pframes, make([]uint64, min(len(ex.pframes), ex.frameLimit()-len(ex.pframes)))...)
 	}
 	np := int(cl.p.nparams)
 	if nargs < np {

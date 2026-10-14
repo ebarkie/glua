@@ -108,3 +108,10 @@ return r1[2], l1, r2[2], l2, r3[2], l3, r4[2], l4, r5[2], log
 local function c(name) return setmetatable({}, {__close = function(_, e) error(name .. " replaced " .. e, 0) end}) end
 local x <close> = c("x")
 error("original", 0)
+--== a message handler for a stack overflow
+local function loop(x) return 1 + loop(x) end
+local a, b = xpcall(loop, function(m) return "h: " .. m end)
+local c, d = xpcall(loop, loop)
+local function deep() return 1 + deep() end
+local e = pcall(deep)
+return a, b, c, d, e, select(2, xpcall(loop, function(m) return "again: " .. m end))

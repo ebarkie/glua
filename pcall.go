@@ -110,6 +110,13 @@ func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
 // errorInErrorHandling is what an error inside an xpcall message handler turns into.
 const errorInErrorHandling = "error in error handling"
 
+// handlerFrames and handlerSlots are how far past the limits on frames and stack slots a
+// message handler may go, so that it can handle a stack overflow.
+const (
+	handlerFrames = 200
+	handlerSlots  = 200 * 64
+)
+
 // pcallValue does pcall(f, ...) or xpcall(f, h, ...) for the call at stack[fn] with nargs
 // arguments. On success the results are true and f's results, at stack[fn].
 func (ex *executor) pcallValue(g *goFunc, fn, nargs int) error {
@@ -261,6 +268,10 @@ func (ex *executor) frameFuncSlot(f, base int, cl *Closure) int {
 // leaves false and value as the results of the pcall at stack[fn].
 func (ex *executor) unwindTo(f, base, fn int, value Value) error {
 	st := &ex.st
+	if ex.errExtra > 0 && f < ex.maxCallDepth {
+		ex.errExtra = 0
+		ex.pframes = ex.pframes[:min(len(ex.pframes), ex.maxCallDepth)] // take back the handler's room
+	}
 	fr := ex.pframes[f]
 	value, err := ex.closeOnError(fn, value)
 	if err != nil {
@@ -335,6 +346,7 @@ func (ex *executor) dropTBC(level int) {
 // handlerReturned unwinds to f with its result.
 func (ex *executor) startHandler(f, fn int, msg Value) error {
 	h := ex.stack[fn]
+	ex.errExtra = handlerFrames // room for the handler of a stack overflow; unwindTo takes it back
 	if !h.isObj(kindLuaFn) {
 		r, err := ex.callHandler(h, msg)
 		if err != nil {
@@ -355,7 +367,13 @@ func (ex *executor) startHandler(f, fn int, msg Value) error {
 		ex.cont = append(ex.cont, 0)
 	}
 	ex.cont[st.nf] = int32(f) // the catch frame to unwind to when the handler returns
-	return ex.pushLua((*Closure)(h.p), slot, 1, frErrHandler)
+	if err := ex.pushLua((*Closure)(h.p), slot, 1, frErrHandler); err != nil {
+		if le, ok := err.(*Error); ok && le.terminal {
+			return err
+		}
+		return ex.unwindFrom(f, String(errorInErrorHandling))
+	}
+	return nil
 }
 
 // unwindFrom unwinds from the current frame to catch frame f with the result value.

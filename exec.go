@@ -93,6 +93,7 @@ type executor struct {
 
 	maxSteps     int64
 	maxCallDepth int
+	errExtra     int // frames a message handler may use beyond maxCallDepth, as C Lua's error stack
 	maxHostDepth int
 	maxAlloc     int64 // bytes one entry may allocate
 	allocLeft    int64 // what is left of it in the current entry
@@ -231,15 +232,22 @@ func release(pool *sync.Pool, ex *executor) {
 	}
 }
 
+// frameLimit is the number of frames allowed now.
+func (ex *executor) frameLimit() int { return ex.maxCallDepth + ex.errExtra }
+
 // ensure grows the stack so that n slots plus the slack exist.
 func (ex *executor) ensure(n int) error {
 	if n+stackSlack <= len(ex.stack) {
 		return nil
 	}
-	if n+stackSlack > maxStack {
+	limit := maxStack
+	if ex.errExtra > 0 {
+		limit += handlerSlots
+	}
+	if n+stackSlack > limit {
 		return ex.errorf("stack overflow")
 	}
-	size := min(max(2*len(ex.stack), n+stackSlack), maxStack)
+	size := min(max(2*len(ex.stack), n+stackSlack), limit)
 	s := make([]Value, size)
 	copy(s, ex.stack)
 	clear(ex.stack) // the old stack may stay reachable from a stale pointer; leave nothing in it
@@ -309,10 +317,10 @@ func (ex *executor) drive(nf0 int) error {
 				ex.st.pc-- // run the CALL again
 			}
 		case exGrowFrames:
-			if len(ex.pframes) >= ex.maxCallDepth {
+			if len(ex.pframes) >= ex.frameLimit() {
 				err = ex.errorf("stack overflow")
 			} else {
-				ex.pframes = append(ex.pframes, make([]uint64, min(len(ex.pframes), ex.maxCallDepth-len(ex.pframes)))...)
+				ex.pframes = append(ex.pframes, make([]uint64, min(len(ex.pframes), ex.frameLimit()-len(ex.pframes)))...)
 				ex.st.pc--
 			}
 		case exTick:
