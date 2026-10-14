@@ -92,12 +92,13 @@ const (
 	opGtKJmp  // test R[A] > K[B], that is K[B] < R[A]
 	opGeKJmp  // test R[A] >= K[B], that is K[B] <= R[A]
 	opTestJmp // test R[A] is truthy
+	opTestSet // test R[B] is truthy; fall through when it equals C, else R[A] = R[B] and jump
 
 	// loops
 	opForPrep  // prepare R[A..A+3]; skip the loop, pc += Bx, when it runs no times
 	opForLoop  // count down; while iterations remain, R[A+3] = next, pc -= Bx
 	opTForPrep // mark R[A+3] to be closed; pc += Bx, to the TFORCALL
-	opTForCall // R[A+4], ..., R[A+3+C] = R[A](R[A+1], R[A+2])
+	opTForCall // R[A+4], ..., R[A+2+C] = R[A](R[A+1], R[A+2]); C-1 results, as CALL counts them
 	opTForLoop // if R[A+4] ~= nil then R[A+2] = R[A+4]; pc -= Bx end
 
 	// calls
@@ -211,6 +212,7 @@ var opTable = [numOps]opInfo{
 	opGtKJmp:     {"GTKJMP", oReg, oK, oInt, false, oJumpX},
 	opGeKJmp:     {"GEKJMP", oReg, oK, oInt, false, oJumpX},
 	opTestJmp:    {"TESTJMP", oReg, oNone, oInt, false, oJumpX},
+	opTestSet:    {"TESTSET", oReg, oReg, oInt, false, oJumpX},
 	opForPrep:    {"FORPREP", oReg, oFwd, oNone, true, oNone},
 	opForLoop:    {"FORLOOP", oReg, oBack, oNone, true, oNone},
 	opTForPrep:   {"TFORPREP", oReg, oFwd, oNone, true, oNone},

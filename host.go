@@ -88,11 +88,22 @@ func (ex *executor) hostCall() error {
 }
 
 // callGo calls g with the nargs arguments above stack[fn], for the CALL at pc-1, and puts
-// its results where that CALL expects them. Call records live in a slice indexed by
-// host-call depth, so nesting allocates nothing and each host frame has its own record.
+// its results where that CALL expects them.
 func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
+	n, err := ex.callGoRaw(g, fn, nargs)
+	if err != nil {
+		return err
+	}
+	ex.adjustResults(ex.instr(ex.st.pc-1), fn, n)
+	return nil
+}
+
+// callGoRaw calls g with the nargs arguments above stack[fn] and leaves its n results at
+// stack[fn]. Call records live in a slice indexed by host-call depth, so nesting allocates
+// nothing and each host frame has its own record.
+func (ex *executor) callGoRaw(g *goFunc, fn, nargs int) (int, error) {
 	if ex.depth >= ex.maxHostDepth {
-		return ex.terminal(ErrHostDepth)
+		return 0, ex.terminal(ErrHostDepth)
 	}
 	for len(ex.calls) <= ex.depth { // Invoke also counts as depth, so this may skip a record
 		ex.calls = append(ex.calls, &Call{ex: ex})
@@ -107,15 +118,14 @@ func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
 	st.cl, st.base, st.pc = cl, base, pc
 	if err != nil {
 		c.reset()
-		return ex.hostError(err)
+		return 0, ex.hostError(err)
 	}
 	n := len(c.res)
 	if err := ex.ensure(fn + n); err != nil {
-		return err
+		return 0, err
 	}
 	copy(ex.stack[fn:], c.res)
 	c.reset()
 	st.hi = max(st.hi, fn+n)
-	ex.adjustResults(ex.instr(pc-1), fn, n)
-	return nil
+	return n, nil
 }

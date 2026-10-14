@@ -1,0 +1,41 @@
+arithmetic and precedence	7 | 9 | 512.0 | -4.0 | 3 | -4 | -2 | 2 | 3.0 | 0.5 | inf
+integer and float	2 | 2.0 | 5.0 | 4.5 | 9.007199254741e+15 | 9007199254740993 | nil
+integer wraparound and division	-9223372036854775808 | 9223372036854775807 | -2 | -3 | -1 | -9223372036854775807
+bitwise	1 | 7 | 6 | -1 | 4611686018427387904 | -9223372036854775808 | 0 | 9223372036854775807 | 1 | 2
+comparisons	true | true | false | true | true | true | true | true | true
+logic values	1 | 2 | 2 | nil | nil | true | false | 3 | true
+numeric strings in arithmetic	11 | 12 | 16 | 10 | str:31303230 | str:312e35 | -2
+locals and multiple assignment	2 | 1 | nil | 1 | 2
+assignment conflicts	1 | nil | nil
+globals	5 | 10 | nil
+table constructors	4 | 1 | 4 | str:61 | str:62 | str:63 | nil
+constructors with calls and varargs	3 | 4 | 1 | 2 | 3 | 10
+varargs	3 | 10 | 20 | 10 | 20 | 30
+varargs with fixed parameters	nil | 1 | 1 | 2 | 2 | 3
+result adjustment	1 | 2 | nil | 1 | 10 | 1
+method calls	10 | 10
+closures capture by value	1 | 2 | 3 | 10
+closures share cells	2 | 3
+upvalues through several levels	5 | 5
+fresh cell per iteration	11 | 21 | 12 | 13
+loop variable assigned and captured	2 | 4 | 6
+while, repeat, break	11 | 55 | 5
+numeric for loops	55 | 30 | 4.5 | 0
+generic for with an iterator	15 | 1.0 | 4.0 | 9.0
+goto continue and nested loops	30
+if chains	str:6e6567 | str:7a65726f | str:736d616c6c | str:626967
+recursion and tail calls	6765 | 100000
+mutual recursion through locals	true | true | false
+concatenation	str:7832332e3079 | str:7833 | str:3132
+const locals	11 | str:733130 | 20
+and/or in conditions and values	str:706f73 | str:6e6f6e706f73 | str:6e6f6e706f73 | str:64656661756c74 | 3
+comparison results as values	true | false | true | true
+length of strings and tables	5 | 0 | 0 | 3
+large constructor	60 | 1 | 50 | 51 | 60
+__index and __newindex	str:6869 | nil | 2 | str:61 | str:7821 | str:3121
+to-be-closed variables	5 | str:62 | str:61 | str:6331 | str:6332 | str:64 | str:726574
+_ENV as a local	3 | 3
+upvalue _ENV	7
+nested functions and varargs in closures	3
+string escapes and long strings	str:610962 | str:4142 | str:6c696e65 | str:4869
+float formatting through tostring	1e+15 | 1e+16 | 9.2233720368548e+18 | -0.0 | inf | -inf | 3.0 | 0.1

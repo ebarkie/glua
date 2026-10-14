@@ -38,7 +38,7 @@ func TestVerifyRejects(t *testing.T) {
 		{"missing aux", mk(0, 2, str, iABC(opGetField, 0, 1, 0)), "missing aux word"},
 		{"vararg prep mismatch", mk(1, 2, nil, iABC(opVarargPrep, 0, 0, 0)), "0 fixed parameters, the prototype has 1"},
 		{"loadnil range", mk(0, 2, nil, iABC(opLoadNil, 1, 1, 0)), "register 2 not below"},
-		{"tforcall range", mk(0, 5, nil, iABC(opTForCall, 0, 0, 2)), "register 5 not below"},
+		{"tforcall range", mk(0, 6, nil, iABC(opTForCall, 0, 0, 2)), "register 6 not below"},
 		{"closure prototype", mk(0, 1, nil, iABx(opClosure, 0, 0)), "prototype 0 out of range"},
 		{"maxstack below params", &Proto{name: "v", nparams: 2, maxstack: 1, code: []uint32{opBad}}, "maxstack below nparams"},
 	}

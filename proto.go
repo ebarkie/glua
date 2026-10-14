@@ -17,6 +17,8 @@ type Proto struct {
 	upvals   []upvalDesc
 	nparams  uint8
 	maxstack uint8
+	vararg   bool
+	lines    []int32 // source line of each code word
 	source   string
 	name     string
 
@@ -29,10 +31,13 @@ type upvalDesc struct {
 	index     uint8
 }
 
-// Closure is a Lua function value: a prototype and its captured values.
+// Closure is a Lua function value: a prototype, its captured values, and the globals table
+// it was created under, which GETGLOBAL reads. One prototype can so serve both a frozen
+// Script and its private VMs.
 type Closure struct {
-	p  *Proto
-	up []Value
+	p   *Proto
+	up  []Value
+	env *Table
 }
 
 // goFunc is a Go function value.

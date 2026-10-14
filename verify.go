@@ -156,7 +156,7 @@ func (v *verifier) instr(pc int) error {
 			return fail("fewer than two operands")
 		}
 		return reg(a + b - 1)
-	case opEqJmp, opLtJmp, opLeJmp, opEqKJmp, opLtKJmp, opLeKJmp, opGtKJmp, opGeKJmp, opTestJmp:
+	case opEqJmp, opLtJmp, opLeJmp, opEqKJmp, opLtKJmp, opLeKJmp, opGtKJmp, opGeKJmp, opTestJmp, opTestSet:
 		if c > 1 {
 			return fail("polarity %d is not 0 or 1", c)
 		}
@@ -166,10 +166,13 @@ func (v *verifier) instr(pc int) error {
 		}
 		return reg(a + 3)
 	case opTForCall:
-		if c < 1 {
+		if c < 2 {
 			return fail("no loop variables")
 		}
-		return reg(a + 3 + c)
+		if err := reg(a + 6); err != nil { // the call's copy of iterator, state and control
+			return err
+		}
+		return reg(a + 2 + c)
 	case opCall, opTailCall:
 		if b > 0 {
 			if err := reg(a + b - 1); err != nil {

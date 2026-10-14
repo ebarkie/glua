@@ -286,7 +286,7 @@ dispatch:
 		case opCall: // R[A], ... = R[A](R[A+1], ..., R[A+B-1]); C-1 results are expected
 			a := uint8(i >> 8)
 			fn := &regs[a]
-			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 {
+			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 && !(*Closure)(fn.p).p.vararg {
 				if uintptr(unsafe.Pointer(fn)) >= ex.st.limitAddr {
 					e = exGrowStack
 					break dispatch
@@ -317,7 +317,7 @@ dispatch:
 				e = exHostCall
 				break dispatch
 			} else {
-				e = exSlowOp // open argument lists, __call and errors live in the driver
+				e = exSlowOp // open argument lists, vararg callees, __call and errors live in the driver
 				break dispatch
 			}
 

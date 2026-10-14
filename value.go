@@ -50,6 +50,7 @@ const (
 	kindGoFn
 	kindThread
 	kindUser
+	kindCell // internal: a captured variable's cell; never visible to Lua
 )
 
 // A userdata's n is kindUser<<56 | flags<<48 | typeID.
@@ -370,7 +371,7 @@ func checkValue(v Value) string {
 			if v.n&lenMask == 0 {
 				return "empty string that is not the canonical empty string"
 			}
-		case kindTable, kindLuaFn, kindGoFn, kindThread:
+		case kindTable, kindLuaFn, kindGoFn, kindThread, kindCell:
 			if v.n&lenMask != 0 {
 				return "object with a payload"
 			}
