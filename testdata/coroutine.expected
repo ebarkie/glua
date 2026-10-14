@@ -1,0 +1,11 @@
+generator	1 | 2 | 3 | str:646f6e65
+values both ways	true | 3 | true | 20 | true | 7 | str:656e64 | false | str:63616e6e6f7420726573756d65206465616420636f726f7574696e65
+status and running	str:73757370656e646564 | true | str:72756e6e696e67 | true | false | true | str:64656164 | true | false
+yield across pcall	1 | 2 | true | 50 | false | str:6166746572207969656c64
+pcall of yield itself	str:79 | true | true | str:6261636b
+yield inside metamethods and iterators	str:6b6579 | str:697431 | str:697432 | str:676f74 | 3
+errors in coroutines	false | str:696e73696465 | str:64656164 | false | str:63616e6e6f7420726573756d65206465616420636f726f7574696e65 | false | str:6572726f727320696e20636f726f7574696e65733a343a2077726170706564
+yield errors	false | str:617474656d707420746f207969656c642066726f6d206f757473696465206120636f726f7574696e65 | true | str:72756e6e696e67
+close	true | str:636c6f7365643a6e696c | str:64656164 | false | str:78
+resume non-suspended	true | false | str:63616e6e6f7420726573756d65206e6f6e2d73757370656e64656420636f726f7574696e65 | false | str:63616e6e6f7420726573756d65206e6f6e2d73757370656e64656420636f726f7574696e65
+many coroutines and deep yields	5050 | 60500

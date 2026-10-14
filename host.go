@@ -73,7 +73,9 @@ func (c *Call) Invoke(fn Value, args ...Value) (Value, error) {
 	}
 	copy(ex.stack[slot+1:], args)
 	ex.depth++
+	ex.nny++
 	err := ex.run((*Closure)(fn.p), slot, len(args))
+	ex.nny--
 	ex.depth--
 	st.cl, st.base, st.pc = cl, base, pc
 	if err != nil {
@@ -107,6 +109,9 @@ func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
 		return ex.pcallValue(g, fn, nargs)
 	}
 	n, err := ex.callGoRawFrom(g, fn, nargs, true)
+	if err == errYield {
+		return ex.yieldedAt(fn, yieldCall)
+	}
 	if err != nil {
 		return err
 	}
@@ -135,9 +140,15 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	st := &ex.st
 	cl, base, pc := st.cl, st.base, st.pc // the host function may re-enter the VM
 	ex.depth++
+	ex.nny++
 	err := g.f(c)
+	ex.nny--
 	ex.depth--
 	st.cl, st.base, st.pc = cl, base, pc
+	if err == errYield {
+		c.reset()
+		return 0, err // coroutine.yield: the caller records where the results go
+	}
 	if err != nil {
 		c.reset()
 		return 0, ex.hostError(err)

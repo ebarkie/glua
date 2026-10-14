@@ -83,6 +83,9 @@ type executor struct {
 	cont    []int32                  // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
 	strMeta *Table                   // the metatable all strings share; the string library sets it
 	goErrs  map[unsafe.Pointer]error // Go errors by the data of their message, so raising it again keeps the chain
+	co      *coroutine               // the running coroutine, nil on the main thread
+	mainCo  *coroutine               // stands for the main thread in coroutine.running
+	nny     int                      // Go calls and nested runs in progress: a yield cannot cross them
 	st      state
 	types   *[]*typeInfo
 
@@ -174,6 +177,7 @@ func (ex *executor) reset() {
 	ex.ctx, ex.top, ex.depth = nil, 0, 0
 	ex.tbc = ex.tbc[:0]
 	clear(ex.goErrs)
+	ex.co, ex.nny = nil, 0
 }
 
 // release returns an executor to the pool, unless it ended abnormally or has grown large.

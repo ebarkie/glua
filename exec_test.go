@@ -550,3 +550,27 @@ func TestCloseAfterTerminalError(t *testing.T) {
 		t.Error("a closer did not run after a terminal error")
 	}
 }
+
+// A yield cannot cross a Go function: Lua code called back from Go gets C Lua's error.
+func TestYieldAcrossGoCall(t *testing.T) {
+	p, _, err := compileChunk("t", `
+		local co = coroutine.create(function()
+			return each(function() coroutine.yield(1) end)
+		end)
+		return coroutine.resume(co)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGlobals()
+	g.Set(String("each"), goFnValue(&goFunc{name: "each", f: func(c *Call) error {
+		_, err := c.Invoke(c.Value(0))
+		return err
+	}}))
+	res, err := runClosure(context.Background(), newExecutor(), &Closure{p: p, env: g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res[0].Truthy() || !strings.Contains(res[1].String(), "attempt to yield across a C-call boundary") {
+		t.Fatalf("got %v %v", res[0], res[1])
+	}
+}

@@ -552,6 +552,9 @@ func (ex *executor) callMeta(h Value, args ...Value) error {
 		return ex.pushLua((*Closure)(h.p), fn, len(args), frCont)
 	}
 	n, err := ex.callGoRawFrom((*goFunc)(h.p), fn, len(args), true)
+	if err == errYield {
+		return ex.yieldedAt(fn, yieldMeta)
+	}
 	if err != nil {
 		return err
 	}

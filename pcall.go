@@ -67,7 +67,8 @@ func protectedSync(c *Call, handler bool) error {
 func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
 	st := &ex.st
 	cl, base, pc := st.cl, st.base, st.pc
-	defer func() { st.cl, st.base, st.pc = cl, base, pc }()
+	ex.nny++ // a nested run: it cannot yield
+	defer func() { st.cl, st.base, st.pc = cl, base, pc; ex.nny-- }()
 	slot := max(base+int(cl.p.maxstack), ex.top)
 	if d := ex.depth - 1; d >= 0 && d < len(ex.calls) {
 		slot = max(slot, ex.calls[d].base+ex.calls[d].nargs) // above the calling Go function's arguments
@@ -134,6 +135,9 @@ func (ex *executor) pcallValue(g *goFunc, fn, nargs int) error {
 			return ex.pushLua((*Closure)(v.p), slot, nargs, flags)
 		case v.isObj(kindGoFn):
 			n, err := ex.callGoRaw((*goFunc)(v.p), slot, nargs)
+			if err == errYield && flags&frHandler == 0 {
+				return ex.yieldedAt(slot, yieldPcall)
+			}
 			if err != nil {
 				return ex.caughtNow(fn, flags, err)
 			}
@@ -189,6 +193,8 @@ func (ex *executor) callHandler(h, msg Value) (Value, error) {
 	ex.stack[slot], ex.stack[slot+1] = h, msg
 	st.hi = max(st.hi, slot+2)
 	var err error
+	ex.nny++ // a handler runs in a nested run: it cannot yield
+	defer func() { ex.nny-- }()
 	switch {
 	case h.isObj(kindLuaFn):
 		err = ex.run((*Closure)(h.p), slot, 1)

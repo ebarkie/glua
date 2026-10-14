@@ -15,6 +15,7 @@ var fuzzBases = []string{
 	`local s = "" for k, v in next, {a = 1} do s = s .. k .. v end return s`,
 	`local x <close> = nil local a, b = 1, 2 a, b = b, a if a < b then return a else return b end`,
 	`local t = setmetatable({}, {__index = function(t, k) return k end}) return t.x, t[1]`,
+	`local co = coroutine.wrap(function(a) local b = coroutine.yield(a) return pcall(coroutine.yield, b) end) return co(1), co(2), co(3)`,
 }
 
 // FuzzVerifiedCode mutates the code of compiled programs. Whatever the verifier accepts must

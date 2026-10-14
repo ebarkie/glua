@@ -1,0 +1,366 @@
+package glua
+
+import (
+	"errors"
+	"fmt"
+	"unsafe"
+)
+
+// A coroutine is a second register stack and frame list, not a goroutine. resume swaps the
+// executor's per-thread state with the coroutine's and drives it; yield returns errYield,
+// which the driver passes up to resume, leaving the coroutine's frames in place. A yield may
+// cross pcall, metamethods, iterators and __close, which are VM frames, but not a Go
+// function: that would need the Go stack to be suspended.
+
+type coStatus uint8
+
+const (
+	coSuspended coStatus = iota
+	coRunning
+	coNormal // it resumed another coroutine
+	coDead
+)
+
+var coStatusNames = [...]string{"suspended", "running", "normal", "dead"}
+
+// threadState is everything that belongs to one thread of execution.
+type threadState struct {
+	stack   []Value
+	pframes []uint64
+	nvar    []int32
+	cont    []int32
+	tbc     []int
+	st      state
+	top     int
+}
+
+type coroutine struct {
+	threadState
+	fn      Value // the body, until it starts
+	status  coStatus
+	main    bool // stands for the main thread in coroutine.running
+	started bool
+	errVal  *Error // set when the body died in error, for close
+
+	nnyBase   int       // ex.nny when resumed: a yield must come from exactly one Go call above it
+	yieldFn   int       // stack index where a pending yield's results go
+	yieldKind yieldKind // how to deliver them
+	yielded   []Value
+}
+
+type yieldKind uint8
+
+const (
+	yieldCall  yieldKind = iota // a CALL or TFORCALL: the results as that call expects them
+	yieldMeta                   // a metamethod: finishOp completes the instruction
+	yieldPcall                  // pcall(coroutine.yield, ...): true, then the results
+)
+
+// errYield is how coroutine.yield leaves the coroutine's driver.
+var errYield = errors.New("glua: yield")
+
+func threadValue(co *coroutine) Value { return Value{p: unsafe.Pointer(co), n: kindThread << 56} }
+
+func (ex *executor) saveThread() threadState {
+	return threadState{ex.stack, ex.pframes, ex.nvar, ex.cont, ex.tbc, ex.st, ex.top}
+}
+
+func (ex *executor) loadThread(t threadState) {
+	ex.stack, ex.pframes, ex.nvar, ex.cont, ex.tbc, ex.st, ex.top = t.stack, t.pframes, t.nvar, t.cont, t.tbc, t.st, t.top
+}
+
+// newCoroutine creates a coroutine for function f, charging its stack to the budget.
+func (ex *executor) newCoroutine(f Value) (*coroutine, error) {
+	if err := ex.charge(initStack*16 + 4<<10); err != nil {
+		return nil, err
+	}
+	co := &coroutine{fn: f}
+	co.stack = make([]Value, initStack)
+	co.pframes = make([]uint64, 16)
+	return co, nil
+}
+
+// resume runs co with args until it yields, returns or fails. ok is false when the body
+// failed; vals are then the error value. Terminal errors come back as err.
+func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, err error) {
+	switch {
+	case co.status == coDead:
+		return []Value{String("cannot resume dead coroutine")}, false, nil
+	case co.status != coSuspended:
+		return []Value{String("cannot resume non-suspended coroutine")}, false, nil
+	}
+	prev := ex.co
+	if prev != nil {
+		prev.status = coNormal
+	}
+	saved := ex.saveThread()
+	ex.loadThread(co.threadState)
+	ex.st.ticks = saved.st.ticks // the step budget belongs to the entry, not the coroutine
+	ex.co = co
+	co.status = coRunning
+	co.nnyBase = ex.nny
+	defer func() {
+		co.threadState = ex.saveThread()
+		saved.st.ticks = ex.st.ticks
+		ex.loadThread(saved)
+		ex.co = prev
+		if prev != nil {
+			prev.status = coRunning
+		}
+	}()
+
+	if !co.started {
+		co.started = true
+		f := co.fn
+		co.fn = Value{}
+		if !f.isObj(kindLuaFn) {
+			// a Go function body runs to completion: it cannot yield
+			res, cerr := ex.callSync(f, args)
+			co.status = coDead
+			if cerr != nil {
+				return errorValues(cerr)
+			}
+			return res, true, nil
+		}
+		if err := ex.ensure(1 + len(args) + stackSlack); err != nil {
+			return nil, false, err
+		}
+		ex.stack[0] = f
+		copy(ex.stack[1:], args)
+		ex.st.hi = max(ex.st.hi, 1+len(args))
+		if err := ex.pushFrame((*Closure)(f.p), 0, len(args), 0, 1, frGoEntry); err != nil {
+			return nil, false, err
+		}
+	} else {
+		// the resume values are the results of the pending yield
+		n := len(args)
+		if err := ex.ensure(co.yieldFn + n); err != nil {
+			return nil, false, err
+		}
+		copy(ex.stack[co.yieldFn:], args)
+		ex.st.hi = max(ex.st.hi, co.yieldFn+n)
+		switch co.yieldKind {
+		case yieldMeta:
+			if err := ex.finishOp(co.yieldFn, n); err != nil {
+				return ex.coFailed(co, err)
+			}
+		case yieldPcall:
+			ex.stack[co.yieldFn-1] = Bool(true)
+			ex.adjustResults(ex.instr(ex.st.pc-1), co.yieldFn-1, n+1)
+		default:
+			ex.adjustResults(ex.instr(ex.st.pc-1), co.yieldFn, n)
+		}
+	}
+	err = ex.drive(0)
+	switch {
+	case err == nil:
+		co.status = coDead
+		return append([]Value(nil), ex.stack[0:ex.top]...), true, nil
+	case err == errYield:
+		co.status = coSuspended
+		vals, co.yielded = co.yielded, nil
+		return vals, true, nil
+	}
+	return ex.coFailed(co, err)
+}
+
+// coFailed ends a coroutine that died in error. Its frames stay, so that coroutine.close
+// can close its to-be-closed variables; terminal errors pass through.
+func (ex *executor) coFailed(co *coroutine, err error) ([]Value, bool, error) {
+	co.status = coDead
+	le, ok := err.(*Error)
+	if !ok || le.terminal {
+		return nil, false, err
+	}
+	co.errVal = le
+	return []Value{le.Value}, false, nil
+}
+
+// errorValues turns a non-terminal error into the values resume reports.
+func errorValues(err error) ([]Value, bool, error) {
+	le, ok := err.(*Error)
+	if !ok || le.terminal {
+		return nil, false, err
+	}
+	return []Value{le.Value}, false, nil
+}
+
+// yieldable reports whether the running coroutine may yield from a Go function called by
+// the VM right now: no other Go function or nested run lies in between.
+func (ex *executor) yieldable() bool {
+	return ex.co != nil && !ex.co.main && ex.nny == ex.co.nnyBase+1
+}
+
+// The coroutine library.
+
+func coArg(c *Call, fname string) (*coroutine, error) {
+	v := c.Value(0)
+	if !v.isObj(kindThread) {
+		return nil, fmt.Errorf("bad argument #1 to '%s' (coroutine expected)", fname)
+	}
+	return (*coroutine)(v.p), nil
+}
+
+func coCreate(c *Call) error {
+	f := c.Value(0)
+	if !f.isObj(kindLuaFn) && !f.isObj(kindGoFn) {
+		return fmt.Errorf("bad argument #1 to 'create' (function expected)")
+	}
+	co, err := c.ex.newCoroutine(f)
+	if err != nil {
+		return err
+	}
+	return c.ReturnValues(threadValue(co))
+}
+
+func callArgs(c *Call, from int) []Value {
+	args := make([]Value, 0, max(c.Len()-from, 0))
+	for i := from; i < c.Len(); i++ {
+		args = append(args, c.Value(i))
+	}
+	return args
+}
+
+func coResume(c *Call) error {
+	co, err := coArg(c, "resume")
+	if err != nil {
+		return err
+	}
+	vals, ok, err := c.ex.resume(co, callArgs(c, 1))
+	if err != nil {
+		return err
+	}
+	return c.ReturnValues(append([]Value{Bool(ok)}, vals...)...)
+}
+
+func coYield(c *Call) error {
+	ex := c.ex
+	switch {
+	case ex.co == nil || ex.co.main:
+		return fmt.Errorf("attempt to yield from outside a coroutine")
+	case !ex.yieldable():
+		return fmt.Errorf("attempt to yield across a C-call boundary")
+	}
+	ex.co.yielded = callArgs(c, 0)
+	return errYield
+}
+
+func coStatusOf(c *Call) error {
+	co, err := coArg(c, "status")
+	if err != nil {
+		return err
+	}
+	return c.ReturnValues(String(coStatusNames[co.status]))
+}
+
+func coRunningFn(c *Call) error {
+	ex := c.ex
+	if ex.co == nil {
+		if ex.mainCo == nil {
+			ex.mainCo = &coroutine{main: true, status: coRunning}
+		}
+		return c.ReturnValues(threadValue(ex.mainCo), Bool(true))
+	}
+	return c.ReturnValues(threadValue(ex.co), Bool(ex.co.main))
+}
+
+func coIsYieldable(c *Call) error {
+	ex := c.ex
+	return c.ReturnValues(Bool(ex.co != nil && !ex.co.main && ex.nny == ex.co.nnyBase+1))
+}
+
+func coWrap(c *Call) error {
+	f := c.Value(0)
+	if !f.isObj(kindLuaFn) && !f.isObj(kindGoFn) {
+		return fmt.Errorf("bad argument #1 to 'wrap' (function expected)")
+	}
+	co, err := c.ex.newCoroutine(f)
+	if err != nil {
+		return err
+	}
+	g := &goFunc{name: "wrap", stateful: true}
+	g.f = func(c *Call) error {
+		vals, ok, err := c.ex.resume(co, callArgs(c, 0))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			v := vals[0]
+			if v.isString() {
+				// as C Lua's auxwrap: add the position of the caller
+				if pos := c.ex.whereLevel(c, 1); pos != "" {
+					v = String(pos + ": " + v.str())
+				}
+			}
+			return &Error{Value: v}
+		}
+		return c.ReturnValues(vals...)
+	}
+	return c.ReturnValues(goFnValue(g))
+}
+
+func coClose(c *Call) error {
+	co, err := coArg(c, "close")
+	if err != nil {
+		return err
+	}
+	switch co.status {
+	case coRunning:
+		return fmt.Errorf("cannot close a running coroutine")
+	case coNormal:
+		return fmt.Errorf("cannot close a normal coroutine")
+	}
+	ex := c.ex
+	var errv *Value
+	if co.errVal != nil {
+		v := co.errVal.Value
+		errv = &v
+	}
+	if len(co.tbc) > 0 {
+		// close the variables the coroutine left open, on its own stack
+		saved := ex.saveThread()
+		ex.loadThread(co.threadState)
+		prev := ex.co
+		ex.co = nil // closers cannot yield
+		value := Value{}
+		if errv != nil {
+			value = *errv
+		}
+		v, cerr := ex.closeOnError(0, value)
+		ex.co = prev
+		co.threadState = ex.saveThread()
+		ex.loadThread(saved)
+		if cerr != nil {
+			return cerr
+		}
+		if !same(&v, &value) {
+			errv = &v
+		}
+	}
+	co.status = coDead
+	co.errVal = nil
+	co.stack, co.pframes = nil, nil
+	if errv != nil {
+		return c.ReturnValues(Bool(false), *errv)
+	}
+	return c.ReturnValues(Bool(true))
+}
+
+// coroutineLib returns the coroutine library table.
+func coroutineLib() *Table {
+	t := NewTable(0, 8)
+	for name, f := range map[string]GoFunc{
+		"create": coCreate, "resume": coResume, "yield": coYield, "status": coStatusOf,
+		"running": coRunningFn, "isyieldable": coIsYieldable, "wrap": coWrap, "close": coClose,
+	} {
+		t.Set(String(name), goFnValue(&goFunc{name: name, f: f}))
+	}
+	return t
+}
+
+// yieldedAt records where the results of the yield that just happened go, for the Go call
+// at stack[fn]. It returns errYield, for the caller to pass on.
+func (ex *executor) yieldedAt(fn int, kind yieldKind) error {
+	ex.co.yieldFn, ex.co.yieldKind = fn, kind
+	return errYield
+}

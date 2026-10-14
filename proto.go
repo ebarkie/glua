@@ -51,8 +51,9 @@ type Closure struct {
 
 // goFunc is a Go function value.
 type goFunc struct {
-	f    GoFunc
-	name string
+	f        GoFunc
+	name     string
+	stateful bool // hidden state, such as coroutine.wrap's coroutine: freezing refuses it
 }
 
 func luaFnValue(cl *Closure) Value { return Value{p: unsafe.Pointer(cl), n: kindLuaFn << 56} }
