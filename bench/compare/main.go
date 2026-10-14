@@ -63,6 +63,8 @@ func main() {
 	out := flag.String("raw", "bench/results/go.txt", "file for the raw Go results, in benchstat format")
 	source := flag.Bool("source", false, "time the workloads compiled from source, on the checked and the fast loop, instead")
 	bound := flag.Bool("boundary", false, "time only calls through the public API, on the checked and the fast loop; needs no C Lua")
+	suite := flag.Bool("suite", false, "time the scripts of bench/lua/suite against C Lua instead")
+	only := flag.String("only", "", "with -suite: a regular expression selecting scripts")
 	flag.Parse()
 
 	if *bound {
@@ -85,6 +87,10 @@ func main() {
 	run("go", "test", "-c", "-o", testBin, ".")
 	if *source {
 		compareSource(*lua, testBin, *rounds, *runs, *out)
+		return
+	}
+	if *suite {
+		compareSuite(*lua, testBin, *rounds, *runs, *out, *only)
 		return
 	}
 
@@ -193,6 +199,65 @@ func compareBoundary(testBin string, rounds int, out string) {
 		fmt.Printf("| %s | %s | %s | %s | %s |\n", b.name, spreadNs(chk[i]), spreadNs(fast[i]), b.target, allocs[i])
 	}
 	fmt.Printf("\nRaw Go results for benchstat (checked loop): %s\n", out)
+}
+
+// compareSuite times the scripts of bench/lua/suite against C Lua: on the checked loop, the
+// fast loop, and the checked loop while the GC is marking.
+func compareSuite(lua, testBin string, rounds, runs int, out, only string) {
+	b, err := os.ReadFile("bench/lua/suite/expected.txt")
+	check(err)
+	var names []string
+	sel := regexp.MustCompile(only)
+	for line := range strings.Lines(string(b)) {
+		name, _, _ := strings.Cut(strings.TrimSpace(line), "\t")
+		if name != "" && sel.MatchString(name) {
+			names = append(names, name)
+		}
+	}
+	variants := []string{"BenchmarkSuite", "BenchmarkSuiteFast", "BenchmarkSuiteGC"}
+	var raw bytes.Buffer
+	cT := make([][]float64, len(names))
+	gT := make([][][]float64, len(variants))
+	for v := range variants {
+		gT[v] = make([][]float64, len(names))
+	}
+	for r := range rounds {
+		fmt.Fprintf(os.Stderr, "round %d/%d\n", r+1, rounds)
+		for i, name := range names {
+			cT[i] = append(cT[i], luaRound(lua, filepath.Join("bench/lua/suite", name+".lua"), runs))
+			for v, bench := range variants {
+				ns, line := goRound(testBin, bench+"$/^"+name, runs, false)
+				gT[v][i] = append(gT[v][i], ns/1e6)
+				raw.WriteString(line)
+			}
+		}
+	}
+	check(os.MkdirAll(filepath.Dir(out), 0o755))
+	check(os.WriteFile(out, raw.Bytes(), 0o644))
+	luaName := luaVersion(lua)
+	fmt.Printf("Machine: %s, %d CPUs, governor %s. %s. %s: %s.\n", cpuModel(), runtime.NumCPU(), governor(),
+		goVersion(), luaName, luaInfo(lua))
+	fmt.Printf("%d interleaved rounds of %d runs each; medians of the round means, with the range. %s.\n\n",
+		rounds, runs, time.Now().Format("2 January 2006"))
+	fmt.Printf("| Script, ms | %s | glua, checked | / C Lua | glua, fast | / C Lua | checked, GC marking | / C Lua |\n", luaName)
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- |")
+	geo := make([]float64, len(variants))
+	worst := make([]float64, len(variants))
+	for i, name := range names {
+		c := median(cT[i])
+		fmt.Printf("| %s | %s", name, spread(cT[i]))
+		for v := range variants {
+			g := median(gT[v][i])
+			geo[v] += math.Log(g / c)
+			worst[v] = max(worst[v], g/c)
+			fmt.Printf(" | %s | %.2fx", spread(gT[v][i]), g/c)
+		}
+		fmt.Println(" |")
+	}
+	n := float64(len(names))
+	fmt.Printf("| Geometric mean | | | %.2fx | | %.2fx | | %.2fx |\n", math.Exp(geo[0]/n), math.Exp(geo[1]/n), math.Exp(geo[2]/n))
+	fmt.Printf("| Worst | | | %.2fx | | %.2fx | | %.2fx |\n", worst[0], worst[1], worst[2])
+	fmt.Printf("\nRaw Go results for benchstat: %s\n", out)
 }
 
 // compareSource times the workloads compiled from source against C Lua, on the checked
