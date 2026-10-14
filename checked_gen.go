@@ -183,6 +183,16 @@ dispatch:
 				}
 			}
 
+		case opJmpX: // pc += int32(aux), counting from the word after the aux word
+			off := int(int32(code[pc])) + 1
+			pc += off
+			if off < 0 {
+				if ex.st.ticks--; ex.st.ticks < 0 { // every back-edge ticks
+					e = exTick
+					break dispatch
+				}
+			}
+
 		case opLtJmp, opLtKJmp: // test R[A] < R[B] (or K[B]); fall through when it equals C, else jump by the aux word
 			x, y := &regs[uint8(i>>8)], &regs[uint8(i>>16)]
 			if uint8(i) == opLtKJmp {

@@ -149,6 +149,7 @@ func newExecutor() *executor {
 		maxHostDepth: defaultHost,
 		maxAlloc:     defaultAlloc,
 		checked:      defaultChecked,
+		types:        types.Load(),
 	}
 }
 
@@ -165,7 +166,9 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 	if ex.maxHostDepth < 0 {
 		return ErrHostDepth
 	}
-	ex.running, ex.ctx, ex.types = true, ctx, ex.planSet()
+	// ex.types stays from entry to entry: plans are only ever added, and plan reloads the
+	// list when it meets a type bound since
+	ex.running, ex.ctx = true, ctx
 	q := min(tickQuantum, ex.maxSteps)
 	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q) // budgets are set here only: nested entries share them
 	ex.allocLeft = ex.maxAlloc
@@ -206,9 +209,6 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 
 // run pushes a goEntry frame and drives the loop until that frame returns. Host functions re-enter here.
 func (ex *executor) run(cl *Closure, fn, nargs int) error {
-	if err := ex.ensure(fn + 1 + stackSlack); err != nil {
-		return err
-	}
 	st := &ex.st
 	nf := st.nf
 	ex.stack[fn] = luaFnValue(cl)
@@ -240,14 +240,19 @@ func (ex *executor) reset() {
 	} else {
 		clear(ex.stack[:hi])
 	}
-	for _, c := range ex.calls {
-		c.reset()
-	}
+	// the Call records are cleared after every host call; an executor that a panic left with
+	// one in use is never pooled again
 	ex.st = state{}
 	ex.ctx, ex.top, ex.depth = nil, 0, 0
 	ex.tbc = ex.tbc[:0]
-	clear(ex.goErrs)
-	ex.co, ex.nny, ex.fatal, ex.ectx = nil, 0, nil, nil
+	if len(ex.goErrs) > 0 {
+		clear(ex.goErrs)
+	}
+	if ex.ectx != nil {
+		liveEntryCtx.Add(-1)
+		ex.ectx = nil
+	}
+	ex.co, ex.nny, ex.fatal = nil, 0, nil
 	ex.randSeeded = false
 }
 

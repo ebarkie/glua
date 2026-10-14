@@ -18,9 +18,9 @@ const (
 // compileExpr compiles src as an expression over a Go struct: first as `return <src>`, and
 // if that does not parse, as a chunk. The main function takes the struct as its parameter.
 func compileExpr(source, src string, env *syntax.ExprEnv) (p *Proto, info *syntax.Info, err error) {
-	fn, err := syntax.Parse(source, "return "+src)
+	fn, err := syntax.ParseFixed(source, "return "+src)
 	if err != nil {
-		if fn, err = syntax.Parse(source, src); err != nil {
+		if fn, err = syntax.ParseFixed(source, src); err != nil {
 			return nil, nil, err
 		}
 	}

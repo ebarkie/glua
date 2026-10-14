@@ -97,6 +97,7 @@ func TestExprErrors(t *testing.T) {
 		{"x = 1", "gold:1: unknown name 'x'"},
 		{"local function f() return custmer end return f()", "gold:1: unknown name 'custmer'"},
 		{"total >", "gold:1: syntax error near '>'"},
+		{"select('#', ...)", "gold:1: cannot use '...' outside a vararg function near '...'"},
 	} {
 		_, err := rt.Expr[ruleOrder, bool]("gold", tc.src)
 		if err == nil || err.Error() != tc.want {

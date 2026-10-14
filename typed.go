@@ -123,8 +123,9 @@ func decoderFor[R any]() (func(Value) (R, error), error) {
 // resultDecoder decodes the results of a call into R: struct{} discards them, Pair takes the
 // first two, and anything else the first.
 type resultDecoder[R any] struct {
-	one  func(Value) (R, error)
-	pair func(a, b Value) (any, error)
+	one    func(Value) (R, error)
+	pair   func(a, b Value) (any, error)
+	scalar scalarKind // a built-in scalar, decoded inline
 }
 
 func resultDecoderFor[R any]() (resultDecoder[R], error) {
@@ -133,14 +134,35 @@ func resultDecoderFor[R any]() (resultDecoder[R], error) {
 		return resultDecoder[R]{pair: dec}, err
 	}
 	one, err := decoderFor[R]()
-	return resultDecoder[R]{one: one}, err
+	return resultDecoder[R]{one: one, scalar: scalarOf[R]()}, err
 }
 
 // decode decodes the results res.
-func (d *resultDecoder[R]) decode(res []Value) (R, error) {
+func (d *resultDecoder[R]) decode(res []Value) (r R, err error) {
 	var a, b Value
 	if len(res) > 0 {
 		a = res[0]
+	}
+	p := unsafe.Pointer(&r)
+	switch d.scalar { // the scalar kind fixes R, so the casts are exact
+	case scalarInt64:
+		if i, ok := a.Int(); ok {
+			*(*int64)(p) = i
+			return r, nil
+		}
+	case scalarBool:
+		*(*bool)(p) = a.truthy()
+		return r, nil
+	case scalarString:
+		if a.isString() {
+			*(*string)(p) = a.str()
+			return r, nil
+		}
+	case scalarFloat64:
+		if f, ok := a.Float(); ok {
+			*(*float64)(p) = f
+			return r, nil
+		}
 	}
 	if d.pair != nil {
 		if len(res) > 1 {

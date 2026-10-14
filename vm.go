@@ -109,7 +109,7 @@ func (vm *VM) bindFunc(name string) (*boundFunc, error) {
 		return nil, err
 	}
 	cl, base, _ := entryFunc(fn)
-	return &boundFunc{rt: vm.s.rt, lim: &vm.s.lim, fn: fn, cl: cl, base: base, script: vm.s.name, name: name, vm: vm}, nil
+	return &boundFunc{rt: vm.s.rt, lim: vm.s.lim, fn: fn, cl: cl, base: base, script: vm.s.name, name: name, vm: vm}, nil
 }
 
 // Func0 returns a Go function backed by the Lua function name, as Script.Func0 does, running

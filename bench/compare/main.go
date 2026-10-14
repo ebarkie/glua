@@ -62,7 +62,18 @@ func main() {
 	lua := flag.String("lua", "bench/.clua/lua-5.4.9/src/lua", "C Lua binary")
 	out := flag.String("raw", "bench/results/go.txt", "file for the raw Go results, in benchstat format")
 	source := flag.Bool("source", false, "time the workloads compiled from source, on the checked and the fast loop, instead")
+	bound := flag.Bool("boundary", false, "time only calls through the public API, on the checked and the fast loop; needs no C Lua")
 	flag.Parse()
+
+	if *bound {
+		tmp, err := os.MkdirTemp("", "glua-compare")
+		check(err)
+		defer os.RemoveAll(tmp)
+		testBin := filepath.Join(tmp, "glua.test")
+		run("go", "test", "-c", "-o", testBin, ".")
+		compareBoundary(testBin, *rounds, *out)
+		return
+	}
 
 	if _, err := os.Stat(*lua); err != nil {
 		fatalf("no C Lua at %s: run bench/build-clua.sh first", *lua)
@@ -137,6 +148,51 @@ func main() {
 		fmt.Printf("| %s | %s | %s |\n", b.name, spreadNs(bounds[i].ns), bounds[i].allocs)
 	}
 	fmt.Printf("\nRaw Go results for benchstat: %s\n", *out)
+}
+
+// apiBoundary are the boundary rows through the public API, with the targets of milestone 2.
+var apiBoundary = []struct{ name, bench, target string }{
+	{"`function(x) return x + 1 end`, typed, private VM", "BenchmarkAPICallPrivate", "50"},
+	{"Same, shared Script, executor from the pool", "BenchmarkAPICallPooled", "75"},
+	{"46-byte string in, same string out", "BenchmarkAPIStringRoundTrip", ""},
+	{"Rule reading three fields of a `*request` that is reused", "BenchmarkAPIRuleReusedPointer", ""},
+	{"Same rule when `req.method` does not share a pointer with the constant", "BenchmarkAPIRuleOtherPointer", ""},
+	{"Same rule through `Expr` and `Rule.Eval`, struct built per call", "BenchmarkAPIRuleEvalPerCall", ""},
+	{"Same rule through `Func1`, struct built per call and passed by value", "BenchmarkAPIFuncByValuePerCall", ""},
+	{"Same rule through `Func1`, pointer to a struct built per call", "BenchmarkAPIFuncPointerPerCall", ""},
+	{"Function that calls one Go host function made with `Fn1`", "BenchmarkAPIHostCall", ""},
+	{"Same, host function written as a `GoFunc`", "BenchmarkAPIHostCallRaw", ""},
+}
+
+// compareBoundary times the API boundary rows on both loops, in interleaved rounds.
+func compareBoundary(testBin string, rounds int, out string) {
+	var raw bytes.Buffer
+	chk := make([][]float64, len(apiBoundary))
+	fast := make([][]float64, len(apiBoundary))
+	allocs := make([]string, len(apiBoundary))
+	for r := range rounds {
+		fmt.Fprintf(os.Stderr, "round %d/%d\n", r+1, rounds)
+		for i, b := range apiBoundary {
+			ns, line := goRound(testBin, b.bench, 0, true)
+			chk[i] = append(chk[i], ns)
+			allocs[i] = allocsOf(line)
+			raw.WriteString(line)
+			os.Setenv("GLUA_BENCH_FAST", "1")
+			ns, _ = goRound(testBin, b.bench, 0, true)
+			os.Unsetenv("GLUA_BENCH_FAST")
+			fast[i] = append(fast[i], ns)
+		}
+	}
+	check(os.MkdirAll(filepath.Dir(out), 0o755))
+	check(os.WriteFile(out, raw.Bytes(), 0o644))
+	fmt.Printf("Machine: %s, %d CPUs, governor %s. %s.\n", cpuModel(), runtime.NumCPU(), governor(), goVersion())
+	fmt.Printf("%d interleaved rounds; medians, with the range. %s.\n\n", rounds, time.Now().Format("2 January 2006"))
+	fmt.Println("| Call from Go | ns, checked loop | ns, fast loop | Target | Allocations |")
+	fmt.Println("| --- | --- | --- | --- | --- |")
+	for i, b := range apiBoundary {
+		fmt.Printf("| %s | %s | %s | %s | %s |\n", b.name, spreadNs(chk[i]), spreadNs(fast[i]), b.target, allocs[i])
+	}
+	fmt.Printf("\nRaw Go results for benchstat (checked loop): %s\n", out)
 }
 
 // compareSource times the workloads compiled from source against C Lua, on the checked

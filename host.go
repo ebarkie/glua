@@ -26,7 +26,7 @@ type Call struct {
 }
 
 func (c *Call) reset() {
-	clear(c.res[:cap(c.res)])
+	clear(c.res) // past len, every slot is nil already: each reset clears what was used
 	c.res = c.res[:0]
 	c.unwinding, c.argErr = false, nil
 }
@@ -39,6 +39,7 @@ func (c *Call) Context() context.Context {
 	if e == nil {
 		e = &entryCtx{Context: ex.ctx}
 		ex.ectx = e
+		liveEntryCtx.Add(1)
 	}
 	e.steps.Store(ex.steps + int64(max(ex.st.ticks, 0)))
 	e.alloc.Store(ex.allocLeft)
@@ -58,6 +59,10 @@ type entryCtx struct {
 
 type budgetKey struct{}
 
+// liveEntryCtx counts the entries whose host functions asked for their context. While it
+// is zero, no context can carry a budget, and entries skip looking for one.
+var liveEntryCtx atomic.Int64
+
 func (e *entryCtx) Value(k any) any {
 	if k == (budgetKey{}) {
 		return e
@@ -68,6 +73,9 @@ func (e *entryCtx) Value(k any) any {
 // inherit limits an entry made with ctx to what its parent entry had left, if ctx came from
 // a host function's Call. It returns the parent's context, or nil.
 func (ex *executor) inherit(ctx context.Context) *entryCtx {
+	if liveEntryCtx.Load() == 0 {
+		return nil
+	}
 	e, _ := ctx.Value(budgetKey{}).(*entryCtx)
 	if e == nil {
 		return nil
@@ -222,8 +230,14 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	if err := ex.ensure(fn + n); err != nil {
 		return 0, err
 	}
-	copy(ex.stack[fn:], c.res)
-	c.reset()
+	if n == 1 { // the common case, without a slice copy and a clear
+		ex.stack[fn], c.res[0] = c.res[0], Value{}
+		c.res = c.res[:0]
+		c.unwinding, c.argErr = false, nil
+	} else {
+		copy(ex.stack[fn:], c.res)
+		c.reset()
+	}
 	st.hi = max(st.hi, fn+n)
 	return n, nil
 }

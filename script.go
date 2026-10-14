@@ -96,9 +96,12 @@ func (rt *Runtime) giveBack(ex *executor) {
 
 // observeEntry reports what an entry used, if the Runtime has an Observe function.
 func (rt *Runtime) observeEntry(ex *executor, script, fn string, err error) {
-	if rt.observe == nil {
-		return
+	if rt.observe != nil {
+		rt.report(ex, script, fn, err)
 	}
+}
+
+func (rt *Runtime) report(ex *executor, script, fn string, err error) {
 	rt.observe(CallStats{
 		Script:     script,
 		Func:       fn,
@@ -229,7 +232,7 @@ func entryFunc(fn Value) (*Closure, int, error) {
 // Runtime, limits and names of its entry.
 type boundFunc struct {
 	rt     *Runtime
-	lim    **limits // the Script's, so WithLimits copies see their own
+	lim    *limits
 	fn     Value
 	cl     *Closure
 	base   int // stack index of the first argument
@@ -245,7 +248,7 @@ func (s *Script) bindFunc(name string) (*boundFunc, error) {
 		return nil, err
 	}
 	cl, base, _ := entryFunc(fn)
-	return &boundFunc{rt: s.rt, lim: &s.lim, fn: fn, cl: cl, base: base, script: s.name, name: name}, nil
+	return &boundFunc{rt: s.rt, lim: s.lim, fn: fn, cl: cl, base: base, script: s.name, name: name}, nil
 }
 
 // begin borrows an executor and places the function for a call.
@@ -254,7 +257,7 @@ func (b *boundFunc) begin(nargs int) *executor {
 	if b.vm != nil {
 		ex = b.vm.enter()
 	} else {
-		ex = b.rt.borrow(*b.lim)
+		ex = b.rt.borrow(b.lim)
 	}
 	ex.stack[1] = b.fn
 	ex.st.hi = b.base + nargs
@@ -282,6 +285,33 @@ type argEnc[T any] struct {
 	enc     func(T) (Value, error)
 	byValue bool
 	id      uint64
+	scalar  scalarKind // a built-in scalar, encoded inline
+}
+
+// scalarKind names the built-in scalar types the boundary converts inline, without an
+// indirect call.
+type scalarKind uint8
+
+const (
+	notScalar scalarKind = iota
+	scalarInt64
+	scalarFloat64
+	scalarString
+	scalarBool
+)
+
+func scalarOf[T any]() scalarKind {
+	switch any((*T)(nil)).(type) {
+	case *int64:
+		return scalarInt64
+	case *float64:
+		return scalarFloat64
+	case *string:
+		return scalarString
+	case *bool:
+		return scalarBool
+	}
+	return notScalar
 }
 
 func newArgEnc[T any](rt *Runtime) (argEnc[T], error) {
@@ -289,7 +319,7 @@ func newArgEnc[T any](rt *Runtime) (argEnc[T], error) {
 		return argEnc[T]{}, err
 	}
 	enc, byValue, err := encoderFor[T]()
-	a := argEnc[T]{enc: enc, byValue: byValue}
+	a := argEnc[T]{enc: enc, byValue: byValue, scalar: scalarOf[T]()}
 	if byValue {
 		a.id = bindType(reflect.TypeFor[T]())
 	}
@@ -299,6 +329,21 @@ func newArgEnc[T any](rt *Runtime) (argEnc[T], error) {
 // put stores v in stack[i]. pos is the argument position, which picks the slot. A private
 // VM has state that outlives the call, so it copies a struct to the heap instead.
 func (a *argEnc[T]) put(ex *executor, i, pos int, v T, private bool) (slot *T, err error) {
+	p := unsafe.Pointer(&v)
+	switch a.scalar { // the scalar kind fixes T, so the casts are exact
+	case scalarInt64:
+		ex.stack[i] = Int(*(*int64)(p))
+		return nil, nil
+	case scalarFloat64:
+		ex.stack[i] = Float(*(*float64)(p))
+		return nil, nil
+	case scalarString:
+		ex.stack[i] = String(*(*string)(p))
+		return nil, nil
+	case scalarBool:
+		ex.stack[i] = Bool(*(*bool)(p))
+		return nil, nil
+	}
 	if !a.byValue {
 		ex.stack[i], err = a.enc(v)
 		return nil, err

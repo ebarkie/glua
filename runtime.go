@@ -452,6 +452,7 @@ func compileModule(name, src string) (*sourceModule, error) {
 func (rt *Runtime) newExecutor() *executor {
 	ex := newExecutor()
 	ex.rt = rt
+	ex.types = rt.plans()
 	ex.strMeta = rt.strMeta
 	ex.randSeed = rt.randSeed
 	ex.checked = rt.checked

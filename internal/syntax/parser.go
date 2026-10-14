@@ -13,15 +13,21 @@ const (
 
 // Parse parses a chunk into the body of its main function, which takes '...'.
 func Parse(source, src string) (fn *FunctionExpr, err error) {
-	return parse(source, src, false)
+	return parse(source, src, false, true)
+}
+
+// ParseFixed is Parse for a chunk whose main function is not vararg, such as an expression
+// over a Go struct: '...' in it is an error.
+func ParseFixed(source, src string) (fn *FunctionExpr, err error) {
+	return parse(source, src, false, false)
 }
 
 // ParseFile is Parse for the contents of a file: a first line starting with '#' is skipped.
 func ParseFile(source, src string) (fn *FunctionExpr, err error) {
-	return parse(source, src, true)
+	return parse(source, src, true, true)
 }
 
-func parse(source, src string, skipComment bool) (fn *FunctionExpr, err error) {
+func parse(source, src string, skipComment, vararg bool) (fn *FunctionExpr, err error) {
 	p := &parser{lex: NewLexer(source, src, skipComment), source: source}
 	defer func() {
 		if r := recover(); r != nil {
@@ -33,7 +39,7 @@ func parse(source, src string, skipComment bool) (fn *FunctionExpr, err error) {
 		}
 	}()
 	p.next()
-	fn = &FunctionExpr{Line: 0, IsVararg: true, Name: "main chunk"}
+	fn = &FunctionExpr{Line: 0, IsVararg: vararg, Name: "main chunk"}
 	p.funcs = append(p.funcs, fn)
 	fn.Body = p.block()
 	p.check(EOF)
