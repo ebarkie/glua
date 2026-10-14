@@ -61,6 +61,18 @@ type Ref struct {
 	// _ENV that is visible there; the name is a field of it. It is nil in the common case,
 	// where free names go straight to the closure's globals table.
 	Env *Ref
+	// Field, in an expression chunk, is the field of the environment parameter a free name
+	// names; Var and Upval then bind that parameter.
+	Field string
+}
+
+// ExprEnv makes a chunk an expression over a Go struct: its main function takes the struct
+// as the parameter Param, and a free name that is one of Fields is a field of it. Any other
+// free name must be Known. Fields maps each name to whether it may be assigned.
+type ExprEnv struct {
+	Param  string
+	Fields map[string]bool
+	Known  func(name string) bool
 }
 
 // Info is the result of resolution.
@@ -81,8 +93,16 @@ type Info struct {
 // gotos and labels, break outside a loop, assignments to const variables, and the limits
 // on locals and upvalues.
 func Resolve(source string, fn *FunctionExpr) (info *Info, err error) {
+	return ResolveExpr(source, fn, nil)
+}
+
+// ResolveExpr is Resolve for a chunk whose free names env resolves. fn must take env.Param
+// as its first parameter. A name neither a field nor known, an assignment to a read-only
+// field and an assignment to a global are errors.
+func ResolveExpr(source string, fn *FunctionExpr, xenv *ExprEnv) (info *Info, err error) {
 	r := &resolver{
-		source: source,
+		source:  source,
+		exprEnv: xenv,
 		info: &Info{
 			Funcs: map[*FunctionExpr]*FuncInfo{},
 			Names: map[*NameExpr]Ref{},
@@ -115,10 +135,11 @@ func Resolve(source string, fn *FunctionExpr) (info *Info, err error) {
 }
 
 type resolver struct {
-	source string
-	info   *Info
-	fs     *funcState
-	errs   []*Error
+	source  string
+	info    *Info
+	fs      *funcState
+	errs    []*Error
+	exprEnv *ExprEnv
 }
 
 type funcState struct {
@@ -251,6 +272,13 @@ func (r *resolver) upval(fs *funcState, v *Var) *Upval {
 func (r *resolver) bind(name string) Ref {
 	v := lookup(r.fs, name)
 	switch {
+	case v == nil && r.exprEnv != nil && name != r.exprEnv.Param:
+		if _, ok := r.exprEnv.Fields[name]; ok {
+			ref := r.bind(r.exprEnv.Param)
+			ref.Field = name
+			return ref
+		}
+		fallthrough
 	case v == nil:
 		ref := Ref{Kind: RefGlobal}
 		if r.info.ExplicitEnv {
@@ -292,6 +320,19 @@ func (r *resolver) stmt(s Stmt, idx int) {
 			if n, ok := t.(*NameExpr); ok {
 				ref := r.bind(n.Name)
 				r.info.Names[n] = ref
+				if r.exprEnv != nil {
+					switch {
+					case ref.Field != "" && !r.exprEnv.Fields[ref.Field]:
+						r.errorf(s.TargetLines[i], "cannot assign to read-only field '%s'", n.Name)
+					case ref.Kind == RefGlobal && r.exprEnv.Known(n.Name):
+						r.errorf(s.TargetLines[i], "cannot assign to global '%s'", n.Name)
+					case ref.Kind == RefGlobal:
+						r.errorf(s.TargetLines[i], "unknown name '%s'", n.Name)
+					}
+					if ref.Field != "" {
+						continue
+					}
+				}
 				if ref.Var != nil {
 					if ref.Var.Attrib != "" {
 						r.errorf(s.TargetLines[i], "attempt to assign to const variable '%s'", n.Name)
@@ -514,7 +555,11 @@ func localName(b *blockState, n, j int) string {
 func (r *resolver) expr(e Expr) {
 	switch e := e.(type) {
 	case *NameExpr:
-		r.info.Names[e] = r.bind(e.Name)
+		ref := r.bind(e.Name)
+		r.info.Names[e] = ref
+		if r.exprEnv != nil && ref.Kind == RefGlobal && ref.Env == nil && !r.exprEnv.Known(e.Name) {
+			r.errorf(e.Line, "unknown name '%s'", e.Name)
+		}
 	case *IndexExpr:
 		r.expr(e.Obj)
 		r.expr(e.Key)

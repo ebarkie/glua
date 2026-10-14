@@ -15,6 +15,23 @@ const (
 	listFlush = 50 // table constructor items stored per SETLIST
 )
 
+// compileExpr compiles src as an expression over a Go struct: first as `return <src>`, and
+// if that does not parse, as a chunk. The main function takes the struct as its parameter.
+func compileExpr(source, src string, env *syntax.ExprEnv) (p *Proto, info *syntax.Info, err error) {
+	fn, err := syntax.Parse(source, "return "+src)
+	if err != nil {
+		if fn, err = syntax.Parse(source, src); err != nil {
+			return nil, nil, err
+		}
+	}
+	fn.Params = []string{env.Param}
+	info, err = syntax.ResolveExpr(source, fn, env)
+	if err != nil {
+		return nil, nil, err
+	}
+	return compileResolved(source, fn, info)
+}
+
 // compileChunk parses, resolves and compiles a chunk into the prototype of its main function.
 func compileChunk(source, src string) (p *Proto, info *syntax.Info, err error) {
 	fn, err := syntax.Parse(source, src)
@@ -25,6 +42,11 @@ func compileChunk(source, src string) (p *Proto, info *syntax.Info, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return compileResolved(source, fn, info)
+}
+
+// compileResolved generates the code of a resolved chunk.
+func compileResolved(source string, fn *syntax.FunctionExpr, info *syntax.Info) (p *Proto, _ *syntax.Info, err error) {
 	c := &compiler{source: source, info: info}
 	defer func() {
 		if r := recover(); r != nil {
@@ -1044,6 +1066,14 @@ func (fs *fstate) name(n *syntax.NameExpr) expdesc {
 }
 
 func (fs *fstate) ref(ref syntax.Ref, name string) expdesc {
+	if ref.Field != "" { // a field of an expression's environment parameter
+		field := ref.Field
+		ref.Field = ""
+		obj := fs.ref(ref, "")
+		key := expdesc{k: eK, val: String(field)}
+		fs.indexed(&obj, &key)
+		return obj
+	}
 	switch ref.Kind {
 	case syntax.RefLocal:
 		if v, ok := fs.consts[ref.Var]; ok {

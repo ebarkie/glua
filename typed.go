@@ -252,35 +252,3 @@ func bindFunc1[A, R any](e *engine, cl *Closure) func(context.Context, A) (R, er
 		return r, err
 	}
 }
-
-// Rule is a compiled expression over a struct E. It is a concrete generic type with a
-// method, so a call to Eval is static and escape analysis can see that env does not leak.
-// A func value would force every pointer argument to the heap.
-type Rule[E, R any] struct {
-	pool *sync.Pool
-	cl   *Closure
-	id   uint64
-	dec  func(Value) (R, error)
-}
-
-func newRule[E, R any](e *engine, cl *Closure) *Rule[E, R] {
-	dec, _ := decoderFor[R]()
-	return &Rule[E, R]{pool: &e.pool, cl: cl, id: bindType(reflect.TypeFor[E]()), dec: dec}
-}
-
-// Eval copies *env into a slot of the borrowed executor, runs, and copies it back. env
-// itself does not escape, so a caller-local struct stays on the stack.
-func (ru *Rule[E, R]) Eval(ctx context.Context, env *E) (r R, err error) {
-	ex := ru.pool.Get().(*executor)
-	slot := slotFor[E](ex, ru.id, 0)
-	*slot = *env // copy in
-	ex.stack[1] = Value{p: unsafe.Pointer(slot), n: kindUser<<56 | flagCallscoped | ru.id}
-	if err = ex.call(ctx, ru.cl, 0, 1); err == nil {
-		r, err = ru.dec(ex.stack[0])
-	}
-	ex.reset()
-	*env = *slot                 // copy out; milestone 2 copies only the rw fields
-	clear(unsafe.Slice(slot, 1)) // nothing of this call stays reachable from the pool
-	release(ru.pool, ex)
-	return r, err
-}

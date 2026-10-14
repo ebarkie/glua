@@ -344,6 +344,18 @@ const maxSlotArgs = 4
 // escapeResults makes the results of a call that used slots safe to keep: a callscoped
 // userdata among them, or in a table they reach, is replaced by a heap copy of its struct.
 func escapeResults(res []Value) {
+	scan := false
+	for i := range res {
+		if v := &res[i]; v.n>>56 == kindUser && v.n&flagCallscoped != 0 || v.n>>56 == kindTable {
+			scan = !isScalar(v.p)
+		}
+		if scan {
+			break
+		}
+	}
+	if !scan {
+		return // scalars, strings and functions cannot hold a slot
+	}
 	seen := map[unsafe.Pointer]bool{}
 	var work []*Table
 	fix := func(v *Value) {
