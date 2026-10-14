@@ -103,11 +103,12 @@ func main() {
 	check(os.WriteFile(*out, raw.Bytes(), 0o644))
 
 	// report
-	fmt.Printf("Machine: %s, %d CPUs, governor %s. %s. C Lua: %s.\n", cpuModel(), runtime.NumCPU(), governor(),
-		goVersion(), luaInfo())
+	luaName := luaVersion(*lua)
+	fmt.Printf("Machine: %s, %d CPUs, governor %s. %s. %s: %s.\n", cpuModel(), runtime.NumCPU(), governor(),
+		goVersion(), luaName, luaInfo(*lua))
 	fmt.Printf("%d interleaved rounds of %d runs each; medians of the round means, with the range of the round means. %s.\n\n",
 		*rounds, *runs, time.Now().Format("2 January 2006"))
-	fmt.Println("| Workload, ms | C Lua 5.4.9 | glua | glua / C Lua | glua, GC marking | GC marking / idle |")
+	fmt.Printf("| Workload, ms | %s | glua | glua / C Lua | glua, GC marking | GC marking / idle |\n", luaName)
 	fmt.Println("| --- | --- | --- | --- | --- | --- |")
 	geo, geoGC := 0.0, 0.0
 	for i, w := range workloads {
@@ -218,10 +219,20 @@ func governor() string {
 
 func goVersion() string { return strings.TrimSpace(run("go", "version")) }
 
-func luaInfo() string {
-	b, err := os.ReadFile("bench/.clua/BUILDINFO")
+// luaVersion returns "C Lua 5.4.9" or similar, from the binary itself.
+func luaVersion(lua string) string {
+	f := strings.Fields(run(lua, "-v"))
+	if len(f) < 2 {
+		return "C Lua"
+	}
+	return "C Lua " + f[1]
+}
+
+// luaInfo returns the compiler and flags of a C Lua built by build-clua.sh.
+func luaInfo(lua string) string {
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(lua), "../../BUILDINFO"))
 	if err != nil {
-		return "unknown build"
+		return "a build without recorded flags"
 	}
 	var parts []string
 	for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {

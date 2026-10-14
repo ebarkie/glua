@@ -134,7 +134,9 @@ func (ex *executor) run(cl *Closure, fn, nargs int) error {
 	st.cl, st.base, st.pc = cl, fn+1, 0
 	st.hi = max(st.hi, fn+1+int(cl.p.maxstack))
 	ex.stack[fn] = luaFnValue(cl)
-	clear(ex.stack[fn+1+min(nargs, int(cl.p.nparams)) : fn+1+int(cl.p.nparams)]) // missing parameters
+	for j := fn + 1 + nargs; j < fn+1+int(cl.p.nparams); j++ {
+		ex.stack[j] = Value{} // missing parameters
+	}
 	err := ex.drive()
 	st.nf = nf // on an error this is the unwinding: it never crosses a goEntry frame
 	return err
@@ -142,7 +144,13 @@ func (ex *executor) run(cl *Closure, fn, nargs int) error {
 
 // reset drops every pointer the call may have left behind.
 func (ex *executor) reset() {
-	clear(ex.stack[:ex.st.hi])
+	if hi := ex.st.hi; hi <= 16 {
+		for j := range hi { // a small call: plain stores beat memclrHasPointers and its bulk barrier
+			ex.stack[j] = Value{}
+		}
+	} else {
+		clear(ex.stack[:hi])
+	}
 	for _, c := range ex.calls {
 		c.reset()
 	}
