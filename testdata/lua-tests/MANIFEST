@@ -1,0 +1,41 @@
+# The Lua 5.4.9 test suite, from https://www.lua.org/tests/lua-5.4.9-tests.tar.gz
+# (sha256 7d971845f545ffc09fbb3128a86b2c6524161c70d0fdf0154a16e8c00c343fca). The files in
+# this directory are the release's, unmodified; TestSuiteManifest checks their sums.
+#
+# Each line: file status sha256 [reason]
+#   run       runs unmodified
+#   patched   patched/<file> runs instead; its cuts are marked "-- glua:" with the reason
+#   excluded  does not run
+all.lua excluded 3e296dd2b26ac6891ccba1ebaa62d40f1816ac93c7efdeaddc05aaa064e7311c the suite's driver: TestSuite runs the files itself
+api.lua excluded 38e248f069b253da6734096bfe8d38f6deb41aa54ee78577b5dfb8873fe2f7af tests the C API through ltests (T), which glua has no counterpart of
+attrib.lua patched 2a6e9d4fea68f64eabf2fc5c46fb10309e473d5f70ac4efc2879355600996edf no require or package library (the host loads code): the require tests are cut; the rest runs
+big.lua run ad1248361b3fe8132a91fa01f588ffece6a2f01cf231cf124fd18c74b6742e64 skips itself under _soft
+bitwise.lua patched d918d3030f85a6debca13c0a7e5e4e4931b43e53d61843970011a51a125537d4 no string.packsize until string.pack lands (M4): numbits is set to 64
+bwcoercion.lua excluded 73f7ae0e1295c4500e1d76a2bbebecea9b5298247e2d8ea1a29432cdfacc0232 a helper module that bitwise.lua requires
+calls.lua patched 1ee37317c7e5bf10d9db2f74d0a449de3d6ff4b38c6cdfd8a657928138cf8d66 glua loads text chunks only: the string.dump and binary-chunk tests, and the debug.getupvalue/setupvalue/upvaluejoin checks that go with them, are cut; a chunk's globals must be a table, so load(..., 123) is cut
+closure.lua patched a4f42a13133edee412d181664bdb19fc73164ee81ac2fc4847a42cec1d6da8e6 no weak tables: the wait for a collection is cut; no debug.upvalueid/upvaluejoin, since captures that are never assigned are copied and have no identity
+code.lua run 2ed2b5a4aef2aa0470bbd1b13c613e2ab7f0ec9ba24cf38118ec6ad99c6a3412
+constructs.lua run 0b29658544ab38367ed487bd75803ebd7131df981d972a2c8a40ac4d51579f6b
+coroutine.lua patched 7b6e486d147d6ed20424db73e27690ad532ab7d3aa232d1bf6d2ad07d3139e8e no debug.sethook, debug.getlocal/setlocal or weak tables: the hook trace, the weak-table check and the local-access tests are cut; the T (ltests) sections skip themselves
+cstack.lua patched 626adc09f79218d3265c57cae83b54ececd693c77f84b09cf28e9a016c63abce nesting between Go and Lua past Limits.HostDepth is a terminal error in glua, not a catchable 'C stack overflow': the recursive gsub, coroutine and close-chain tests are cut
+db.lua excluded 7da82387fdfd8431a51884741bb64c25705e8f62c25d2fd16340e9ef5d50d36c tests the debug library (hooks, getlocal, getinfo in detail), which glua does not provide
+errors.lua patched a8ba7ea89a3cdd713ba26d36da216eccf8f536ece26741c0b1aa056005c8c67d no io library, light userdata, debug.upvalueid or string.dump: those checks are cut; the limit on locals is checked after parsing, so the check that it comes before a later syntax error is cut
+events.lua patched 1213a3ffd35d7e6465e53aabf3367dab5074fe48e5da3b39812d61bef89e27a2 no io library, weak tables or per-type metatables (debug.setmetatable on numbers, booleans and nil): those checks are cut
+files.lua excluded 330858905d6518d97640be82687255c2b48c1f0f84f1ea1878672912a24109d5 tests the io and os libraries, which glua does not provide
+gc.lua excluded 4351d096ad1dc003e914ffee3959955faed723185ad1935bb925853276fa7808 tests the garbage collector, finalizers and weak tables; glua leaves collection to Go
+gengc.lua excluded f591eaba4922fee792e49d725fe3bd34c8e8af20b3383eaa2be34a1b9c4b54e6 tests the generational collector; glua leaves collection to Go
+goto.lua patched a082e103d195f097f9c38b518eca90d7142d3b5c8eb269a3325bb927ef164c77 no debug.upvalueid: captures that are never assigned are copied and have no identity, so the upvalue-sharing checks are cut
+heavy.lua run 519bb3f13bb516185b4102a53d4a4d60e5537cd94ebc2363fa276eee0b0947f0
+literals.lua run 51c324df341e5e37634846e5db35b3eac6a5062fb98da2023e08d295e3d09058
+locals.lua patched 89ff0912073780ca8068d16a006377825873bdd77c1a91a24317a1ea1cd2dbad closers of an error run on top of the failing frames, so the checks that level 2 is pcall are cut; closers that run because of an error cannot yield; tracebacks do not name metamethods; no debug.sethook
+main.lua excluded 2c5edce47c36e5cf37a533fea8c83a99c9630ecc77befa57c0e3adeab9226928 tests the standalone lua interpreter
+math.lua run 9435888672e75df06965dc81d47428053a135f3acbc546fb24e9d5fa20a0cfb6
+nextvar.lua patched 035b70531b3e33e318e5f75c0434608164a2d4dd67efb11b22529dc745ffa425 no io library: a table stands in for io.stdin as a key
+pm.lua run 58df0dc9faa82786aaff6801ec6c5d20943bf7e99d60af55b59f3205d3c04d04
+sort.lua run 009808b850722d39511143d33dc67a75387b1176544c5e8d26bb4a0976b5c780
+strings.lua patched 4ce64311c4b5399577889b0e122ce6236af59fa1cc56bcb1b0c9e1ed91e6cc01 no string.packsize until string.pack lands (M4): the int-size guard is taken as true; no io library: the %p checks on io.stdin are cut; strings are not interned, so the %p check on equal short strings is cut
+tpack.lua excluded 30a8ef71dd4f78cfa3b2a60bbc7c7a4478e305a533c00aa50351500da32195d5 string.pack and string.unpack land in M4
+tracegc.lua excluded cab25cde8d0c3c944c583383ad9b1c10e1d4f023f547f84239421bcc567edd55 a helper module for the gc tests; the harness stubs it
+utf8.lua run 0c0d78f84c8b3f77135c5d4f1cf5ec961d67a3c204af58c031388ba356eabf46
+vararg.lua run d2285d422f084c52763cf2777c49178e06d9cd7dff05e9f64481bb22709d7f83
+verybig.lua run 64bcef945cdfbd149a1c4437ce369d35b3d62d85a50f78c9a40b846d4bda4a9d runs its _soft part
