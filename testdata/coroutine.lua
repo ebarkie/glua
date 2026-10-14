@@ -152,3 +152,18 @@ return ok, e, x, y
 --== a variable that gets a non-closable value
 local function g() local a, b <close> = 1, {} end
 return pcall(g)
+--== yield inside __pairs
+local t = setmetatable({10, 20, 30}, {__pairs = function (t)
+  local inc = coroutine.yield()
+  return function (t, i)
+           if i > 1 then return i - inc, t[i - inc] else return nil end
+         end, t, #t + 1, "extra"
+end})
+local res = {}
+local co = coroutine.wrap(function ()
+  for i, p in pairs(t) do res[#res + 1] = p end
+  return select("#", pairs(setmetatable({}, {__pairs = function() return 1, 2, 3, 4 end})))
+end)
+co()
+local n = co(1)
+return table.concat(res, ","), n

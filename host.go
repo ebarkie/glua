@@ -106,8 +106,15 @@ func (ex *executor) hostCall() error {
 // callGo calls g with the nargs arguments above stack[fn], for the CALL at pc-1, and puts
 // its results where that CALL expects them.
 func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
-	if g == builtinPcall || g == builtinXpcall {
+	switch g {
+	case builtinPcall, builtinXpcall:
 		return ex.pcallValue(g, fn, nargs)
+	case builtinPairs:
+		if h := ex.metamethod(ex.stack[fn+1], "__pairs"); nargs > 0 && !h.IsNil() {
+			ex.stack[fn], ex.stack[fn+1], ex.stack[fn+2] = luaFnValue(pairsMeta), h, ex.stack[fn+1]
+			ex.st.hi = max(ex.st.hi, fn+3)
+			return ex.pushLua(pairsMeta, fn, 2, 0)
+		}
 	}
 	n, err := ex.callGoRawFrom(g, fn, nargs, true)
 	if err == errYield {

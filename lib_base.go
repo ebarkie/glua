@@ -12,13 +12,14 @@ import (
 func openBase(g *Table) {
 	for name, f := range map[string]GoFunc{
 		"assert": baseAssert, "collectgarbage": baseCollectGarbage, "getmetatable": baseGetMetatable,
-		"ipairs": baseIpairs, "next": baseNext, "pairs": basePairs, "print": basePrint,
+		"ipairs": baseIpairs, "next": baseNext, "print": basePrint,
 		"rawequal": baseRawEqual, "rawget": baseRawGet, "rawlen": baseRawLen, "rawset": baseRawSet,
 		"select": baseSelect, "setmetatable": baseSetMetatable, "tonumber": baseToNumber,
 		"tostring": baseToString, "type": baseType, "warn": baseWarn,
 	} {
 		g.Set(String(name), goFnValue(&goFunc{name: name, f: f}))
 	}
+	g.Set(String("pairs"), goFnValue(builtinPairs))
 	g.Set(String("pcall"), goFnValue(builtinPcall))
 	g.Set(String("xpcall"), goFnValue(builtinXpcall))
 	g.Set(String("error"), goFnValue(builtinError))
@@ -128,6 +129,22 @@ func baseNext(c *Call) error {
 }
 
 var nextFn = goFnValue(&goFunc{name: "next", f: baseNext})
+
+// builtinPairs is pairs. When Lua calls it for a value with __pairs, the VM calls
+// pairsMeta instead, so that __pairs can yield.
+var builtinPairs = &goFunc{name: "pairs"}
+
+func init() { builtinPairs.f = basePairs }
+
+// pairsMeta is function(mm, t) local f, s, c = mm(t) return f, s, c end: pairs through
+// __pairs, which C Lua truncates to three results.
+var pairsMeta = func() *Closure {
+	p, _, err := compileChunk("=pairs", "return function(mm, t) local f, s, c = mm(t) return f, s, c end")
+	if err != nil {
+		panic(err)
+	}
+	return &Closure{p: p.protos[0]}
+}()
 
 func basePairs(c *Call) error {
 	if err := c.checkAny(0, "pairs"); err != nil {
