@@ -33,7 +33,7 @@ func baseAssert(c *Call) error {
 		return c.argError(1, "assert", "value expected")
 	}
 	if c.Value(0).Truthy() {
-		return c.ReturnValues(callArgs(c, 0)...)
+		return c.returnArgs(0)
 	}
 	if c.Len() >= 2 {
 		return &Error{Value: c.Value(1)} // the message as it is, without a position
@@ -318,7 +318,7 @@ func baseSelect(c *Call) error {
 	if i < 1 {
 		return c.argError(1, "select", "index out of range")
 	}
-	return c.ReturnValues(callArgs(c, int(i))...)
+	return c.returnArgs(int(i))
 }
 
 func baseToNumber(c *Call) error {

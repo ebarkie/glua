@@ -122,6 +122,12 @@ func (c *Call) Errorf(format string, args ...any) error {
 	return fmt.Errorf(format, args...)
 }
 
+// returnArgs makes the arguments from index from on the results, without allocating.
+func (c *Call) returnArgs(from int) error {
+	c.res = append(c.res[:0], c.ex.stack[c.base+from:c.base+c.nargs]...)
+	return nil
+}
+
 // return1 sets a single result without the variadic slice.
 func (c *Call) return1(v Value) {
 	c.res = append(c.res[:0], v)
@@ -199,7 +205,12 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	ex.depth++
 	ex.nny++
 	ex.hostCalls++
-	err := invokeGo(g, c)
+	var err error
+	if g.host {
+		err = invokeGo(g, c)
+	} else {
+		err = g.f(c) // library functions return their argument errors; they never panic with them
+	}
 	ex.hostCalls--
 	ex.nny--
 	ex.depth--
@@ -219,11 +230,13 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 		return 0, ex.hostError(err)
 	}
 	n := len(c.res)
-	for _, v := range c.res { // what the host made for the script counts toward its budget
-		if g.host && (v.isString() || v.isObj(kindTable)) {
-			if err := ex.chargeResult(v); err != nil {
-				c.reset()
-				return 0, err
+	if g.host {
+		for _, v := range c.res { // what the host made for the script counts toward its budget
+			if v.isString() || v.isObj(kindTable) {
+				if err := ex.chargeResult(v); err != nil {
+					c.reset()
+					return 0, err
+				}
 			}
 		}
 	}

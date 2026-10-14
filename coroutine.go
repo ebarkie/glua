@@ -46,6 +46,7 @@ type coroutine struct {
 	yieldFn   int       // stack index where a pending yield's results go
 	yieldKind yieldKind // how to deliver them
 	yielded   []Value
+	yieldBuf  []Value // backs yielded, reused from yield to yield
 }
 
 type yieldKind uint8
@@ -227,6 +228,15 @@ func coCreate(c *Call) error {
 	return c.ReturnValues(threadValue(co))
 }
 
+// argView returns the arguments from index from on as a view of the stack: valid until the
+// stack moves, which a resume does not do to the caller's.
+func argView(c *Call, from int) []Value {
+	if from >= c.nargs {
+		return nil
+	}
+	return c.ex.stack[c.base+from : c.base+c.nargs : c.base+c.nargs]
+}
+
 func callArgs(c *Call, from int) []Value {
 	args := make([]Value, 0, max(c.Len()-from, 0))
 	for i := from; i < c.Len(); i++ {
@@ -240,11 +250,12 @@ func coResume(c *Call) error {
 	if err != nil {
 		return err
 	}
-	vals, ok, err := c.ex.resume(co, callArgs(c, 1))
+	vals, ok, err := c.ex.resume(co, argView(c, 1))
 	if err != nil {
 		return err
 	}
-	return c.ReturnValues(append([]Value{Bool(ok)}, vals...)...)
+	c.res = append(append(c.res[:0], Bool(ok)), vals...)
+	return nil
 }
 
 func coYield(c *Call) error {
@@ -255,7 +266,9 @@ func coYield(c *Call) error {
 	case !ex.yieldable():
 		return fmt.Errorf("attempt to yield across a C-call boundary")
 	}
-	ex.co.yielded = callArgs(c, 0)
+	co := ex.co
+	co.yieldBuf = append(co.yieldBuf[:0], argView(c, 0)...)
+	co.yielded = co.yieldBuf
 	return errYield
 }
 
@@ -303,7 +316,7 @@ func coWrap(c *Call) error {
 	}
 	g := &goFunc{name: "wrap", qualname: "coroutine.wrap", stateful: true}
 	g.f = func(c *Call) error {
-		vals, ok, err := c.ex.resume(co, callArgs(c, 0))
+		vals, ok, err := c.ex.resume(co, argView(c, 0))
 		if err != nil {
 			return err
 		}
