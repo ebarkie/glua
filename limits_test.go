@@ -176,3 +176,26 @@ func TestHostResultsCharged(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+// Callbacks from library code, such as sort's comparator, must not climb the stack.
+func TestCallbacksDoNotClimbStack(t *testing.T) {
+	p, info, err := compileChunk("climb", `
+		local t = {}
+		for i = 1, 5000 do t[i] = (i * 7919) % 5000 end
+		table.sort(t, function(a, b) return a < b end)
+		local s = string.rep("ab", 5000):gsub("a", function() return "c" end)
+		return #s`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGlobals()
+	ex := newExecutor()
+	ex.strMeta = testStrMeta
+	ex.maxSteps = 100_000_000
+	if _, err := runClosure(context.Background(), ex, newMainClosure(p, info, g)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.stack) > 4*initStack {
+		t.Errorf("the stack grew to %d slots", len(ex.stack))
+	}
+}

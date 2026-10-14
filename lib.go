@@ -151,6 +151,11 @@ func (c *Call) call(f Value, args ...Value) ([]Value, error) {
 	return c.ex.callSync(f, args)
 }
 
+// call1 is call for the first result only, without allocating.
+func (c *Call) call1(f Value, args ...Value) (Value, error) {
+	return c.ex.callSync1(f, args)
+}
+
 // index returns obj[key], with __index, from library code.
 func (c *Call) index(obj, key Value) (Value, error) {
 	ex := c.ex

@@ -412,12 +412,9 @@ func addValue(c *Call, ms *matchState, b *strings.Builder, s, e int, repl Value)
 		if ms.err != nil {
 			return false, ms.err
 		}
-		res, err := c.call(repl, caps...)
-		if err != nil {
+		var err error
+		if v, err = c.call1(repl, caps...); err != nil {
 			return false, err
-		}
-		if len(res) > 0 {
-			v = res[0]
 		}
 	}
 	switch {

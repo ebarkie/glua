@@ -71,10 +71,40 @@ func (ex *executor) callSync(f Value, args []Value) ([]Value, error) {
 // callSyncInto is callSync, appending the results to dst. A Lua function runs in a nested
 // run, which counts as a host re-entry.
 func (ex *executor) callSyncInto(dst []Value, f Value, args []Value) ([]Value, error) {
+	slot, n, err := ex.callSyncAt(f, args)
+	if err != nil {
+		return nil, err
+	}
+	return append(dst, ex.stack[slot:slot+n]...), nil
+}
+
+// callSync1 is callSync for the first result only, without allocating.
+func (ex *executor) callSync1(f Value, args []Value) (Value, error) {
+	slot, n, err := ex.callSyncAt(f, args)
+	if err != nil || n == 0 {
+		return Value{}, err
+	}
+	return ex.stack[slot], nil
+}
+
+// callSyncAt calls f and leaves its n results at stack[slot:], above ex.top, which it puts
+// back: the caller reads them at once, and the next call from the same Go function must
+// not climb the stack. A panic passing through leaves the state as it is: the executor is
+// never used again.
+func (ex *executor) callSyncAt(f Value, args []Value) (slot, n int, err error) {
 	st := &ex.st
-	cl, base, pc := st.cl, st.base, st.pc
+	cl, base, pc, top := st.cl, st.base, st.pc, ex.top
 	ex.nny++ // a nested run: it cannot yield
-	defer func() { st.cl, st.base, st.pc = cl, base, pc; ex.nny-- }()
+	slot, err = ex.callSyncBody(f, args, cl, base)
+	st.cl, st.base, st.pc = cl, base, pc
+	ex.nny--
+	n = max(ex.top-slot, 0)
+	ex.top = top
+	return slot, n, err
+}
+
+func (ex *executor) callSyncBody(f Value, args []Value, cl *Closure, base int) (int, error) {
+	st := &ex.st
 	slot := ex.top // a coroutine with a Go body has no Lua frame yet
 	if cl != nil {
 		slot = max(base+int(cl.p.maxstack), ex.top)
@@ -84,7 +114,7 @@ func (ex *executor) callSyncInto(dst []Value, f Value, args []Value) ([]Value, e
 	}
 	for hops := 0; ; hops++ {
 		if err := ex.ensure(slot + 1 + len(args) + stackSlack); err != nil {
-			return nil, err
+			return 0, err
 		}
 		ex.stack[slot] = f
 		copy(ex.stack[slot+1:], args)
@@ -93,7 +123,7 @@ func (ex *executor) callSyncInto(dst []Value, f Value, args []Value) ([]Value, e
 		switch {
 		case f.isObj(kindLuaFn):
 			if ex.depth >= ex.maxHostDepth {
-				return nil, ex.terminal(ErrHostDepth)
+				return 0, ex.terminal(ErrHostDepth)
 			}
 			ex.depth++
 			err = ex.run((*Closure)(f.p), slot, len(args))
@@ -105,16 +135,13 @@ func (ex *executor) callSyncInto(dst []Value, f Value, args []Value) ([]Value, e
 		default:
 			h := ex.metamethod(f, "__call")
 			if h.IsNil() || hops >= maxIndexHops {
-				return nil, &Error{Value: String(fmt.Sprintf("attempt to call a %s value", typeName(f)))}
+				return 0, &Error{Value: String(fmt.Sprintf("attempt to call a %s value", typeName(f)))}
 			}
 			args = append([]Value{f}, args...)
 			f = h
 			continue
 		}
-		if err != nil {
-			return nil, err
-		}
-		return append(dst, ex.stack[slot:ex.top]...), nil
+		return slot, err
 	}
 }
 

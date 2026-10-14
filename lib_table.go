@@ -372,12 +372,12 @@ func (s *sorter) less(a, b Value) bool {
 		return false
 	}
 	if !s.comp.IsNil() {
-		res, err := s.c.call(s.comp, a, b)
+		r, err := s.c.call1(s.comp, a, b)
 		if err != nil {
 			s.err = err
 			return false
 		}
-		return len(res) > 0 && res[0].Truthy()
+		return r.Truthy()
 	}
 	return s.c.lessThan(a, b, &s.err)
 }

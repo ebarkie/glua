@@ -301,7 +301,13 @@ func (ms *matchState) match(s, p int) int {
 	if ms.depth++; ms.depth > maxMatchDepth {
 		return ms.fail("pattern too complex")
 	}
-	defer func() { ms.depth-- }()
+	r := ms.doMatch(s, p)
+	ms.depth--
+	return r
+}
+
+// doMatch is match without the depth count, which a defer would make costly.
+func (ms *matchState) doMatch(s, p int) int {
 	pat := ms.pat
 	for {
 		if ms.err != nil || !ms.step() {
