@@ -58,6 +58,9 @@ func TestPow(t *testing.T) {
 		{58770.618175967735, -3.5, 2.0320720108469758e-17},
 		{-71.75951830572649, 13.0, -1.3379309254533578e+24},
 		{1.9601313433659002, 188.8390461318569, 1.5662220085985357e+55},
+		{0x1p63, 2 / 3.0, 0x1.ffffffffffff1p+41}, // 63 * (2/3.0) rounds to 42: not a power of two
+		{0x1p63, 1 / 3.0, 0x1.ffffffffffff9p+20},
+		{0x1p-60, -0.25, 0x1p15}, // exact: the shortcut
 	} {
 		if got := luaPow(tc.x, tc.y); got != tc.want {
 			t.Errorf("%v ^ %v = %v, want %v (math.Pow: %v)", tc.x, tc.y, got, tc.want, math.Pow(tc.x, tc.y))

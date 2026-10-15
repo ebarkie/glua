@@ -140,7 +140,8 @@ func luaPow(x, y float64) float64 {
 		return y
 	}
 	if frac, exp := math.Frexp(x); frac == 0.5 && x > 0 {
-		if e := float64(exp-1) * y; e == math.Trunc(e) && e >= -1074 && e <= 1023 {
+		// only when the product is exact: 63 * (2/3.0) rounds to 42, but 2^63 ^ (2/3.0) is not 2^42
+		if e := float64(exp-1) * y; e == math.Trunc(e) && math.FMA(float64(exp-1), y, -e) == 0 && e >= -1074 && e <= 1023 {
 			return math.Ldexp(1, int(e))
 		}
 	}
