@@ -83,7 +83,13 @@ func baseLoad(c *Call, globals *Table) error {
 	case chunk.isObj(kindLuaFn) || chunk.isObj(kindGoFn):
 		var b strings.Builder
 		for {
+			if err := ex.tick(); err != nil { // a reader that never ends runs out of steps
+				return err
+			}
 			res, err := c.call(chunk)
+			if le, ok := err.(*Error); ok && le.terminal {
+				return err
+			}
 			if err != nil {
 				return c.ReturnValues(Value{}, errValue(err))
 			}
@@ -94,6 +100,9 @@ func baseLoad(c *Call, globals *Table) error {
 				res[0] = String(res[0].String())
 			} else if !res[0].isString() {
 				return c.ReturnValues(Value{}, errValue(c.libErrorf("reader function must return a string")))
+			}
+			if err := ex.produce(int(res[0].n & lenMask)); err != nil { // the source grows as it is read
+				return err
 			}
 			b.WriteString(res[0].str())
 			if b.Len() > maxAlloc {

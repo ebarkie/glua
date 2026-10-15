@@ -384,7 +384,16 @@ func (ex *executor) openCount(from int) (int, error) {
 	if ex.top < from || ex.top > len(ex.stack) {
 		return 0, ex.errorf("internal error: no open list for %s", opName(uint8(ex.instr(ex.st.pc-1))))
 	}
-	return ex.top - from, nil
+	n := ex.top - from
+	if n > 8 {
+		// a list made from varargs or results can grow without bound: copying it costs a step
+		// per 8 values, so that a tail call that adds arguments each time cannot run forever
+		// on one step per call
+		if err := ex.spend(n / 8); err != nil {
+			return 0, err
+		}
+	}
+	return n, nil
 }
 
 // maxAlloc is the fixed cap on any single allocation made for a script, checked before the
@@ -1048,6 +1057,9 @@ func (ex *executor) vararg(a, c int) error {
 	n := c - 1
 	if c == 0 {
 		n = nextra
+		if err := ex.spend(n / 8); err != nil {
+			return err
+		}
 		if err := ex.ensure(st.base + a + n); err != nil {
 			return err
 		}

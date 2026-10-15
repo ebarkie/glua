@@ -51,6 +51,7 @@ func TestHostileScripts(t *testing.T) {
 		{"load", "function f() local s = string.rep(' ', 1 << 18) for i = 1, 10 do load(s) end end", ErrAlloc},
 		{"pcall swallows nothing", "function f() local ok = pcall(string.rep, 'x', 1 << 22) return ok end", ErrAlloc},
 		{"error handler", "function f() return xpcall(error, function() while true do end end) end", ErrSteps},
+		{"growing tail calls", "local function r(...) return r(1, 2, 3, ...) end function f() return r() end", ErrSteps},
 	} {
 		_, err := runLimited(t, rt, ctx, tc.src)
 		if !errors.Is(err, tc.want) {
