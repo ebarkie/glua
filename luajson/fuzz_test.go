@@ -79,7 +79,7 @@ func FuzzEncode(f *testing.F) {
 			case 1:
 				return lua.Float(float64(b) / 7)
 			case 2:
-				return lua.Float([]float64{math.Inf(1), math.NaN(), -0.0, 1e300, 5e-324}[int(b)%5])
+				return lua.Float([]float64{math.Inf(1), math.NaN(), math.Copysign(0, -1), 1e300, 5e-324}[int(b)%5])
 			case 3:
 				return lua.String(string(data[i:min(i+int(b%5), len(data))]))
 			case 4:
