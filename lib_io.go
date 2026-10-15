@@ -71,7 +71,7 @@ func openIO(g *Table, rt *Runtime) {
 // toFile returns argument i as an open file.
 func toFile(c *Call, i int, fname string) (*ioFile, error) {
 	v := c.Value(i)
-	if !v.isObj(kindUser) || v.n&typeIDMask != ioFileID {
+	if !isFile(v) {
 		return nil, c.typeArgError(i, fname, "FILE*")
 	}
 	f := (*ioFile)(v.p)
@@ -145,7 +145,7 @@ func ioType(c *Call) error {
 		return err
 	}
 	v := c.Value(0)
-	if !v.isObj(kindUser) || v.n&typeIDMask != ioFileID {
+	if !isFile(v) {
 		return c.ReturnValues(Value{})
 	}
 	if (*ioFile)(v.p).closed {
@@ -190,17 +190,21 @@ func closeFile(c *Call, f *ioFile) error {
 // fileGC closes a file that a script let go of, or that a <close> variable held.
 func fileGC(c *Call) error {
 	v := c.Value(0)
-	if v.isObj(kindUser) && v.n&typeIDMask == ioFileID {
-		if f := (*ioFile)(v.p); !f.closed && f.std == 0 {
-			f.w.Flush()
-			f.f.Close()
-			f.closed = true
-		}
+	if !isFile(v) { // as C Lua's luaL_checkudata: the metamethods can be called with anything
+		return c.typeArgError(0, "__gc", "FILE*")
+	}
+	if f := (*ioFile)(v.p); !f.closed && f.std == 0 {
+		f.w.Flush()
+		f.f.Close()
+		f.closed = true
 	}
 	return nil
 }
 
 func fileToString(c *Call) error {
+	if !isFile(c.Value(0)) {
+		return c.typeArgError(0, "__tostring", "FILE*")
+	}
 	f := (*ioFile)(c.Value(0).p)
 	if f.closed {
 		return c.ReturnValues(String("file (closed)"))
@@ -522,5 +526,8 @@ func linesIter(c *Call, f *ioFile, first int, owns bool) error {
 
 // isStdFile reports whether v is one of the standard files, which are shared by design.
 func isStdFile(v Value) bool {
-	return v.n&typeIDMask == ioFileID && (*ioFile)(v.p).std != 0
+	return isFile(v) && (*ioFile)(v.p).std != 0
 }
+
+// isFile reports whether v is a file. Check it before reading v.p as an *ioFile.
+func isFile(v Value) bool { return v.isObj(kindUser) && v.n&typeIDMask == ioFileID }

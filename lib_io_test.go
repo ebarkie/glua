@@ -97,3 +97,21 @@ func TestOSLibrary(t *testing.T) {
 		t.Error("the hardened profile took LibOS")
 	}
 }
+
+// The file metamethods can be called with anything: what is not a file is an argument error,
+// never memory read as a file or a nil dereference that takes down the host.
+func TestIOMetamethodsCheckTheirArgument(t *testing.T) {
+	rt := MustNew(LibSafe | LibIO)
+	for _, tc := range []struct{ src, want string }{
+		{`return select(2, pcall(getmetatable(io.stdin).__tostring, {}))`, "FILE* expected, got table"},
+		{`return select(2, pcall(getmetatable(io.stdin).__tostring))`, "FILE* expected, got no value"},
+		{`return select(2, pcall(getmetatable(io.stdin).__gc, 7))`, "FILE* expected, got number"},
+		{`return select(2, pcall(getmetatable(io.stdin).__close, "x"))`, "FILE* expected, got string"},
+		{`return tostring(io.stdout)`, "file ("},
+	} {
+		res, err := runInEnv(t, rt, tc.src)
+		if err != nil || len(res) == 0 || !strings.Contains(res[0].String(), tc.want) {
+			t.Errorf("%s: got %v, %v; want %q", tc.src, res, err, tc.want)
+		}
+	}
+}
