@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -82,7 +83,9 @@ func TestDifferential(t *testing.T) {
 			if d := time.Since(cs); d > 2*time.Second {
 				t.Logf("%s took %v in glua:\n%s", c.name, d, c.src)
 			}
-			norm := func(s string) string { return nanSign.Replace(addrs.ReplaceAllString(s, "0x")) }
+			norm := func(s string) string {
+				return fmodArg.ReplaceAllString(nanSign.Replace(addrs.ReplaceAllString(s, "0x")), "#? to 'fmod' (number expected)")
+			}
 			if norm(got) != norm(want[c.name]) {
 				t.Errorf("%s differs (seed %d)\n%s\n got: %s\nwant: %s", c.name, seed, c.src, got, want[c.name])
 				if failed++; failed > 5 {
@@ -95,6 +98,11 @@ func TestDifferential(t *testing.T) {
 		}
 	}
 }
+
+// fmodArg hides which argument math.fmod names when neither is a number: C Lua checks both
+// in one call expression, so the order depends on the compiler, and gcc differs between
+// amd64 and arm64.
+var fmodArg = regexp.MustCompile(`#[12] to 'fmod' \(number expected, got [a-z ]+\)`)
 
 // progGen writes random Lua programs from a small grammar: locals, arithmetic, strings,
 // tables, library calls, control flow and pcall, all deterministic.
