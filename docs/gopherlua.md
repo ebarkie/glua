@@ -209,7 +209,9 @@ a scalar or string form instead of a userdata.
 GopherLua opens all standard libraries unless `Options.SkipOpenLibs` is set, after which the
 wanted ones are opened by calling their `Open*` functions. glua opens a small default set
 (`base`, `string`, `table`, `math`, `utf8`); `coroutine`, `load`, `os` and `io` are opt-in
-flags, and `os` and `io` are subsets. `lua.Hardened()` is a profile for untrusted scripts. The
+flags, and `os` and `io` are subsets. Where GopherLua code sets a global such as
+`collectgarbage` to nil, the host leaves it out with `lua.Without("collectgarbage")`, and may
+then define its own under the name. `lua.Hardened()` is a profile for untrusted scripts. The
 [sandbox document](sandbox.md) lists what each allows.
 
 ## Limits and cancellation

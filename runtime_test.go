@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"math"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -60,6 +63,54 @@ func TestNewLibs(t *testing.T) {
 	}
 }
 
+func TestWithout(t *testing.T) {
+	for _, tc := range []struct {
+		opts []Option
+		src  string
+		want string
+	}{
+		{[]Option{Without("collectgarbage", "string.rep", "debug.traceback")},
+			"return collectgarbage, string.rep, ('x').rep, debug.traceback, type(string.sub), type(debug)",
+			"nil\tnil\tnil\tnil\tfunction\ttable"},
+		{[]Option{Without("string")}, "return string, ('x'):rep(2), pcall(function() getmetatable('').__index.rep = 1 end)",
+			"nil\txx\tfalse\ttest:1: attempt to modify a frozen table"},
+		{[]Option{Without("string", "string.rep")}, "return string, ('x').rep", "nil\tnil"},
+		{[]Option{Without("print")}, "rawset(_G, 'print', 1) return print", "1"},
+		{[]Option{LibSafe | LibLoad, Without("_G", "package", "require", "load")}, "return _G, package, require, load", "nil\tnil\tnil\tnil"},
+		{[]Option{Without("require")}, "return type(package.loaded)", "table"},
+		{[]Option{Without("print", "print")}, "print = 1 return print", "1"},
+		{[]Option{Without("print"), Global("print", Fn1(func(s string) string { return "host " + s }))}, "return print('x')", "host x"},
+		{[]Option{Without("require"), Global("require", Fn1(func(s string) string { return "module " + s }))}, "return require('m')", "module m"},
+		{[]Option{Without("math"), Module("math", Members{"pi": 3})}, "return math.pi, math.floor", "3\tnil"},
+		{[]Option{LibSafe, Global("load", Fn1(func(s string) string { return "host " + s }))}, "return load('x')", "host x"},
+		{[]Option{LibNone, Global("require", Fn1(func(s string) string { return "module " + s }))}, "return require('m')", "module m"},
+		{nil, "return type(collectgarbage), type(string.rep)", "function\tfunction"}, // other Runtimes keep them
+	} {
+		rt, err := New(tc.opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := runInEnv(t, rt, tc.src)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.src, err)
+		}
+		if got := joinValues(res); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.src, got, tc.want)
+		}
+	}
+	rt := MustNew(Without("print"), StrictGlobals())
+	if _, err := runInEnv(t, rt, "print(1)"); err == nil || !strings.Contains(err.Error(), "undefined global 'print'") {
+		t.Errorf("print left out: got %v", err)
+	}
+	vm, err := mustLoad(t, MustNew(Without("print")), "").NewVM(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vm.Set("print", 1); err != nil {
+		t.Errorf("VM.Set of a name left out: %v", err)
+	}
+}
+
 func TestNewErrors(t *testing.T) {
 	for _, tc := range []struct {
 		opts []Option
@@ -80,6 +131,14 @@ func TestNewErrors(t *testing.T) {
 		{[]Option{Global("u", uint64(math.MaxUint64))}, "does not fit"},
 		{[]Option{SourceModule("m", "return +")}, "m:1:"},
 		{[]Option{Module("m", Members{}), SourceModule("m", "return 1")}, "module is already defined"},
+		{[]Option{Without("printf")}, "cannot bind 'printf': the libraries define no such name"},
+		{[]Option{Without("string.repp")}, "cannot bind 'string.repp'"},
+		{[]Option{Without("strin.rep")}, "cannot bind 'strin.rep'"},
+		{[]Option{Without("print.x")}, "cannot bind 'print.x'"},
+		{[]Option{Without("load")}, "cannot bind 'load'"},
+		{[]Option{Without("_G.print")}, "cannot bind '_G.print'"},
+		{[]Option{LibNone | LibMath, Without("require")}, "cannot bind 'require'"},
+		{[]Option{Without("string.rep"), Global("string", 1)}, "cannot bind 'string': the name is already defined"},
 	} {
 		_, err := New(tc.opts...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -220,6 +279,71 @@ func TestOutput(t *testing.T) {
 	}
 	if _, err := runInEnv(t, MustNew(), "print('discarded')"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOutputSerialised(t *testing.T) {
+	var buf bytes.Buffer // not safe for concurrent use: Output's lock must make it so
+	rt := MustNew(Output(&buf))
+	s := mustLoad(t, rt, "function f() for i = 1, 100 do print('line') end end")
+	f, _ := s.Func0[struct{}]("f")
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() { f(context.Background()) })
+	}
+	wg.Wait()
+	if buf.String() != strings.Repeat("line\n", 400) {
+		t.Errorf("output of %d bytes is torn", buf.Len())
+	}
+}
+
+func TestOutputFunc(t *testing.T) {
+	type tenantKey struct{}
+	var got []string
+	f := func(ctx context.Context, s string) error {
+		if s == "full\n" {
+			return errors.New("output is full")
+		}
+		tenant, _ := ctx.Value(tenantKey{}).(string)
+		got = append(got, tenant+": "+s)
+		return nil
+	}
+	invoke := GoFunc(func(c *Call) error { _, err := c.Invoke(c.Value(0)); return err })
+	rt := MustNew(LibSafe|LibIO, Output(io.Discard), OutputFunc(f), Global("invoke", invoke))
+	s, err := rt.Load(context.WithValue(context.Background(), tenantKey{}, "a"), "out.lua", `
+		print("loading")
+		function f()
+			print("called", 1)
+			warn("@on") warn("warned")
+			io.write("written\n")
+			invoke(function() print("from Go") end)
+			return select(2, pcall(print, "full"))
+		end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := s.Func0[string]("f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := call(context.WithValue(context.Background(), tenantKey{}, "b"))
+	if err != nil || msg != "output is full" {
+		t.Errorf("a failing write: got %q, %v", msg, err)
+	}
+	want := []string{"a: loading\n", "b: called\t1\n", "b: Lua warning: warned\n", "b: written\n", "b: from Go\n"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+
+	var buf bytes.Buffer
+	if _, err := runInEnv(t, MustNew(OutputFunc(f), Output(&buf)), "print('last wins')"); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "last wins\n" {
+		t.Errorf("output %q", buf.String())
+	}
+	if _, err := runInEnv(t, MustNew(Output(&buf), Output(nil)), "print('discarded')"); err != nil || buf.String() != "last wins\n" {
+		t.Errorf("Output(nil): %v, output %q", err, buf.String())
 	}
 }
 

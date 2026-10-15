@@ -15,7 +15,7 @@ func runWithOutput(t *testing.T, src string) (string, []Value) {
 	}
 	var out bytes.Buffer
 	ex := newExecutor()
-	ex.output = &out
+	ex.output = writerOutput(&out)
 	g := testGlobals()
 	ex.strMeta = testStrMeta
 	res, err := runClosure(context.Background(), ex, &closure{p: p, env: g})

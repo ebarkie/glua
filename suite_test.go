@@ -147,7 +147,7 @@ func runSuiteFile(path string, out *bytes.Buffer) error {
 	ex.strMeta = testStrMeta
 	ex.maxSteps = 4_000_000_000
 	ex.maxCallDepth = 200_000
-	ex.output = out
+	ex.output = writerOutput(out)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	_, err = runClosure(ctx, ex, f)
