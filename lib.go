@@ -26,11 +26,16 @@ func (c *Call) libErrorCause(cause error, format string, args ...any) error {
 // luaL_argerror does: the function is named as the call site names it, a method call does
 // not count self, and without a call-site name the library's qualified name is used.
 func (c *Call) argError(n int, fname, msg string) error {
+	return c.libErrorf("%s", c.argMessage(n, fname, msg))
+}
+
+// argMessage is argError's message, without the position.
+func (c *Call) argMessage(n int, fname, msg string) string {
 	name, method := c.callSiteName()
 	if method {
 		n--
 		if n == 0 {
-			return c.libErrorf("calling '%s' on bad self (%s)", name, msg)
+			return fmt.Sprintf("calling '%s' on bad self (%s)", name, msg)
 		}
 	}
 	if name == "" {
@@ -39,7 +44,7 @@ func (c *Call) argError(n int, fname, msg string) error {
 			name = c.fn.qualname
 		}
 	}
-	return c.libErrorf("bad argument #%d to '%s' (%s)", n, name, msg)
+	return fmt.Sprintf("bad argument #%d to '%s' (%s)", n, name, msg)
 }
 
 // callSiteName returns the name the calling Lua code used for the function, and whether

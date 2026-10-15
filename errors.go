@@ -196,21 +196,32 @@ func (ex *executor) terminal(cause error) error {
 	return err
 }
 
-// hostError turns an error returned by a host function into a Lua error. The Go error is
-// kept on the side, so errors.Is and errors.As still find it.
-func (ex *executor) hostError(err error) error {
-	var le *Error
-	if errors.As(err, &le) {
+// hostError turns an error that the host function of c returned into a Lua error. The Go
+// error is kept on the side, so errors.Is and errors.As still find it. A Lua error returned
+// as it is stays itself; one the host wrapped, as a Lua error from Invoke in an Errorf, is
+// the host's own error, as in C Lua, while a terminal one has already replaced err. One that
+// Errorf or ArgError made, wrapped or not, starts with the position of the Lua code that
+// called the function, as luaL_error's does.
+func (ex *executor) hostError(c *Call, err error) error {
+	if _, ok := err.(*Error); ok {
 		return err
 	}
-	msg := err.Error()
+	msg, where, pos := err.Error(), "", ""
+	if pe := (*positioned)(nil); errors.As(err, &pe) {
+		pos = ex.whereLevel(c, 1)
+	}
+	if pos != "" {
+		msg = pos + ": " + msg
+	} else {
+		where = ex.where()
+	}
 	if ex.goErrs == nil {
 		ex.goErrs = map[unsafe.Pointer]error{}
 	}
 	if msg != "" {
 		ex.goErrs[unsafe.Pointer(unsafe.StringData(msg))] = err // for error(e) raising it again
 	}
-	return &Error{Value: String(msg), where: ex.where(), cause: err}
+	return &Error{Value: String(msg), where: where, cause: err}
 }
 
 func ctxError(ctx context.Context) error {

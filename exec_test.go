@@ -3,6 +3,7 @@ package glua
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"runtime"
@@ -212,6 +213,73 @@ func TestHostErrorKeepsGoError(t *testing.T) {
 	var le *Error
 	if !errors.Is(err, sentinel) || !errors.As(err, &le) || le.Value.String() != "not found" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// Errorf and ArgError write their messages as luaL_error and luaL_argerror do: the position
+// of the Lua code that called the host function, none for a call from Go, before the whole
+// message when the error is wrapped, and the function as the call names it. The Go error
+// stays behind the message, also when error(e, 0) raises it again, and the Go side shows the
+// position once, Terminate's included.
+func TestHostErrorsWithPosition(t *testing.T) {
+	missing := errors.New("not found")
+	lookup := func(c *Call) error { return c.Errorf("user %d: %w", c.Arg[int](0), missing) }
+	rt := MustNew(
+		Global("lookup", GoFunc(lookup)),
+		Global("wrapped", GoFunc(func(c *Call) error { return fmt.Errorf("lookup: %w", lookup(c)) })),
+		Global("deny", GoFunc(func(c *Call) error { return Terminate(lookup(c)) })),
+		Global("check", GoFunc(func(c *Call) error { return c.ArgError(c.Len()-1, "positive expected") })),
+		Global("invoke", GoFunc(func(c *Call) error {
+			if _, err := c.Invoke(c.Value(0)); err != nil {
+				return c.Errorf("in callback: %w", err)
+			}
+			return nil
+		})))
+	s, err := rt.Load(context.Background(), "t.lua", `
+		local obj = { check = check }
+		function f()
+			return select(2, pcall(function() lookup(7) end)), select(2, pcall(lookup, 7)),
+				select(2, pcall(function() wrapped(7) end)),
+				select(2, pcall(function() check(1) end)), select(2, pcall(function() obj:check(1) end)),
+				select(2, pcall(check, 1)), select(2, pcall(function() obj:check() end)),
+				select(2, pcall(function() invoke(function() error("inner") end) end))
+		end
+		function g() local _, e = pcall(function() lookup(7) end) error(e, 0) end
+		function h() lookup(7) end
+		function d() pcall(deny, 7) end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.CallN(context.Background(), nil, s.Globals().Get(String("f")))
+	want := []string{"t.lua:4: user 7: not found", "user 7: not found", "t.lua:5: lookup: user 7: not found",
+		"t.lua:6: bad argument #1 to 'check' (positive expected)", "t.lua:6: bad argument #1 to 'check' (positive expected)",
+		"bad argument #1 to 'check' (positive expected)", "t.lua:7: calling 'check' on bad self (positive expected)",
+		"t.lua:8: in callback: t.lua:8: inner"}
+	if err != nil || len(res) != len(want) {
+		t.Fatalf("got %v, %v", res, err)
+	}
+	for i, w := range want {
+		if res[i].String() != w {
+			t.Errorf("message %d = %q, want %q", i+1, res[i], w)
+		}
+	}
+	for name, want := range map[string]string{"g": "t.lua:10: user 7: not found", "h": "t.lua:11: user 7: not found",
+		"d": "t.lua:12: user 7: not found"} {
+		if _, err := s.Call(context.Background(), s.Globals().Get(String(name))); !errors.Is(err, missing) || err.Error() != want {
+			t.Errorf("%s: got %v, want %q", name, err, want)
+		}
+	}
+	// a terminal error stays terminal, wrapped
+	limited := MustNew(Limits{Steps: 10_000}, Global("invoke", GoFunc(func(c *Call) error {
+		_, err := c.Invoke(c.Value(0))
+		return c.Errorf("in callback: %w", err)
+	})))
+	ls, err := limited.Load(context.Background(), "l.lua", "function f() pcall(invoke, function() while true do end end) end")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ls.Call(context.Background(), ls.Globals().Get(String("f"))); !errors.Is(err, ErrSteps) {
+		t.Errorf("a wrapped step limit: %v", err)
 	}
 }
 

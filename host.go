@@ -2,6 +2,7 @@ package glua
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 )
@@ -163,10 +164,29 @@ func (c *Call) Renew() {
 	}
 }
 
-// Errorf returns an error with a formatted message, for a host function to return.
+// Errorf returns an error with a formatted message, for a host function to return. As C
+// Lua's luaL_error does, the message Lua sees starts with the position of the Lua code that
+// called the function ("policy.lua:4: no such user"), and has none when Go code, such as
+// pcall, made the call. %w wraps an error as fmt.Errorf does, for errors.Is and errors.As,
+// and the error may itself be wrapped: the position starts the whole message.
 func (c *Call) Errorf(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
+	return &positioned{fmt.Errorf(format, args...)}
 }
+
+// ArgError returns the error for a bad argument i, counting from 0 as Arg does, as C Lua's
+// luaL_argerror makes it: "bad argument #1 to 'f' (msg)", the function named as the calling
+// code names it, or by its own name when Go code made the call, a method call not counting
+// self, with the position Errorf gives.
+func (c *Call) ArgError(i int, msg string) error {
+	return &positioned{errors.New(c.argMessage(i+1, c.fnName(), msg))}
+}
+
+// positioned is an error that Errorf or ArgError made, whose message hostError starts with
+// the position of the calling Lua code.
+type positioned struct{ err error }
+
+func (e *positioned) Error() string { return e.err.Error() }
+func (e *positioned) Unwrap() error { return e.err }
 
 // returnArgs makes the arguments from index from on the results, without allocating.
 func (c *Call) returnArgs(from int) error {
@@ -274,9 +294,9 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	if err != nil {
 		c.reset()
 		if g.host && ex.fatal == nil {
-			return 0, ex.hostFailed(err)
+			return 0, ex.hostFailed(c, err)
 		}
-		return 0, ex.hostError(err)
+		return 0, ex.hostError(c, err)
 	}
 	n := len(c.res)
 	if g.host && !c.charged {
@@ -309,14 +329,14 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 // one when the function asked for that with Terminate, or when the entry's context ended (a
 // host function that waited on the context and returned its error must not leave the script
 // to catch it).
-func (ex *executor) hostFailed(err error) error {
+func (ex *executor) hostFailed(c *Call, err error) error {
 	if te, ok := err.(*terminateError); ok {
 		return ex.terminal(te.err)
 	}
 	if ex.ctx.Err() != nil {
 		return ex.terminal(ctxError(ex.ctx))
 	}
-	return ex.hostError(err)
+	return ex.hostError(c, err)
 }
 
 // invokeGo calls the host function g. An argument error that Arg raised by panic is
