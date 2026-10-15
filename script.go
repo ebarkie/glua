@@ -19,7 +19,7 @@ type Script struct {
 	env    *Table  // the frozen globals
 	result []Value // what the chunk returned, frozen
 	lim    *limits // for calls
-	main   *Proto  // for NewVM, which runs the top level again
+	main   *proto  // for NewVM, which runs the top level again
 	info   *syntax.Info
 }
 
@@ -45,7 +45,7 @@ func (rt *Runtime) Load(ctx context.Context, name, src string) (*Script, error) 
 }
 
 // runTop runs a top level under the init limits and returns its results.
-func (rt *Runtime) runTop(ctx context.Context, cl *Closure, name string) ([]Value, error) {
+func (rt *Runtime) runTop(ctx context.Context, cl *closure, name string) ([]Value, error) {
 	ex := rt.borrow(&rt.init)
 	err := ex.call(ctx, cl, 0, 0)
 	var res []Value
@@ -218,10 +218,10 @@ func (rt *Runtime) callN(ctx context.Context, l *limits, script string, dst []Va
 
 // entryFunc returns the closure an entry runs for fn, and the stack index of its first
 // argument: a Go function runs from the trampoline, which takes it as its first argument.
-func entryFunc(fn Value) (*Closure, int, error) {
+func entryFunc(fn Value) (*closure, int, error) {
 	switch {
 	case fn.isObj(kindLuaFn):
-		return (*Closure)(fn.p), 1, nil
+		return (*closure)(fn.p), 1, nil
 	case fn.isObj(kindGoFn):
 		return trampoline, 2, nil
 	}
@@ -234,7 +234,7 @@ type boundFunc struct {
 	rt     *Runtime
 	lim    *limits
 	fn     Value
-	cl     *Closure
+	cl     *closure
 	base   int // stack index of the first argument
 	script string
 	name   string

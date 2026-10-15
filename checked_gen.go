@@ -308,7 +308,7 @@ dispatch:
 		case opCall: // R[A], ... = R[A](R[A+1], ..., R[A+B-1]); C-1 results are expected
 			a := uint8(i >> 8)
 			fn := &regs[a]
-			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 && !(*Closure)(fn.p).p.vararg {
+			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 && !(*closure)(fn.p).p.vararg {
 				if base+int(a)+1+256 > len(ex.stack) {
 					e = exGrowStack
 					break dispatch
@@ -319,7 +319,7 @@ dispatch:
 				}
 				ex.pframes[ex.st.nf] = uint64(uint32(pc)) | uint64(a+1)<<32
 				ex.st.nf++
-				cl = (*Closure)(fn.p)
+				cl = (*closure)(fn.p)
 				base += int(a) + 1
 				regs = (*[256]Value)(ex.stack[base : base+256])
 				for j := int(uint8(i>>16)) - 1; j < int(cl.p.nparams); j++ {

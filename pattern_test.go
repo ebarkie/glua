@@ -30,7 +30,7 @@ func FuzzPatterns(f *testing.F) {
 		ex := newExecutor()
 		ex.strMeta = testStrMeta
 		ex.maxSteps = 20_000
-		_, err := runClosure(context.Background(), ex, &Closure{p: p, env: g}, String(s), String(pat))
+		_, err := runClosure(context.Background(), ex, &closure{p: p, env: g}, String(s), String(pat))
 		if pe, ok := err.(*PanicError); ok {
 			t.Fatalf("panic: %v\n%s", pe.Value, pe.Stack)
 		}

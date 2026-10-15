@@ -150,12 +150,12 @@ func init() {
 
 // pairsMeta is function(mm, t) local f, s, c = mm(t) return f, s, c end: pairs through
 // __pairs, which C Lua truncates to three results.
-var pairsMeta = func() *Closure {
+var pairsMeta = func() *closure {
 	p, _, err := compileChunk("=pairs", "return function(mm, t) local f, s, c = mm(t) return f, s, c end")
 	if err != nil {
 		panic(err)
 	}
-	return &Closure{p: p.protos[0]}
+	return &closure{p: p.protos[0]}
 }()
 
 func basePairs(c *Call) error {

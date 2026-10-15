@@ -49,7 +49,7 @@ type Runtime struct {
 // sourceModule is a module written in Lua, compiled once by New and run by require in each
 // environment that loads it.
 type sourceModule struct {
-	p    *Proto
+	p    *proto
 	info *syntax.Info
 }
 
@@ -65,18 +65,18 @@ type limits struct {
 type Lib uint
 
 const (
-	LibBase Lib = 1 << iota
-	LibString
-	LibTable
-	LibMath
-	LibUTF8
-	LibCoroutine
-	LibOS   // clock, time, date, difftime
-	LibIO   // trusted scripts only
-	LibLoad // load(): compile text at run time
+	LibBase      Lib = 1 << iota // the base library, without dofile and loadfile; also require and package
+	LibString                    // string, with pack and unpack
+	LibTable                     // table
+	LibMath                      // math
+	LibUTF8                      // utf8
+	LibCoroutine                 // coroutine
+	LibOS                        // os: clock, time, date and difftime only
+	LibIO                        // io, for trusted scripts only
+	LibLoad                      // load: compile text at run time
 
-	LibNone Lib = 1 << 31 // an empty environment; with other flags, only those
-	LibSafe     = LibBase | LibString | LibTable | LibMath | LibUTF8
+	LibNone Lib = 1 << 31                                            // an empty environment; with other flags, only those
+	LibSafe     = LibBase | LibString | LibTable | LibMath | LibUTF8 // the default
 )
 
 func (l Lib) apply(o *options) { o.libs |= l; o.libsSet = true }
@@ -479,6 +479,7 @@ type syncWriter struct {
 	w  io.Writer
 }
 
+// Write writes b to the underlying writer, one call at a time.
 func (s *syncWriter) Write(b []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

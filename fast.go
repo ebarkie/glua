@@ -16,17 +16,17 @@ import (
 func kAt(k unsafe.Pointer, i uint32) *Value { return (*Value)(unsafe.Add(k, uintptr(i)*16)) }
 
 // hintAt returns the hint word of site i of p.
-func hintAt(p *Proto, i uint32) *uint32 {
+func hintAt(p *proto, i uint32) *uint32 {
 	return (*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(p.hints)), uintptr(i)*4))
 }
 
 // upAt returns upvalue i of cl.
-func upAt(cl *Closure, i uint8) *Value {
+func upAt(cl *closure, i uint8) *Value {
 	return (*Value)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.up)), uintptr(i)*16))
 }
 
 // khashAt returns the hash of constant i of p.
-func khashAt(p *Proto, i uint32) uint64 {
+func khashAt(p *proto, i uint32) uint64 {
 	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(p.khash)), uintptr(i)*8))
 }
 
@@ -355,7 +355,7 @@ dispatch:
 		case opCall: // R[A], ... = R[A](R[A+1], ..., R[A+B-1]); C-1 results are expected
 			a := uint8(i >> 8)
 			fn := &regs[a]
-			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 && !(*Closure)(fn.p).p.vararg {
+			if fn.n == kindLuaFn<<56 && !isScalar(fn.p) && uint8(i>>16) != 0 && !(*closure)(fn.p).p.vararg {
 				//gen:fast
 				if uintptr(unsafe.Pointer(fn)) >= ex.st.limitAddr {
 					e = exGrowStack
@@ -369,7 +369,7 @@ dispatch:
 				code0 := uintptr(unsafe.Pointer(unsafe.SliceData(cl.p.code)))
 				ex.pframes[ex.st.nf] = uint64(uint32((uintptr(pc)-code0)>>2)) | uint64(a+1)<<32
 				ex.st.nf++
-				cl = (*Closure)(fn.p)
+				cl = (*closure)(fn.p)
 				regs = (*[256]Value)(unsafe.Pointer(&regs[a+1]))
 				for j := int(uint8(i>>16)) - 1; j < int(cl.p.nparams); j++ {
 					regs[uint8(j)] = Value{} // only missing parameters are filled
@@ -390,7 +390,7 @@ dispatch:
 				//				}
 				//				ex.pframes[ex.st.nf] = uint64(uint32(pc)) | uint64(a+1)<<32
 				//				ex.st.nf++
-				//				cl = (*Closure)(fn.p)
+				//				cl = (*closure)(fn.p)
 				//				base += int(a) + 1
 				//				regs = (*[256]Value)(ex.stack[base : base+256])
 				//				for j := int(uint8(i>>16)) - 1; j < int(cl.p.nparams); j++ {
@@ -435,7 +435,7 @@ dispatch:
 			}
 			//gen:fast
 			regs = (*[256]Value)(unsafe.Add(unsafe.Pointer(regs), -int(fr>>32&0xffffff)*16))
-			cl = (*Closure)((*Value)(unsafe.Add(unsafe.Pointer(regs), -16)).p)
+			cl = (*closure)((*Value)(unsafe.Add(unsafe.Pointer(regs), -16)).p)
 			k = unsafe.Pointer(unsafe.SliceData(cl.p.k))
 			pc = unsafe.Add(unsafe.Pointer(unsafe.SliceData(cl.p.code)), int(uint32(fr))*4)
 			if want := *(*uint32)(unsafe.Add(pc, -4)) >> 24; want != 2 { // C of the CALL at pc-1

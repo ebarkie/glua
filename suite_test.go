@@ -156,7 +156,7 @@ func runSuiteFile(path string, out *bytes.Buffer) error {
 
 // loadSuiteChunk compiles a file as luaL_loadfile does: "@name" for its chunk name, and a
 // first line starting with '#' skipped.
-func loadSuiteChunk(path string, g *Table) (*Closure, error) {
+func loadSuiteChunk(path string, g *Table) (*closure, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

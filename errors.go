@@ -10,12 +10,14 @@ import (
 	"github.com/folbricht/glua/internal/syntax"
 )
 
+// Errors that errors.Is finds. The first three are terminal: pcall cannot catch them, and
+// an *Error that wraps them carries the script's position and traceback.
 var (
-	ErrSteps       = errors.New("glua: step limit exceeded")
-	ErrAlloc       = errors.New("glua: allocation limit exceeded")
-	ErrHostDepth   = errors.New("glua: too many nested calls between Go and Lua")
-	ErrUndefined   = errors.New("glua: name is not defined")
-	ErrNotFunction = errors.New("glua: value is not a function")
+	ErrSteps       = errors.New("glua: step limit exceeded")                      // Limits.Steps ran out
+	ErrAlloc       = errors.New("glua: allocation limit exceeded")                // Limits.AllocBytes ran out, or one allocation was over 1 GiB
+	ErrHostDepth   = errors.New("glua: too many nested calls between Go and Lua") // Limits.HostDepth was reached
+	ErrUndefined   = errors.New("glua: name is not defined")                      // FuncN or Get named nothing
+	ErrNotFunction = errors.New("glua: value is not a function")                  // FuncN, Call or CallN got something else
 )
 
 // errDone tells the driver that a general RETURN ended the run's goEntry frame.
@@ -33,7 +35,7 @@ type Error struct {
 // traceEntry is one frame of a traceback, kept as a prototype and pc until it is read. A nil
 // prototype marks Go code between two entries from Go.
 type traceEntry struct {
-	p  *Proto
+	p  *proto
 	pc int
 }
 
@@ -61,6 +63,7 @@ type PanicError struct {
 	Stack []byte
 }
 
+// Error returns "glua: panic: " and the panic value.
 func (e *PanicError) Error() string { return fmt.Sprintf("glua: panic: %v", e.Value) }
 
 // Frame is one level of a traceback.
@@ -107,7 +110,7 @@ func (ex *executor) captureTrace(le *Error, nf0 int) {
 		base -= int(fr >> 32 & 0xffffff)
 		pc = int(uint32(fr))
 		if v := ex.stack[base-1]; v.isObj(kindLuaFn) {
-			cl = (*Closure)(v.p)
+			cl = (*closure)(v.p)
 		} else {
 			cl = nil
 		}
@@ -186,6 +189,7 @@ type SyntaxError struct {
 	Msg       string
 }
 
+// Error returns "source:line: message", as C Lua reports a syntax error.
 func (e *SyntaxError) Error() string { return fmt.Sprintf("%s:%d: %s", e.Source, e.Line, e.Msg) }
 
 // syntaxError turns the compiler's error into a *SyntaxError.
@@ -205,6 +209,7 @@ type BindError struct {
 	Reason string
 }
 
+// Error names the binding, its type when known, and the reason.
 func (e *BindError) Error() string {
 	var s string
 	switch {

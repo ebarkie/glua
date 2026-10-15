@@ -303,11 +303,13 @@ func (e resEnc[R]) ret(c *Call, r R) error {
 // which becomes a Lua error; Do returns nothing; DoE only an error. They panic when made
 // with a parameter or result type that cannot be converted.
 
+// Fn0 adapts func() R.
 func Fn0[R any](f func() R) GoFunc {
 	er := newResEnc[R]()
 	return func(c *Call) error { return er.ret(c, f()) }
 }
 
+// Fn1 adapts func(A) R.
 func Fn1[A, R any](f func(A) R) GoFunc {
 	da, er := newArgDec[A](), newResEnc[R]()
 	return func(c *Call) error {
@@ -320,6 +322,7 @@ func Fn1[A, R any](f func(A) R) GoFunc {
 	}
 }
 
+// Fn2 adapts func(A, B) R, such as a method expression (*T).M.
 func Fn2[A, B, R any](f func(A, B) R) GoFunc {
 	da, db, er := newArgDec[A](), newArgDec[B](), newResEnc[R]()
 	return func(c *Call) error {
@@ -336,6 +339,7 @@ func Fn2[A, B, R any](f func(A, B) R) GoFunc {
 	}
 }
 
+// Fn3 adapts func(A, B, C) R.
 func Fn3[A, B, C, R any](f func(A, B, C) R) GoFunc {
 	da, db, dc, er := newArgDec[A](), newArgDec[B](), newArgDec[C](), newResEnc[R]()
 	return func(c *Call) error {
@@ -356,6 +360,7 @@ func Fn3[A, B, C, R any](f func(A, B, C) R) GoFunc {
 	}
 }
 
+// Fn0E adapts func() (R, error); a non-nil error becomes a Lua error.
 func Fn0E[R any](f func() (R, error)) GoFunc {
 	er := newResEnc[R]()
 	return func(c *Call) error {
@@ -367,6 +372,7 @@ func Fn0E[R any](f func() (R, error)) GoFunc {
 	}
 }
 
+// Fn1E adapts func(A) (R, error).
 func Fn1E[A, R any](f func(A) (R, error)) GoFunc {
 	da, er := newArgDec[A](), newResEnc[R]()
 	return func(c *Call) error {
@@ -383,6 +389,7 @@ func Fn1E[A, R any](f func(A) (R, error)) GoFunc {
 	}
 }
 
+// Fn2E adapts func(A, B) (R, error).
 func Fn2E[A, B, R any](f func(A, B) (R, error)) GoFunc {
 	da, db, er := newArgDec[A](), newArgDec[B](), newResEnc[R]()
 	return func(c *Call) error {
@@ -403,6 +410,7 @@ func Fn2E[A, B, R any](f func(A, B) (R, error)) GoFunc {
 	}
 }
 
+// Fn3E adapts func(A, B, C) (R, error).
 func Fn3E[A, B, C, R any](f func(A, B, C) (R, error)) GoFunc {
 	da, db, dc, er := newArgDec[A](), newArgDec[B](), newArgDec[C](), newResEnc[R]()
 	return func(c *Call) error {
@@ -427,10 +435,12 @@ func Fn3E[A, B, C, R any](f func(A, B, C) (R, error)) GoFunc {
 	}
 }
 
+// Do0 adapts func(), which returns nothing to Lua.
 func Do0(f func()) GoFunc {
 	return func(c *Call) error { f(); return nil }
 }
 
+// Do1 adapts func(A).
 func Do1[A any](f func(A)) GoFunc {
 	da := newArgDec[A]()
 	return func(c *Call) error {
@@ -444,6 +454,7 @@ func Do1[A any](f func(A)) GoFunc {
 	}
 }
 
+// Do2 adapts func(A, B).
 func Do2[A, B any](f func(A, B)) GoFunc {
 	da, db := newArgDec[A](), newArgDec[B]()
 	return func(c *Call) error {
@@ -461,6 +472,7 @@ func Do2[A, B any](f func(A, B)) GoFunc {
 	}
 }
 
+// Do3 adapts func(A, B, C).
 func Do3[A, B, C any](f func(A, B, C)) GoFunc {
 	da, db, dc := newArgDec[A](), newArgDec[B](), newArgDec[C]()
 	return func(c *Call) error {
@@ -482,10 +494,12 @@ func Do3[A, B, C any](f func(A, B, C)) GoFunc {
 	}
 }
 
+// Do0E adapts func() error.
 func Do0E(f func() error) GoFunc {
 	return func(c *Call) error { return f() }
 }
 
+// Do1E adapts func(A) error.
 func Do1E[A any](f func(A) error) GoFunc {
 	da := newArgDec[A]()
 	return func(c *Call) error {
@@ -498,6 +512,7 @@ func Do1E[A any](f func(A) error) GoFunc {
 	}
 }
 
+// Do2E adapts func(A, B) error.
 func Do2E[A, B any](f func(A, B) error) GoFunc {
 	da, db := newArgDec[A](), newArgDec[B]()
 	return func(c *Call) error {
@@ -514,6 +529,7 @@ func Do2E[A, B any](f func(A, B) error) GoFunc {
 	}
 }
 
+// Do3E adapts func(A, B, C) error.
 func Do3E[A, B, C any](f func(A, B, C) error) GoFunc {
 	da, db, dc := newArgDec[A](), newArgDec[B](), newArgDec[C]()
 	return func(c *Call) error {

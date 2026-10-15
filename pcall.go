@@ -103,7 +103,7 @@ func (ex *executor) callSyncAt(f Value, args []Value) (slot, n int, err error) {
 	return slot, n, err
 }
 
-func (ex *executor) callSyncBody(f Value, args []Value, cl *Closure, base int) (int, error) {
+func (ex *executor) callSyncBody(f Value, args []Value, cl *closure, base int) (int, error) {
 	st := &ex.st
 	slot := ex.top // a coroutine with a Go body has no Lua frame yet
 	if cl != nil {
@@ -126,7 +126,7 @@ func (ex *executor) callSyncBody(f Value, args []Value, cl *Closure, base int) (
 				return 0, ex.terminal(ErrHostDepth)
 			}
 			ex.depth++
-			err = ex.run((*Closure)(f.p), slot, len(args))
+			err = ex.run((*closure)(f.p), slot, len(args))
 			ex.depth--
 		case f.isObj(kindGoFn):
 			var n int
@@ -180,7 +180,7 @@ func (ex *executor) pcallValue(g *goFunc, fn, nargs int) error {
 		v := ex.stack[slot]
 		switch {
 		case v.isObj(kindLuaFn):
-			return ex.pushLua((*Closure)(v.p), slot, nargs, flags)
+			return ex.pushLua((*closure)(v.p), slot, nargs, flags)
 		case v.isObj(kindGoFn) && ((*goFunc)(v.p) == builtinPcall || (*goFunc)(v.p) == builtinXpcall):
 			// a protected call of pcall: through the trampoline, a Lua frame for this catch
 			// whose call of pcall pushes the inner one, so that both can yield
@@ -255,7 +255,7 @@ func (ex *executor) callHandler(h, msg Value) (Value, error) {
 	defer func() { ex.nny-- }()
 	switch {
 	case h.isObj(kindLuaFn):
-		err = ex.run((*Closure)(h.p), slot, 1)
+		err = ex.run((*closure)(h.p), slot, 1)
 	case h.isObj(kindGoFn):
 		var n int
 		n, err = ex.callGoRaw((*goFunc)(h.p), slot, 1)
@@ -287,7 +287,7 @@ func (ex *executor) unwind(err error, nf0 int) error {
 	base := st.base
 	for f := st.nf - 1; f > nf0; f-- {
 		fr := ex.pframes[f]
-		cl := (*Closure)(ex.stack[base-1].p)
+		cl := (*closure)(ex.stack[base-1].p)
 		if fr&frErrHandler != 0 {
 			inHandler = true // an error inside a message handler
 			value = String(errorInErrorHandling)
@@ -305,7 +305,7 @@ func (ex *executor) unwind(err error, nf0 int) error {
 }
 
 // frameFuncSlot returns the stack index of frame f's function as its caller placed it.
-func (ex *executor) frameFuncSlot(f, base int, cl *Closure) int {
+func (ex *executor) frameFuncSlot(f, base int, cl *closure) int {
 	if ex.pframes[f]&frVararg == 0 {
 		return base - 1
 	}
@@ -327,7 +327,7 @@ func (ex *executor) unwindTo(f, base, fn int, value Value) error {
 	}
 	st.nf = f
 	st.base = base - int(fr>>32&0xffffff)
-	st.cl = (*Closure)(ex.stack[st.base-1].p)
+	st.cl = (*closure)(ex.stack[st.base-1].p)
 	st.pc = int(uint32(fr))
 	ex.stack[fn], ex.stack[fn+1] = Bool(false), value
 	ex.adjustResults(ex.instr(st.pc-1), fn, 2)
@@ -415,7 +415,7 @@ func (ex *executor) startHandler(f, fn int, msg Value) error {
 		ex.cont = append(ex.cont, 0)
 	}
 	ex.cont[st.nf] = int32(f) // the catch frame to unwind to when the handler returns
-	if err := ex.pushLua((*Closure)(h.p), slot, 1, frErrHandler); err != nil {
+	if err := ex.pushLua((*closure)(h.p), slot, 1, frErrHandler); err != nil {
 		if le, ok := err.(*Error); ok && le.terminal {
 			return err
 		}
@@ -431,7 +431,7 @@ func (ex *executor) unwindFrom(f int, value Value) error {
 	for g := st.nf - 1; g > f; g-- {
 		base -= int(ex.pframes[g] >> 32 & 0xffffff)
 	}
-	cl := (*Closure)(ex.stack[base-1].p)
+	cl := (*closure)(ex.stack[base-1].p)
 	return ex.unwindTo(f, base, ex.frameFuncSlot(f, base, cl)-1, value)
 }
 
@@ -479,7 +479,7 @@ func (ex *executor) whereLevel(c *Call, level int) string {
 			return "" // called from Go
 		}
 		base -= int(fr >> 32 & 0xffffff)
-		cl = (*Closure)(ex.stack[base-1].p)
+		cl = (*closure)(ex.stack[base-1].p)
 		pc = int(uint32(fr))
 		nf--
 	}

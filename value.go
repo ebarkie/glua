@@ -18,7 +18,7 @@ import (
 //	float     p == &tags[3]           n holds the float64 bits
 //	string    first byte, or emptyStr n is kindString<<56 | length
 //	table     *Table                  n is kindTable<<56
-//	function  *Closure or *goFunc     n is kindLuaFn<<56 or kindGoFn<<56
+//	function  *closure or *goFunc     n is kindLuaFn<<56 or kindGoFn<<56
 //	thread    *coroutine              n is kindThread<<56
 //	userdata  the Go pointer itself   n is kindUser<<56 | flags<<48 | type ID
 //
@@ -188,16 +188,17 @@ func rawEqual(a, b Value) bool {
 // Kind is the type of a Value as Lua sees it.
 type Kind uint8
 
+// The kinds of Value. Lua's number type is split into KindInt and KindFloat.
 const (
-	KindNil Kind = iota
-	KindBool
-	KindInt
-	KindFloat
-	KindString
-	KindTable
-	KindFunction
-	KindUserdata
-	KindThread
+	KindNil      Kind = iota // nil
+	KindBool                 // boolean
+	KindInt                  // integer number
+	KindFloat                // float number
+	KindString               // string
+	KindTable                // table
+	KindFunction             // a Lua or Go function
+	KindUserdata             // a Go pointer
+	KindThread               // a coroutine
 )
 
 var kindNames = [...]string{"nil", "boolean", "integer", "float", "string", "table", "function", "userdata", "thread"}

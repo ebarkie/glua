@@ -8,7 +8,7 @@ import (
 // The spike's programs, assembled by hand. Each comment gives the Lua they stand for.
 
 // local s = 0.0; for i = 1, n do s = s + i * 1.5 end; return s
-func progFloatLoop(n int64) *Proto {
+func progFloatLoop(n int64) *proto {
 	a := newAsm("floatloop", 0, 6)
 	a.abx(opLoadK, 0, a.konst(Float(0)))
 	a.loadI(1, 1)
@@ -25,7 +25,7 @@ func progFloatLoop(n int64) *Proto {
 }
 
 // local function fib(n) if n < 2 then return n end return fib(n-1) + fib(n-2) end
-func progFibProto() *Proto {
+func progFibProto() *proto {
 	a := newAsm("fib", 1, 4)
 	a.upval(true, 0) // fib captures itself from the enclosing function's R0
 	a.cjump(opLtKJmp, 0, int(a.kint(2)), "rec")
@@ -43,7 +43,7 @@ func progFibProto() *Proto {
 }
 
 // <fib>; return fib(n)
-func progFib(n int64) *Proto {
+func progFib(n int64) *proto {
 	a := newAsm("fibmain", 0, 3)
 	a.abx(opClosure, 0, a.proto(progFibProto()))
 	a.abc(opMove, 1, 0, 0)
@@ -54,7 +54,7 @@ func progFib(n int64) *Proto {
 }
 
 // local t = {x = 1}; local s = 0; for i = 1, n do s = s + t.x end; return s
-func progFieldRead(n int64) *Proto {
+func progFieldRead(n int64) *proto {
 	a := newAsm("fieldread", 0, 7)
 	a.newTable(0, 0, 1)
 	a.loadI(1, 1)
@@ -74,7 +74,7 @@ func progFieldRead(n int64) *Proto {
 }
 
 // function(x) return x + 1 end
-func progAdd1() *Proto {
+func progAdd1() *proto {
 	a := newAsm("add1", 1, 2)
 	a.abc(opAddK, 1, 0, int(a.kint(1)))
 	a.abc(opReturn1, 1, 0, 0)
@@ -82,14 +82,14 @@ func progAdd1() *Proto {
 }
 
 // function(s) return s end
-func progIdentity() *Proto {
+func progIdentity() *proto {
 	a := newAsm("identity", 1, 1)
 	a.abc(opReturn1, 0, 0, 0)
 	return a.done()
 }
 
 // function(r) return r.method == "GET" and r.size < 1000 and r.admin end
-func progRule() *Proto {
+func progRule() *proto {
 	a := newAsm("rule", 1, 2)
 	a.field(opGetField, 1, 0, int(a.kstr("method")))
 	a.cjump(opEqKJmp, 1, int(a.kstr("GET")), "false")
@@ -104,7 +104,7 @@ func progRule() *Proto {
 }
 
 // function(x) return f(x) end, where f is the closure's upvalue 0
-func progCallHost() *Proto {
+func progCallHost() *proto {
 	a := newAsm("callhost", 1, 3)
 	a.upval(false, 0)
 	a.abc(opGetUpval, 1, 0, 0)
@@ -115,7 +115,7 @@ func progCallHost() *Proto {
 }
 
 // local c, last = 0, nil; for i = init, limit, step do c = c + 1; last = i end; return c, last
-func progForCount(init, limit, step Value) *Proto {
+func progForCount(init, limit, step Value) *proto {
 	a := newAsm("forcount", 0, 7)
 	a.loadI(0, 0)
 	a.abc(opLoadNil, 1, 0, 0)
@@ -133,7 +133,7 @@ func progForCount(init, limit, step Value) *Proto {
 }
 
 // for i = 1, n do end
-func progEmptyLoop(n int64) *Proto {
+func progEmptyLoop(n int64) *proto {
 	a := newAsm("emptyloop", 0, 4)
 	a.loadI(0, 1)
 	a.abx(opLoadK, 1, a.konst(Int(n)))
@@ -146,17 +146,17 @@ func progEmptyLoop(n int64) *Proto {
 	return a.done()
 }
 
-func closureOf(p *Proto, up ...Value) *Closure {
-	return &Closure{p: p, up: up}
+func closureOf(p *proto, up ...Value) *closure {
+	return &closure{p: p, up: up}
 }
 
 // runProto runs p on a fresh executor and returns its results.
-func runProto(t testing.TB, p *Proto, args ...Value) ([]Value, error) {
+func runProto(t testing.TB, p *proto, args ...Value) ([]Value, error) {
 	t.Helper()
 	return runClosure(context.Background(), newExecutor(), closureOf(p), args...)
 }
 
-func runClosure(ctx context.Context, ex *executor, cl *Closure, args ...Value) ([]Value, error) {
+func runClosure(ctx context.Context, ex *executor, cl *closure, args ...Value) ([]Value, error) {
 	copy(ex.stack[1:], args)
 	err := ex.call(ctx, cl, 0, len(args))
 	var res []Value

@@ -12,7 +12,7 @@ import (
 // instruction; aux words consumed by the instruction before them; and the padding word at
 // the end, so pc never points past the allocation. Every compile ends with it, and the VM
 // trusts verified code, not the compiler.
-func verify(p *Proto) error {
+func verify(p *proto) error {
 	n := len(p.code)
 	if n == 0 || p.code[n-1] != opBad {
 		return fmt.Errorf("%s: missing padding word", p.name)
@@ -47,7 +47,7 @@ func verify(p *Proto) error {
 }
 
 type verifier struct {
-	p      *Proto
+	p      *proto
 	starts []bool
 }
 
@@ -226,7 +226,7 @@ func (v *verifier) instr(pc int) error {
 }
 
 // disasm lists a prototype's code, one instruction per line, for tests and debugging.
-func (p *Proto) disasm() string {
+func (p *proto) disasm() string {
 	var sb strings.Builder
 	for pc := 0; pc < len(p.code)-1; pc++ {
 		i := p.code[pc]

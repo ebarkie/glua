@@ -21,7 +21,7 @@ type Rule[E, R any] struct {
 	rt       *Runtime
 	pool     *sync.Pool
 	lim      *limits
-	cl       *Closure
+	cl       *closure
 	id       uint64
 	dec      resultDecoder[R]
 	copyBack bool // E has writable fields
@@ -70,7 +70,7 @@ func (rt *Runtime) Expr[E, R any](name, src string) (*Rule[E, R], error) {
 	if err != nil {
 		return nil, bindName(name, err)
 	}
-	return &Rule[E, R]{rt: rt, pool: &rt.pool, lim: &rt.run, cl: &Closure{p: p, env: env}, id: id,
+	return &Rule[E, R]{rt: rt, pool: &rt.pool, lim: &rt.run, cl: &closure{p: p, env: env}, id: id,
 		dec: dec, copyBack: copyBack, name: name}, nil
 }
 
@@ -105,7 +105,7 @@ func (ru *Rule[E, R]) Eval(ctx context.Context, env *E) (r R, err error) {
 }
 
 // newRule makes a Rule from a hand-assembled closure, for the tests of the executor.
-func newRule[E, R any](e *engine, cl *Closure) *Rule[E, R] {
+func newRule[E, R any](e *engine, cl *closure) *Rule[E, R] {
 	dec, _ := resultDecoderFor[R]()
 	t := reflect.TypeFor[E]()
 	return &Rule[E, R]{pool: &e.pool, cl: cl, id: bindType(t), dec: dec, copyBack: true}

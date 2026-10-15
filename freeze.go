@@ -70,7 +70,7 @@ func (f *freezer) walk() error {
 				f.add(tableValue(t.meta), it.path+" (its metatable)")
 			}
 		case kindLuaFn:
-			cl := (*Closure)(v.p)
+			cl := (*closure)(v.p)
 			for i, u := range cl.up {
 				f.add(u, it.path+" (upvalue '"+upvalName(cl.p, i)+"')")
 			}
@@ -168,7 +168,7 @@ func keyPath(k Value) string {
 }
 
 // upvalName returns the name of upvalue i of p, or "?".
-func upvalName(p *Proto, i int) string {
+func upvalName(p *proto, i int) string {
 	if i < len(p.upnames) && p.upnames[i] != "" {
 		return p.upnames[i]
 	}

@@ -269,6 +269,7 @@ func convError(path string, v Value, t reflect.Type, why string) error {
 // convErr is a Lua value that does not convert to the Go type asked for.
 type convErr struct{ msg string }
 
+// Error returns the message.
 func (e *convErr) Error() string { return "glua: " + e.msg }
 
 // decodeReflect stores v, converted, in rv, which must be settable. path names v in messages.

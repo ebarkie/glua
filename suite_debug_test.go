@@ -6,7 +6,7 @@ package glua
 
 // infoLevel is one level of the call stack, as debug.getinfo numbers them.
 type infoLevel struct {
-	cl       *Closure // nil for a Go function
+	cl       *closure // nil for a Go function
 	fn       Value
 	pc       int
 	name     string
@@ -38,7 +38,7 @@ func stackLevels(c *Call) []infoLevel {
 				break
 			}
 		} else if i := ex.instrAt(ex.stack[base-1], pc-1); uint8(i) == opCall || uint8(i) == opTailCall {
-			callerCl := (*Closure)(ex.stack[base-1].p)
+			callerCl := (*closure)(ex.stack[base-1].p)
 			kind, name := callerCl.p.objName(pc-1, decA(i))
 			switch kind {
 			case "global", "field", "local", "upvalue", "method":
@@ -49,7 +49,7 @@ func stackLevels(c *Call) []infoLevel {
 		if !v.isObj(kindLuaFn) {
 			break
 		}
-		cl = (*Closure)(v.p)
+		cl = (*closure)(v.p)
 	}
 	return levels
 }
@@ -59,7 +59,7 @@ func (ex *executor) instrAt(f Value, pc int) uint32 {
 	if !f.isObj(kindLuaFn) || pc < 0 {
 		return 0
 	}
-	code := (*Closure)(f.p).p.code
+	code := (*closure)(f.p).p.code
 	if pc >= len(code) {
 		return 0
 	}
@@ -79,7 +79,7 @@ func debugGetinfo(c *Call) error {
 	if f := c.Value(arg); f.isObj(kindLuaFn) || f.isObj(kindGoFn) {
 		lv.fn = f
 		if f.isObj(kindLuaFn) {
-			lv.cl = (*Closure)(f.p)
+			lv.cl = (*closure)(f.p)
 		}
 	} else {
 		level, err := c.checkInt(arg, "getinfo")
@@ -147,7 +147,7 @@ func debugGetinfo(c *Call) error {
 
 // upvalueArg returns the closure and the 0-based upvalue index of debug.getupvalue(f, n)
 // and debug.setupvalue(f, n, v), or nil when f has no upvalue n.
-func upvalueArg(c *Call, fname string) (*Closure, int, error) {
+func upvalueArg(c *Call, fname string) (*closure, int, error) {
 	n, err := c.checkInt(1, fname)
 	if err != nil {
 		return nil, 0, err
@@ -159,7 +159,7 @@ func upvalueArg(c *Call, fname string) (*Closure, int, error) {
 		}
 		return nil, 0, c.typeArgError(0, fname, "function")
 	}
-	cl := (*Closure)(f.p)
+	cl := (*closure)(f.p)
 	if n == 1 && len(cl.up) == 0 && cl.p.name == "main chunk" {
 		return cl, envUpvalue, nil // a chunk that never names _ENV: its globals table
 	}
@@ -173,7 +173,7 @@ func upvalueArg(c *Call, fname string) (*Closure, int, error) {
 // the closure's globals table when the chunk never names _ENV.
 const envUpvalue = -1
 
-func upvalueName(cl *Closure, i int) string {
+func upvalueName(cl *closure, i int) string {
 	if i < len(cl.p.upnames) && cl.p.upnames[i] != "" {
 		return cl.p.upnames[i]
 	}

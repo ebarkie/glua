@@ -241,7 +241,7 @@ func decBool(v Value) (bool, error) { return v.truthy(), nil }
 
 // bindFunc1 returns a typed Go function backed by cl, run on executors from e's pool.
 // It does the five steps of a typed call: borrow, encode, run, decode, clear.
-func bindFunc1[A, R any](e *engine, cl *Closure) func(context.Context, A) (R, error) {
+func bindFunc1[A, R any](e *engine, cl *closure) func(context.Context, A) (R, error) {
 	enc, byValue, _ := encoderFor[A]() // chosen once, at bind time
 	dec, _ := decoderFor[R]()
 	if byValue {

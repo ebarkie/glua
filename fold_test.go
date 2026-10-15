@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func compileOK(t *testing.T, src string) *Proto {
+func compileOK(t *testing.T, src string) *proto {
 	t.Helper()
 	p, _, err := compileChunk("t", src)
 	if err != nil {
@@ -16,7 +16,7 @@ func compileOK(t *testing.T, src string) *Proto {
 }
 
 // The code between VARARGPREP and the final RETURN, without pc numbers.
-func body(p *Proto) string {
+func body(p *proto) string {
 	var lines []string
 	for _, l := range strings.Split(p.disasm(), "\n") {
 		f := strings.Fields(l)

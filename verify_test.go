@@ -6,8 +6,8 @@ import (
 )
 
 // mk builds a prototype from raw words without the assembler's checks, appending the padding.
-func mk(nparams, maxstack uint8, k []Value, code ...uint32) *Proto {
-	p := &Proto{name: "v", nparams: nparams, maxstack: maxstack, k: k, hints: make([]uint32, 2)}
+func mk(nparams, maxstack uint8, k []Value, code ...uint32) *proto {
+	p := &proto{name: "v", nparams: nparams, maxstack: maxstack, k: k, hints: make([]uint32, 2)}
 	p.code = append(code, opBad)
 	p.upvals = []upvalDesc{{fromStack: true}}
 	return p
@@ -17,10 +17,10 @@ func TestVerifyRejects(t *testing.T) {
 	str := []Value{String("x"), Int(1)}
 	tests := []struct {
 		name string
-		p    *Proto
+		p    *proto
 		want string
 	}{
-		{"no padding", &Proto{name: "v", maxstack: 1, code: []uint32{iABC(opReturn0, 0, 0, 0)}}, "missing padding"},
+		{"no padding", &proto{name: "v", maxstack: 1, code: []uint32{iABC(opReturn0, 0, 0, 0)}}, "missing padding"},
 		{"unknown opcode", mk(0, 1, nil, 250), "unknown opcode"},
 		{"register out of range", mk(0, 2, nil, iABC(opMove, 2, 0, 0)), "register 2 not below maxstack 2"},
 		{"constant out of range", mk(0, 1, str, iABx(opLoadK, 0, 2)), "constant 2 out of range"},
@@ -41,7 +41,7 @@ func TestVerifyRejects(t *testing.T) {
 		{"loadnil range", mk(0, 2, nil, iABC(opLoadNil, 1, 1, 0)), "register 2 not below"},
 		{"tforcall range", mk(0, 6, nil, iABC(opTForCall, 0, 0, 2)), "register 6 not below"},
 		{"closure prototype", mk(0, 1, nil, iABx(opClosure, 0, 0)), "prototype 0 out of range"},
-		{"maxstack below params", &Proto{name: "v", nparams: 2, maxstack: 1, code: []uint32{opBad}}, "maxstack below nparams"},
+		{"maxstack below params", &proto{name: "v", nparams: 2, maxstack: 1, code: []uint32{opBad}}, "maxstack below nparams"},
 	}
 	for _, tt := range tests {
 		err := verify(tt.p)
@@ -52,7 +52,7 @@ func TestVerifyRejects(t *testing.T) {
 }
 
 func TestVerifyAccepts(t *testing.T) {
-	for _, p := range []*Proto{progFloatLoop(10), progFib(5), progFieldRead(10), progRule(), progCallHost(), progForCount(Int(1), Int(2), Int(1))} {
+	for _, p := range []*proto{progFloatLoop(10), progFib(5), progFieldRead(10), progRule(), progCallHost(), progForCount(Int(1), Int(2), Int(1))} {
 		if err := verify(p); err != nil {
 			t.Errorf("%s: %v", p.name, err)
 		}

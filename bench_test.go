@@ -11,7 +11,7 @@ import (
 // VM benchmarks: one op is one run of the whole program. `go run ./bench/compare` times
 // the same programs in C Lua, in interleaved rounds.
 
-func benchProgram(b *testing.B, p *Proto) {
+func benchProgram(b *testing.B, p *proto) {
 	ex := newExecutor()
 	ex.checked = defaultChecked && strings.HasPrefix(b.Name(), "BenchmarkChecked")
 	ex.maxSteps = math.MaxInt64
@@ -28,7 +28,7 @@ func benchProgram(b *testing.B, p *Proto) {
 func BenchmarkFloatLoop(b *testing.B) { benchProgram(b, progFloatLoop(1_000_000)) }
 
 // The same three programs on the checked loop, for the cost of bounds checks.
-func benchChecked(b *testing.B, p *Proto) {
+func benchChecked(b *testing.B, p *proto) {
 	saved := defaultChecked
 	defaultChecked = true
 	defer func() { defaultChecked = saved }()
@@ -78,7 +78,7 @@ func BenchmarkSourceFastFieldRead(b *testing.B) { benchSource(b, srcFieldRead, f
 // Boundary benchmarks: one op is one call from Go.
 
 // privateFunc1 is a typed function on an executor of its own, as a private VM has.
-func privateFunc1[A, R any](ex *executor, cl *Closure) func(context.Context, A) (R, error) {
+func privateFunc1[A, R any](ex *executor, cl *closure) func(context.Context, A) (R, error) {
 	enc, _, _ := encoderFor[A]()
 	dec, _ := decoderFor[R]()
 	return func(ctx context.Context, a A) (r R, err error) {
@@ -227,7 +227,7 @@ func gcPressure() (stop func()) {
 	return func() { close(done); <-finished }
 }
 
-func benchProgramGC(b *testing.B, p *Proto) {
+func benchProgramGC(b *testing.B, p *proto) {
 	stop := gcPressure()
 	defer stop()
 	benchProgram(b, p)

@@ -17,7 +17,7 @@ const (
 
 // compileExpr compiles src as an expression over a Go struct: first as `return <src>`, and
 // if that does not parse, as a chunk. The main function takes the struct as its parameter.
-func compileExpr(source, src string, env *syntax.ExprEnv) (p *Proto, info *syntax.Info, err error) {
+func compileExpr(source, src string, env *syntax.ExprEnv) (p *proto, info *syntax.Info, err error) {
 	fn, err := syntax.ParseFixed(source, "return "+src)
 	if err != nil {
 		if fn, err = syntax.ParseFixed(source, src); err != nil {
@@ -33,7 +33,7 @@ func compileExpr(source, src string, env *syntax.ExprEnv) (p *Proto, info *synta
 }
 
 // compileChunk parses, resolves and compiles a chunk into the prototype of its main function.
-func compileChunk(source, src string) (p *Proto, info *syntax.Info, err error) {
+func compileChunk(source, src string) (p *proto, info *syntax.Info, err error) {
 	fn, err := syntax.Parse(source, src)
 	if err != nil {
 		return nil, nil, err
@@ -46,7 +46,7 @@ func compileChunk(source, src string) (p *Proto, info *syntax.Info, err error) {
 }
 
 // compileResolved generates the code of a resolved chunk.
-func compileResolved(source string, fn *syntax.FunctionExpr, info *syntax.Info) (p *Proto, _ *syntax.Info, err error) {
+func compileResolved(source string, fn *syntax.FunctionExpr, info *syntax.Info) (p *proto, _ *syntax.Info, err error) {
 	c := &compiler{source: source, info: info}
 	defer func() {
 		if r := recover(); r != nil {
@@ -119,7 +119,7 @@ type fstate struct {
 	parent    *fstate
 	node      *syntax.FunctionExpr
 	fi        *syntax.FuncInfo
-	p         *Proto
+	p         *proto
 	kcache    map[kkey]int
 	freereg   int
 	nactive   int // registers held by active locals
@@ -167,10 +167,10 @@ func (c *compiler) errorf(line int, format string, args ...any) {
 }
 
 // function compiles one function and returns its prototype.
-func (c *compiler) function(node *syntax.FunctionExpr, parent *fstate) *Proto {
+func (c *compiler) function(node *syntax.FunctionExpr, parent *fstate) *proto {
 	fs := &fstate{
 		c: c, parent: parent, node: node, fi: c.info.Funcs[node],
-		p:      &Proto{source: c.source, name: node.Name, vararg: node.IsVararg, nparams: uint8(len(node.Params))},
+		p:      &proto{source: c.source, name: node.Name, vararg: node.IsVararg, nparams: uint8(len(node.Params))},
 		kcache: map[kkey]int{},
 		regOf:  map[*syntax.Var]int{},
 		consts: map[*syntax.Var]Value{},

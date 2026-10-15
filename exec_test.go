@@ -256,7 +256,7 @@ func TestResetAfterDeepError(t *testing.T) {
 	f3.abc(opCall, 1, 1, 1)
 	f3.abc(opReturn0, 0, 0, 0)
 	p3 := f3.done()
-	mk := func(name string, next *Proto) *Proto {
+	mk := func(name string, next *proto) *proto {
 		a := newAsm(name, 1, 3)
 		a.abx(opClosure, 1, a.proto(next))
 		a.abc(opMove, 2, 0, 0)
@@ -535,7 +535,7 @@ func TestCloseAfterTerminalError(t *testing.T) {
 	g := testGlobals()
 	ex := newExecutor()
 	ex.maxSteps = 10_000
-	_, err = runClosure(context.Background(), ex, &Closure{p: p, env: g})
+	_, err = runClosure(context.Background(), ex, &closure{p: p, env: g})
 	if !errors.Is(err, ErrSteps) {
 		t.Fatalf("got %v, want ErrSteps", err)
 	}
@@ -551,7 +551,7 @@ func TestCloseAfterTerminalError(t *testing.T) {
 	g = testGlobals()
 	ex = newExecutor()
 	ex.maxSteps = 10_000
-	runClosure(context.Background(), ex, &Closure{p: p, env: g})
+	runClosure(context.Background(), ex, &closure{p: p, env: g})
 	if !g.Get(String("done")).Truthy() {
 		t.Error("a closer did not run after a terminal error")
 	}
@@ -572,7 +572,7 @@ func TestYieldAcrossGoCall(t *testing.T) {
 		_, err := c.Invoke(c.Value(0))
 		return err
 	}}))
-	res, err := runClosure(context.Background(), newExecutor(), &Closure{p: p, env: g})
+	res, err := runClosure(context.Background(), newExecutor(), &closure{p: p, env: g})
 	if err != nil {
 		t.Fatal(err)
 	}

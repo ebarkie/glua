@@ -72,12 +72,12 @@ func (ex *executor) loadThread(t threadState) {
 
 // trampoline is function(f, ...) return f(...) end, the body of a coroutine whose
 // function is a Go function.
-var trampoline = func() *Closure {
+var trampoline = func() *closure {
 	p, _, err := compileChunk("=coroutine", "return function(f, ...) return f(...) end")
 	if err != nil {
 		panic(err)
 	}
-	return &Closure{p: p.protos[0]}
+	return &closure{p: p.protos[0]}
 }()
 
 // newCoroutine creates a coroutine for function f, charging its stack to the budget.
@@ -143,7 +143,7 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		ex.stack[0] = f
 		copy(ex.stack[1:], args)
 		ex.st.hi = max(ex.st.hi, 1+len(args))
-		if err := ex.pushFrame((*Closure)(f.p), 0, len(args), 0, 1, frGoEntry); err != nil {
+		if err := ex.pushFrame((*closure)(f.p), 0, len(args), 0, 1, frGoEntry); err != nil {
 			return nil, false, err
 		}
 	} else {

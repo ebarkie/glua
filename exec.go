@@ -56,7 +56,7 @@ func learn(hint *uint32, slot int) {
 // state is what the loop saves between runs. Only indices persist; the two addresses are
 // valid only while fast is running, when nothing can move the stack.
 type state struct {
-	cl    *Closure
+	cl    *closure
 	base  int
 	pc    int
 	ticks int
@@ -155,7 +155,7 @@ func newExecutor() *executor {
 
 // call is the only way in from Go. Arguments are already in stack[fn+1:], and the first
 // result lands in stack[fn]; ex.top is one past the last result.
-func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err error) {
+func (ex *executor) call(ctx context.Context, cl *closure, fn, nargs int) (err error) {
 	if ex.running {
 		panic("glua: concurrent use of an executor")
 	}
@@ -208,7 +208,7 @@ func (ex *executor) call(ctx context.Context, cl *Closure, fn, nargs int) (err e
 }
 
 // run pushes a goEntry frame and drives the loop until that frame returns. Host functions re-enter here.
-func (ex *executor) run(cl *Closure, fn, nargs int) error {
+func (ex *executor) run(cl *closure, fn, nargs int) error {
 	st := &ex.st
 	nf := st.nf
 	ex.stack[fn] = luaFnValue(cl)

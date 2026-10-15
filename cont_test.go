@@ -7,7 +7,7 @@ import (
 )
 
 // function() return 1, 2, 3 end
-func progThree() *Proto {
+func progThree() *proto {
 	a := newAsm("three", 0, 3)
 	a.loadI(0, 1)
 	a.loadI(1, 2)
@@ -100,7 +100,7 @@ func TestResultAdjustment(t *testing.T) {
 	one.abc(opReturn1, 0, 0, 0) // the inline return, which exits with exResults
 	for _, tt := range []struct {
 		name   string
-		callee *Proto
+		callee *proto
 		c      int
 		want   []int64
 	}{

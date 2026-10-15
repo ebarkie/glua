@@ -5,7 +5,7 @@ import "fmt"
 // Debug information is cold: it is read only to build error messages and tracebacks.
 
 // lineAt returns the source line of the code word at pc, or 0.
-func (p *Proto) lineAt(pc int) int {
+func (p *proto) lineAt(pc int) int {
 	if pc >= 0 && pc < len(p.lines) {
 		return int(p.lines[pc])
 	}
@@ -13,7 +13,7 @@ func (p *Proto) lineAt(pc int) int {
 }
 
 // localName returns the name of the local in register reg at pc, or "".
-func (p *Proto) localName(reg, pc int) string {
+func (p *proto) localName(reg, pc int) string {
 	name := ""
 	for _, lv := range p.locvars {
 		if lv.reg == reg && lv.startpc <= pc && (lv.endpc < 0 || pc < lv.endpc) {
@@ -50,7 +50,7 @@ func setsReg(i uint32, reg int) bool {
 // findSetReg finds the last instruction before lastpc that sets reg, as C Lua's findsetreg
 // does. An instruction inside a stretch that a jump skips may not have run, so it does not
 // count.
-func (p *Proto) findSetReg(lastpc, reg int) int {
+func (p *proto) findSetReg(lastpc, reg int) int {
 	setreg, jmptarget := -1, 0
 	for pc := 0; pc < lastpc; pc++ {
 		i := p.code[pc]
@@ -82,7 +82,7 @@ func (p *Proto) findSetReg(lastpc, reg int) int {
 // varInfo describes where register reg got its value at pc, as C Lua's getobjname does:
 // "local 'x'", "global 'x'", "field 'x'", "upvalue 'x'", "method 'x'" or "constant 'x'".
 // It returns "" when it cannot tell.
-func (p *Proto) varInfo(pc, reg int) string {
+func (p *proto) varInfo(pc, reg int) string {
 	kind, name := p.objName(pc, reg)
 	if kind == "" {
 		return ""
@@ -90,7 +90,7 @@ func (p *Proto) varInfo(pc, reg int) string {
 	return fmt.Sprintf("%s '%s'", kind, name)
 }
 
-func (p *Proto) objName(lastpc, reg int) (kind, name string) {
+func (p *proto) objName(lastpc, reg int) (kind, name string) {
 	if n := p.localName(reg, lastpc); n != "" {
 		return "local", n
 	}

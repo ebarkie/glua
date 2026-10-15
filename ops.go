@@ -352,7 +352,7 @@ func (ex *executor) slowOp() error {
 		if err := ex.charge(48 + 16*len(np.upvals)); err != nil {
 			return err
 		}
-		ncl := &Closure{p: np, up: make([]Value, len(np.upvals)), env: st.cl.env}
+		ncl := &closure{p: np, up: make([]Value, len(np.upvals)), env: st.cl.env}
 		*ex.reg(a) = luaFnValue(ncl) // stored before the captures, so a local function can capture itself
 		for j, u := range np.upvals {
 			if u.fromStack {
@@ -442,7 +442,7 @@ func (ex *executor) asCell(v Value) (*cell, error) {
 	return v.cell(), nil
 }
 
-func envValue(cl *Closure) Value {
+func envValue(cl *closure) Value {
 	if cl.env == nil {
 		return Value{}
 	}
@@ -615,7 +615,7 @@ func (ex *executor) callMeta(event string, h Value, args ...Value) error {
 	copy(ex.stack[fn+1:], args)
 	st.hi = max(st.hi, fn+1+len(args)) // so that reset clears them
 	if h.isObj(kindLuaFn) {
-		return ex.pushLua((*Closure)(h.p), fn, len(args), frCont)
+		return ex.pushLua((*closure)(h.p), fn, len(args), frCont)
 	}
 	n, err := ex.callGoRawFrom((*goFunc)(h.p), fn, len(args), true)
 	if err == errYield {
@@ -878,7 +878,7 @@ func (ex *executor) callValue(fn, nargs int) error {
 		v := ex.stack[fn]
 		switch {
 		case v.isObj(kindLuaFn):
-			return ex.pushLua((*Closure)(v.p), fn, nargs, 0)
+			return ex.pushLua((*closure)(v.p), fn, nargs, 0)
 		case v.isObj(kindGoFn):
 			return ex.callGo((*goFunc)(v.p), fn, nargs)
 		}
@@ -905,7 +905,7 @@ func (ex *executor) callValue(fn, nargs int) error {
 
 // pushLua starts a call of cl at stack[fn] with nargs arguments as a new frame of the loop.
 // The frame record returns to the current frame at st.pc.
-func (ex *executor) pushLua(cl *Closure, fn, nargs int, flags uint64) error {
+func (ex *executor) pushLua(cl *closure, fn, nargs int, flags uint64) error {
 	if err := ex.pushFrame(cl, fn, nargs, ex.st.pc, ex.st.base, flags); err != nil {
 		return err
 	}
@@ -915,7 +915,7 @@ func (ex *executor) pushLua(cl *Closure, fn, nargs int, flags uint64) error {
 // pushFrame pushes a frame for cl at stack[fn], which returns to the frame at callerBase,
 // resuming at pc. A vararg function's arguments stay below its frame: the function and its
 // fixed parameters are copied above them, as C Lua does.
-func (ex *executor) pushFrame(cl *Closure, fn, nargs, pc, callerBase int, flags uint64) error {
+func (ex *executor) pushFrame(cl *closure, fn, nargs, pc, callerBase int, flags uint64) error {
 	st := &ex.st
 	if err := ex.ensure(fn + 1 + max(nargs, int(cl.p.nparams)) + 1 + stackSlack); err != nil {
 		return err
@@ -976,7 +976,7 @@ func (ex *executor) tailCall(fn, nargs int) error {
 	copy(ex.stack[dst:dst+1+nargs], ex.stack[fn:fn+1+nargs])
 	clear(ex.stack[dst+1+nargs : fn+1+nargs])
 	st.nf--
-	if err := ex.pushFrame((*Closure)(v.p), dst, nargs, int(uint32(fr)), callerBase, fr&^frVararg&(0xff<<56)); err != nil {
+	if err := ex.pushFrame((*closure)(v.p), dst, nargs, int(uint32(fr)), callerBase, fr&^frVararg&(0xff<<56)); err != nil {
 		return err
 	}
 	return ex.tick()
@@ -1019,7 +1019,7 @@ func (ex *executor) frameReturned(fn, n int) (done bool, err error) {
 		handlerFor = int(ex.cont[st.nf])
 	}
 	st.base -= int(fr >> 32 & 0xffffff)
-	st.cl = (*Closure)(ex.stack[st.base-1].p)
+	st.cl = (*closure)(ex.stack[st.base-1].p)
 	st.pc = int(uint32(fr))
 	switch {
 	case handlerFor >= 0: // an xpcall handler returned: unwind to its xpcall with the result

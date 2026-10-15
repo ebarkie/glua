@@ -18,7 +18,7 @@ func runWithOutput(t *testing.T, src string) (string, []Value) {
 	ex.output = &out
 	g := testGlobals()
 	ex.strMeta = testStrMeta
-	res, err := runClosure(context.Background(), ex, &Closure{p: p, env: g})
+	res, err := runClosure(context.Background(), ex, &closure{p: p, env: g})
 	if err != nil {
 		t.Fatal(err)
 	}

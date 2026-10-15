@@ -63,6 +63,7 @@ type budgetKey struct{}
 // is zero, no context can carry a budget, and entries skip looking for one.
 var liveEntryCtx atomic.Int64
 
+// Value returns the entry's budgets for budgetKey, and otherwise the parent context's value.
 func (e *entryCtx) Value(k any) any {
 	if k == (budgetKey{}) {
 		return e

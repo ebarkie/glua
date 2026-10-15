@@ -6,14 +6,14 @@ import (
 	"unsafe"
 )
 
-// Proto is a compiled function. It never changes after it is built, except for its hint
+// proto is a compiled function. It never changes after it is built, except for its hint
 // array, which is written with atomics and never affects results.
-type Proto struct {
+type proto struct {
 	code     []uint32 // ends with a padding word, so pc never points past the allocation
 	k        []Value
 	khash    []uint64 // hash of each constant, for the inline probe of a megamorphic site
 	hints    []uint32 // one per field-access site: misses<<24 | slot
-	protos   []*Proto
+	protos   []*proto
 	upvals   []upvalDesc
 	nparams  uint8
 	maxstack uint8
@@ -43,11 +43,11 @@ type upvalDesc struct {
 	index     uint8
 }
 
-// Closure is a Lua function value: a prototype, its captured values, and the globals table
+// closure is a Lua function value: a prototype, its captured values, and the globals table
 // it was created under, which GETGLOBAL reads. One prototype can so serve both a frozen
 // Script and its private VMs.
-type Closure struct {
-	p   *Proto
+type closure struct {
+	p   *proto
 	up  []Value
 	env *Table
 }
@@ -62,12 +62,12 @@ type goFunc struct {
 	fast     uint8  // the built-in FASTCALL can do inline, or 0
 }
 
-func luaFnValue(cl *Closure) Value { return Value{p: unsafe.Pointer(cl), n: kindLuaFn << 56} }
+func luaFnValue(cl *closure) Value { return Value{p: unsafe.Pointer(cl), n: kindLuaFn << 56} }
 func goFnValue(g *goFunc) Value    { return Value{p: unsafe.Pointer(g), n: kindGoFn << 56} }
 
 // asm assembles a prototype by hand. It stands in for the compiler until milestone 1.
 type asm struct {
-	p      Proto
+	p      proto
 	labels map[string]int
 	fixups []fixup
 }
@@ -81,7 +81,7 @@ type fixup struct {
 }
 
 func newAsm(name string, nparams, maxstack uint8) *asm {
-	return &asm{p: Proto{name: name, source: name, nparams: nparams, maxstack: maxstack}, labels: map[string]int{}}
+	return &asm{p: proto{name: name, source: name, nparams: nparams, maxstack: maxstack}, labels: map[string]int{}}
 }
 
 // konst adds a constant and returns its index. Strings are made canonical with unique.Make,
@@ -146,7 +146,7 @@ func (a *asm) newTable(x, narr, nhash int) {
 	a.emit(uint32(narr))
 }
 
-func (a *asm) proto(p *Proto) int {
+func (a *asm) proto(p *proto) int {
 	a.p.protos = append(a.p.protos, p)
 	return len(a.p.protos) - 1
 }
@@ -156,7 +156,7 @@ func (a *asm) upval(fromStack bool, index int) {
 }
 
 // done resolves jumps, appends the padding word and verifies the result.
-func (a *asm) done() *Proto {
+func (a *asm) done() *proto {
 	for _, f := range a.fixups {
 		target, ok := a.labels[f.label]
 		if !ok {

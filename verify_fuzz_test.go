@@ -54,19 +54,19 @@ func FuzzVerifiedCode(f *testing.F) {
 		ex := newExecutor()
 		ex.checked = false // the fast loop is the one that trusts the verifier
 		ex.maxSteps = 10_000
-		runClosure(context.Background(), ex, &Closure{p: p, env: testGlobals()})
+		runClosure(context.Background(), ex, &closure{p: p, env: testGlobals()})
 	})
 }
 
-func allProtos(p *Proto) []*Proto {
-	list := []*Proto{p}
+func allProtos(p *proto) []*proto {
+	list := []*proto{p}
 	for _, c := range p.protos {
 		list = append(list, allProtos(c)...)
 	}
 	return list
 }
 
-func dumpAll(ps []*Proto) string {
+func dumpAll(ps []*proto) string {
 	s := ""
 	for i, p := range ps {
 		s += fmt.Sprintf("-- proto %d\n%s\n", i, p.disasm())
