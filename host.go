@@ -23,6 +23,7 @@ type Call struct {
 
 	unwinding bool  // Arg is panicking with argErr
 	argErr    error // the argument error Arg raised
+	charged   bool  // the function called Charge: its results are not charged again
 }
 
 func (c *Call) reset() {
@@ -121,8 +122,10 @@ func (c *Call) ReturnValues(vs ...Value) error {
 // Charge counts work a host function does for the script against the entry's budgets: n
 // bytes against AllocBytes and a step per 64 of them, as library functions charge for
 // what they make. Call it before allocating. Running out is a terminal error, which the
-// function should return.
+// function should return. A function that calls Charge is taken to charge for everything it
+// makes, so its results are not charged again when it returns.
 func (c *Call) Charge(n int) error {
+	c.charged = true
 	if n < 0 {
 		return nil
 	}
@@ -211,7 +214,7 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 		ex.calls = append(ex.calls, &Call{ex: ex})
 	}
 	c := ex.calls[ex.depth] // one record per depth, so a nested call cannot overwrite its caller's
-	c.base, c.nargs, c.fromLua, c.fn = fn+1, nargs, fromLua, g
+	c.base, c.nargs, c.fromLua, c.fn, c.charged = fn+1, nargs, fromLua, g, false
 	st := &ex.st
 	cl, base, pc := st.cl, st.base, st.pc // the host function may re-enter the VM
 	ex.depth++
@@ -242,7 +245,7 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 		return 0, ex.hostError(err)
 	}
 	n := len(c.res)
-	if g.host {
+	if g.host && !c.charged {
 		for _, v := range c.res { // what the host made for the script counts toward its budget
 			if v.isString() || v.isObj(kindTable) {
 				if err := ex.chargeResult(v); err != nil {
@@ -253,6 +256,7 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 		}
 	}
 	if err := ex.ensure(fn + n); err != nil {
+		c.reset()
 		return 0, err
 	}
 	if n == 1 { // the common case, without a slice copy and a clear

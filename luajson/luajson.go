@@ -32,7 +32,7 @@ const maxDepth = 64
 
 // Options for Marshal.
 type Options struct {
-	Indent string // when set, one member or element per line, indented by this
+	Indent string // when set, one member or element per line, indented by this: spaces and tabs only
 }
 
 // Marshal encodes v as JSON.
@@ -48,6 +48,9 @@ func Marshal(v lua.Value, opts ...Options) ([]byte, error) {
 func MarshalWrite(w io.Writer, v lua.Value, opts ...Options) error {
 	var jopts []jsontext.Options
 	if len(opts) > 0 && opts[0].Indent != "" {
+		if strings.Trim(opts[0].Indent, " \t") != "" { // jsontext panics on anything else
+			return errors.New("luajson: the indent may hold only spaces and tabs")
+		}
 		jopts = append(jopts, jsontext.Multiline(true), jsontext.WithIndent(opts[0].Indent))
 	}
 	e := &encoder{enc: jsontext.NewEncoder(w, jopts...), seen: map[*lua.Table]bool{}}
@@ -96,11 +99,14 @@ func (e *encoder) table(t *lua.Table, depth int, path string) error {
 	}
 	e.seen[t] = true
 	defer delete(e.seen, t)
-	n, count := t.Len(), 0
-	for range t.All() {
+	n, count, seq := t.Len(), 0, t.Len() > 0
+	for k := range t.All() {
 		count++
+		if i, ok := k.Int(); !ok || k.Kind() != lua.KindInt || i < 1 || i > int64(n) {
+			seq = false
+		}
 	}
-	if n > 0 && count == n { // a sequence: an array
+	if seq && count == n { // keys 1 to n and no others: an array
 		if err := e.enc.WriteToken(jsontext.BeginArray); err != nil {
 			return err
 		}

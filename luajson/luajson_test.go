@@ -142,3 +142,55 @@ func TestDecodeChargesBudget(t *testing.T) {
 		t.Errorf("encode was not charged: %v", err)
 	}
 }
+
+// An indent jsontext cannot take is an error, not a panic that takes down the host.
+func TestEncodeBadIndent(t *testing.T) {
+	v, err := eval(t, `local ok, e = pcall(json.encode, {1}, "xx") return tostring(ok) .. " " .. e`)
+	if err != nil || mustStr(v) != "false the indent may hold only spaces and tabs" {
+		t.Errorf("got %v, %v", v, err)
+	}
+	if _, err := luajson.Marshal(lua.Int(1), luajson.Options{Indent: "-"}); err == nil {
+		t.Error("Marshal accepted a bad indent")
+	}
+}
+
+// A table is an array only when its keys are exactly 1 to n: holes with other keys that make
+// up the count must not drop values.
+func TestEncodeHoles(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`return json.encode({1, nil, 3, x = "a"})`, `{"1":1,"3":3,"x":"a"}`},
+		{`local t = {1, 2, 3} t[5] = 5 t[2] = nil return json.encode(t)`, `{"1":1,"3":3,"5":5}`},
+		{`return json.encode({[1] = "a", [2] = "b", [2.5] = "c"})`, "error"},
+	} {
+		v, err := eval(t, tc.src)
+		got := mustStr(v)
+		if err != nil {
+			got = "error"
+		}
+		if got != tc.want {
+			t.Errorf("%s: got %q (%v), want %s", tc.src, got, err, tc.want)
+		}
+	}
+}
+
+// What encode and decode make is charged once: they charge as they work, so the call path
+// does not charge their results again.
+func TestChargedOnce(t *testing.T) {
+	var used int64
+	rt := lua.MustNew(luajson.Module("json"), lua.Observe(func(s lua.CallStats) { used = s.AllocBytes }))
+	s, err := rt.Load(context.Background(), "t.lua", `
+		local t = {} for i = 1, 2000 do t[i] = "abcdefghij" end
+		function enc() return #json.encode(t) end
+		function base() return 0 end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, _ := s.Func0[int64]("enc")
+	n, err := enc(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used < n || used > n+n/2 {
+		t.Errorf("encoding %d bytes charged %d", n, used)
+	}
+}
