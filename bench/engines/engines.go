@@ -8,9 +8,9 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/Liam0205/wangshu"
 	golib "github.com/arnodel/golua/lib"
 	golua "github.com/arnodel/golua/runtime"
-	"github.com/Liam0205/wangshu"
 	lua "github.com/folbricht/glua"
 	gopher "github.com/yuin/gopher-lua"
 )
