@@ -117,10 +117,10 @@ faster). Details, per-script numbers and method are in [the benchmarks](docs/ben
 | Engine | Relative to C Lua |
 | --- | --- |
 | C Lua 5.4.9 | 1.00x |
-| glua | 1.40x |
-| wangshu | 4.15x |
-| GopherLua | 5.18x |
-| golua | 5.97x |
+| glua | 1.43x |
+| wangshu | 4.34x |
+| GopherLua | 5.35x |
+| golua | 6.05x |
 
 ## Documentation
 
