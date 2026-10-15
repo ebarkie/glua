@@ -707,6 +707,11 @@ func (ex *executor) arithOp(op uint8, dst int, x, y Value, rx, ry int) error {
 		if bad.isNumber() { // it is the integer conversion that failed
 			return ex.intError(reg)
 		}
+		if reg < 0 && bad.isString() {
+			// C Lua loads a string operand of a bitwise operator into a register, and names
+			// the constant it came from
+			return ex.errorf("attempt to perform bitwise operation on a string value (constant '%s')", bad.str())
+		}
 		return ex.typeError("perform bitwise operation on", bad, reg)
 	}
 	if x.isString() || y.isString() {

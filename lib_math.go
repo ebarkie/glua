@@ -42,13 +42,15 @@ func mathAbs(c *Call) error {
 	if err != nil {
 		return err
 	}
-	if n.p == tInt() {
+	if c.Value(0).p == tInt() { // as C Lua: a numeric string takes the float path
+		n = c.Value(0)
 		if i := int64(n.n); i < 0 {
 			return c.ReturnValues(Int(int64(-uint64(i)))) // abs(mininteger) wraps, as in C Lua
 		}
 		return c.ReturnValues(n)
 	}
-	return c.ReturnValues(Float(math.Abs(math.Float64frombits(n.n))))
+	f, _ := n.Float()
+	return c.ReturnValues(Float(math.Abs(f)))
 }
 
 // floorCeil returns an integer when the result fits, else the float.
@@ -57,10 +59,11 @@ func floorCeil(c *Call, name string, f func(float64) float64) error {
 	if err != nil {
 		return err
 	}
-	if n.p == tInt() {
+	if c.Value(0).p == tInt() { // as C Lua: a numeric string takes the float path
 		return c.ReturnValues(n)
 	}
-	r := f(math.Float64frombits(n.n))
+	x, _ := n.Float()
+	r := f(x)
 	if i, ok := floatToInt(r); ok {
 		return c.ReturnValues(Int(i))
 	}
@@ -71,15 +74,17 @@ func mathFloor(c *Call) error { return floorCeil(c, "floor", math.Floor) }
 func mathCeil(c *Call) error  { return floorCeil(c, "ceil", math.Ceil) }
 
 func mathFmod(c *Call) error {
-	a, err := c.checkNumber(0, "fmod")
-	if err != nil {
-		return err
-	}
+	// as the reference build of C Lua: the integer form only for two actual integers, and the
+	// second argument checked first (C leaves the order of luaL_checknumber's calls open)
 	b, err := c.checkNumber(1, "fmod")
 	if err != nil {
 		return err
 	}
-	if a.p == tInt() && b.p == tInt() {
+	a, err := c.checkNumber(0, "fmod")
+	if err != nil {
+		return err
+	}
+	if c.Value(0).p == tInt() && c.Value(1).p == tInt() {
 		d := int64(b.n)
 		switch {
 		case d == 0:
@@ -143,16 +148,10 @@ func mathMinMax(c *Call, name string, max bool) error {
 	if n < 1 {
 		return c.argError(1, name, "value expected")
 	}
-	// as C Lua: each argument must convert to a number, but the comparisons are of the
-	// arguments themselves, so math.max("10", 9) compares a string with a number
-	if _, err := c.checkNumber(0, name); err != nil {
-		return err
-	}
+	// as C Lua 5.4: the arguments are compared as they are, numbers or not, so
+	// math.max("10", 9) compares a string with a number and math.max("a", "b") is "b"
 	best := c.Value(0)
 	for i := 1; i < n; i++ {
-		if _, err := c.checkNumber(i, name); err != nil {
-			return err
-		}
 		v := c.Value(i)
 		var less bool
 		var err error
@@ -169,14 +168,6 @@ func mathMinMax(c *Call, name string, max bool) error {
 		}
 	}
 	return c.ReturnValues(best)
-}
-
-// numLessAny is x < y for any two numbers.
-func numLessAny(x, y Value) bool {
-	if x.p == tInt() && y.p == tInt() {
-		return int64(x.n) < int64(y.n)
-	}
-	return numLess(x, y)
 }
 
 func mathMax(c *Call) error { return mathMinMax(c, "max", true) }

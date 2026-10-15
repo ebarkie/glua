@@ -41,14 +41,6 @@ func toFloat(v *Value) float64 {
 	return math.Float64frombits(v.n)
 }
 
-// numPair loads two numbers as floats. ok is false unless both are numbers.
-func numPair(x, y *Value) (a, b float64, ok bool) {
-	if !isNum(x) || !isNum(y) {
-		return 0, 0, false
-	}
-	return toFloat(x), toFloat(y), true
-}
-
 // fast is the hot loop. It makes no Go calls, so the register allocator keeps its state in
 // machine registers; the only calls in its code are write barriers, bounds-check panics and
 // morestack, which a CI gate checks. Anything rare or allocating leaves through an exit and

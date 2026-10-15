@@ -129,11 +129,6 @@ func (a *asm) cjump(op uint8, x, y int, label string) {
 	a.emit(0)
 }
 
-func (a *asm) jmp(label string) {
-	a.fixups = append(a.fixups, fixup{at: len(a.p.code), from: len(a.p.code) + 1, label: label})
-	a.emit(iABx(opJmp, 0, 0))
-}
-
 // forPrep and forLoop emit a numeric for loop over R[x..x+3]; the body sits between them.
 func (a *asm) forPrep(x int, exit string) {
 	a.fixups = append(a.fixups, fixup{at: len(a.p.code), from: len(a.p.code) + 1, label: exit})

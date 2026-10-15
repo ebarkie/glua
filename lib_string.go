@@ -599,7 +599,8 @@ func strFormat(c *Call) error {
 // pad applies the width and '-' flag of spec to s.
 func pad(spec, s string) string {
 	left := strings.Contains(spec, "-")
-	w, _ := strconv.Atoi(strings.TrimLeft(spec, "-+ #0"))
+	width, _, _ := strings.Cut(strings.TrimLeft(spec, "-+ #0"), ".") // the precision does not pad
+	w, _ := strconv.Atoi(width)
 	if len(s) >= w {
 		return s
 	}
@@ -636,6 +637,9 @@ func formatFloatC(spec string, conv byte, x float64) string {
 	}
 	if conv == 'a' || conv == 'A' {
 		return pad(spec, hexFloat(spec, x, upper))
+	}
+	if (conv == 'g' || conv == 'G') && !strings.Contains(spec, ".") {
+		spec += ".6" // C's default precision; Go's %g would give the shortest form instead
 	}
 	return fmt.Sprintf("%"+spec+string(conv), x)
 }

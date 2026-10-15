@@ -619,14 +619,6 @@ func (fs *fstate) exp2anyreg(e *expdesc) int {
 	return e.info
 }
 
-func (fs *fstate) exp2val(e *expdesc) {
-	if e.hasJumps() {
-		fs.exp2anyreg(e)
-	} else {
-		fs.dischargeVars(e)
-	}
-}
-
 // kIndex returns the constant index of e if e is a constant that fits a K operand, else -1.
 func (fs *fstate) kIndex(e *expdesc) int {
 	if e.hasJumps() {
@@ -982,9 +974,11 @@ func (fs *fstate) prefix(op syntax.Kind, e *expdesc, line int) {
 			}
 		}
 	case syntax.Tilde:
-		if isNumeral(e) && e.val.p == tInt() {
-			e.val = Int(^int64(e.val.n))
-			return
+		if isNumeral(e) {
+			if i, ok := e.val.Int(); ok { // a float with an exact integer value folds too, as in C Lua
+				e.val = Int(^i)
+				return
+			}
 		}
 	}
 	r := fs.exp2anyreg(e)

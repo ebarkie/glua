@@ -191,15 +191,6 @@ func (ex *executor) coFailed(co *coroutine, err error) ([]Value, bool, error) {
 	return []Value{le.Value}, false, nil
 }
 
-// errorValues turns a non-terminal error into the values resume reports.
-func errorValues(err error) ([]Value, bool, error) {
-	le, ok := err.(*Error)
-	if !ok || le.terminal {
-		return nil, false, err
-	}
-	return []Value{le.Value}, false, nil
-}
-
 // yieldable reports whether the running coroutine may yield from a Go function called by
 // the VM right now: no other Go function or nested run lies in between.
 func (ex *executor) yieldable() bool {
@@ -235,14 +226,6 @@ func argView(c *Call, from int) []Value {
 		return nil
 	}
 	return c.ex.stack[c.base+from : c.base+c.nargs : c.base+c.nargs]
-}
-
-func callArgs(c *Call, from int) []Value {
-	args := make([]Value, 0, max(c.Len()-from, 0))
-	for i := from; i < c.Len(); i++ {
-		args = append(args, c.Value(i))
-	}
-	return args
 }
 
 func coResume(c *Call) error {

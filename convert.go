@@ -36,7 +36,6 @@ var (
 	durationType = reflect.TypeFor[time.Duration]()
 	timeType     = reflect.TypeFor[time.Time]()
 	bytesType    = reflect.TypeFor[[]byte]()
-	anyType      = reflect.TypeFor[any]()
 )
 
 // converter is a conversion registered with Convert, working on reflect values.
