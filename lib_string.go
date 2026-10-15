@@ -17,6 +17,7 @@ func openString(g *Table) *Table {
 		"byte": strByte, "char": strChar, "find": strFind, "format": strFormat, "gmatch": strGmatch,
 		"gsub": strGsub, "len": strLen, "lower": strLower, "match": strMatch, "rep": strRep,
 		"reverse": strReverse, "sub": strSub, "upper": strUpper,
+		"pack": strPack, "unpack": strUnpack, "packsize": strPacksize,
 	})
 	g.Set(String("string"), tableValue(lib))
 	mt := NewTable(0, 2)

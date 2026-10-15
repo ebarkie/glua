@@ -70,16 +70,18 @@ const (
 
 // typeInfo is the plan of a bound type.
 type typeInfo struct {
-	rt      reflect.Type // the struct type, or the slice or map type
-	id      uint64
-	kind    planKind
-	fields  []field
-	byName  map[string]int   // Lua name to index in fields
-	methods map[string]Value // Method, per Runtime
-	meta    *Table           // the metatable: Meta, per Runtime; __len and __pairs for proxies
-	elem    field            // planSlice and planMap: how an element loads
-	err     string           // why the type cannot be bound, reported at bind time
-	handles []unique.Handle[string]
+	rt       reflect.Type // the struct type, or the slice or map type
+	id       uint64
+	kind     planKind
+	fields   []field
+	byName   map[string]int   // Lua name to index in fields
+	methods  map[string]Value // Method, per Runtime
+	meta     *Table           // the metatable: Meta, per Runtime; __len and __pairs for proxies
+	elem     field            // planSlice and planMap: how an element loads
+	err      string           // why the type cannot be bound, reported at bind time
+	builtin  bool             // the library's own, such as io's files: never opaque
+	stateful bool             // values carry hidden state: freezing refuses them
+	handles  []unique.Handle[string]
 }
 
 var (
@@ -811,7 +813,7 @@ func (rt *Runtime) plans() *[]*typeInfo {
 		switch c, ok := rt.custom[uint64(i)]; {
 		case ok:
 			next[i] = c
-		case !rt.autoBind && gp != nil && gp.kind == planStruct:
+		case !rt.autoBind && gp != nil && gp.kind == planStruct && !gp.builtin:
 			next[i] = opaque(gp)
 		default:
 			next[i] = gp

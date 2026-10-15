@@ -21,7 +21,7 @@ cstack.lua patched 626adc09f79218d3265c57cae83b54ececd693c77f84b09cf28e9a016c63a
 db.lua excluded 7da82387fdfd8431a51884741bb64c25705e8f62c25d2fd16340e9ef5d50d36c tests the debug library (hooks, getlocal, getinfo in detail), which glua does not provide
 errors.lua patched a8ba7ea89a3cdd713ba26d36da216eccf8f536ece26741c0b1aa056005c8c67d no io library, light userdata, debug.upvalueid or string.dump: those checks are cut; the limit on locals is checked after parsing, so the check that it comes before a later syntax error is cut
 events.lua patched 1213a3ffd35d7e6465e53aabf3367dab5074fe48e5da3b39812d61bef89e27a2 no io library, weak tables or per-type metatables (debug.setmetatable on numbers, booleans and nil): those checks are cut
-files.lua excluded 330858905d6518d97640be82687255c2b48c1f0f84f1ea1878672912a24109d5 tests the io and os libraries, which glua does not provide
+files.lua excluded 330858905d6518d97640be82687255c2b48c1f0f84f1ea1878672912a24109d5 tests io.input, io.output, popen, tmpfile and os.remove, rename, tmpname, getenv and exit, which glua leaves out
 gc.lua excluded 4351d096ad1dc003e914ffee3959955faed723185ad1935bb925853276fa7808 tests the garbage collector, finalizers and weak tables; glua leaves collection to Go
 gengc.lua excluded f591eaba4922fee792e49d725fe3bd34c8e8af20b3383eaa2be34a1b9c4b54e6 tests the generational collector; glua leaves collection to Go
 goto.lua patched a082e103d195f097f9c38b518eca90d7142d3b5c8eb269a3325bb927ef164c77 no debug.upvalueid: captures that are never assigned are copied and have no identity, so the upvalue-sharing checks are cut
@@ -34,7 +34,7 @@ nextvar.lua patched 035b70531b3e33e318e5f75c0434608164a2d4dd67efb11b22529dc745ff
 pm.lua run 58df0dc9faa82786aaff6801ec6c5d20943bf7e99d60af55b59f3205d3c04d04
 sort.lua run 009808b850722d39511143d33dc67a75387b1176544c5e8d26bb4a0976b5c780
 strings.lua patched 4ce64311c4b5399577889b0e122ce6236af59fa1cc56bcb1b0c9e1ed91e6cc01 no string.packsize until string.pack lands (M4): the int-size guard is taken as true; no io library: the %p checks on io.stdin are cut; strings are not interned, so the %p check on equal short strings is cut
-tpack.lua excluded 30a8ef71dd4f78cfa3b2a60bbc7c7a4478e305a533c00aa50351500da32195d5 string.pack and string.unpack land in M4
+tpack.lua run 30a8ef71dd4f78cfa3b2a60bbc7c7a4478e305a533c00aa50351500da32195d5
 tracegc.lua excluded cab25cde8d0c3c944c583383ad9b1c10e1d4f023f547f84239421bcc567edd55 a helper module for the gc tests; the harness stubs it
 utf8.lua run 0c0d78f84c8b3f77135c5d4f1cf5ec961d67a3c204af58c031388ba356eabf46
 vararg.lua run d2285d422f084c52763cf2777c49178e06d9cd7dff05e9f64481bb22709d7f83

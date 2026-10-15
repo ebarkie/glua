@@ -1285,11 +1285,18 @@ func numLess(x, y Value) bool {
 // typeName is the Lua type name of v, as error messages use it: "number" for both number
 // kinds, and a table's __name when its metatable has a string there, as luaT_objtypename does.
 func typeName(v Value) string {
-	if v.isObj(kindTable) {
-		if mt := (*Table)(v.p).meta; mt != nil {
-			if n := mt.Get(String("__name")); n.isString() {
-				return n.str()
-			}
+	var mt *Table
+	switch {
+	case v.isObj(kindTable):
+		mt = (*Table)(v.p).meta
+	case v.isObj(kindUser):
+		if ti := userType(v); ti != nil {
+			mt = ti.meta
+		}
+	}
+	if mt != nil {
+		if n := mt.Get(String("__name")); n.isString() {
+			return n.str()
 		}
 	}
 	switch k := v.Kind(); k {

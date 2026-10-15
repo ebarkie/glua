@@ -69,7 +69,6 @@ func TestNewErrors(t *testing.T) {
 		{[]Option{Hardened(), LibCoroutine}, "hardened profile refuses LibCoroutine"},
 		{[]Option{Hardened(), Limits{Steps: NoLimit}}, "refuses NoLimit for Limits.Steps"},
 		{[]Option{Limits{AllocBytes: -2}}, "Limits.AllocBytes is negative"},
-		{[]Option{LibOS}, "LibOS is not available yet"},
 		{[]Option{Global("x", 1), Global("x", 2)}, "cannot bind 'x': the name is already defined"},
 		{[]Option{Global("print", 1)}, "cannot bind 'print': the name is already defined"},
 		{[]Option{Global("require", 1)}, "cannot bind 'require': the name is already defined"},

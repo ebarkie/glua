@@ -96,6 +96,9 @@ func (f *freezer) walk() error {
 					ti = (*f.plans)[id]
 				}
 			}
+			if ti != nil && ti.stateful && !isStdFile(v) {
+				return fmt.Errorf("%s is a %s, which has hidden state and cannot be shared", it.path, typeName(v))
+			}
 			if ti != nil && ti.writable() {
 				return fmt.Errorf("%s is a %s, whose writable fields cannot be shared", it.path, ti.rt)
 			}

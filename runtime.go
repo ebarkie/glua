@@ -30,6 +30,7 @@ type Runtime struct {
 	out      *syncWriter     // nil discards
 	randSeed *uint64
 	clock    func() time.Time
+	started  time.Time // when New ran, by the clock: os.clock counts from here
 	observe  func(CallStats)
 	autoBind bool
 	strict   bool
@@ -240,13 +241,11 @@ func New(opts ...Option) (*Runtime, error) {
 	if rt.clock == nil {
 		rt.clock = time.Now
 	}
+	rt.started = rt.clock()
 	if o.hardened {
 		if bad := rt.libs & (LibLoad | LibCoroutine | LibOS | LibIO); bad != 0 {
 			return nil, fmt.Errorf("glua: the hardened profile refuses %s", bad)
 		}
-	}
-	if bad := rt.libs & (LibOS | LibIO); bad != 0 {
-		return nil, fmt.Errorf("glua: %s is not available yet", bad)
 	}
 	for _, c := range o.converts {
 		if err := c.register(); err != nil {
@@ -361,6 +360,12 @@ func (rt *Runtime) buildLayer(o *options) error {
 	}
 	if rt.libs&LibUTF8 != 0 {
 		openUTF8(g)
+	}
+	if rt.libs&LibOS != 0 {
+		openOS(g)
+	}
+	if rt.libs&LibIO != 0 {
+		openIO(g, rt)
 	}
 	if rt.libs&LibCoroutine != 0 {
 		g.Set(String("coroutine"), tableValue(coroutineLib()))

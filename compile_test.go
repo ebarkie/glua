@@ -138,6 +138,7 @@ func testGlobals() *Table {
 	openTable(g)
 	openMath(g)
 	openUTF8(g)
+	openOS(g)
 	openLoad(g)
 	g.Set(String("coroutine"), tableValue(coroutineLib()))
 	g.Set(String("gofirst"), goFnValue(&goFunc{name: "gofirst", f: func(c *Call) error {
@@ -247,3 +248,5 @@ func TestLoadCorpus(t *testing.T) { runCorpus(t, "testdata/load.lua", "testdata/
 func TestFastCallCorpus(t *testing.T) {
 	runCorpus(t, "testdata/fastcall.lua", "testdata/fastcall.expected")
 }
+
+func TestPackCorpus(t *testing.T) { runCorpus(t, "testdata/pack.lua", "testdata/pack.expected") }
