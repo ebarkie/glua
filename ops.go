@@ -99,7 +99,20 @@ func (ex *executor) slowOp() error {
 	case opGetEnv:
 		*ex.reg(a) = envValue(st.cl)
 	case opGetTable:
-		return ex.index(op, *ex.reg(b), *ex.reg(c), a)
+		obj, key := ex.reg(b), ex.reg(c)
+		if key.isString() && obj.isObj(kindTable) { // a string key: straight to the hash part
+			t := (*Table)(obj.p)
+			if i := t.findNode(key, hashString(key.p, int(key.n&lenMask))); i >= 0 {
+				if v := &t.nodes[i].v; v.p != nil || t.meta == nil {
+					setValue(ex.reg(a), v)
+					return nil
+				}
+			} else if t.meta == nil {
+				*ex.reg(a) = Value{}
+				return nil
+			}
+		}
+		return ex.index(op, *obj, *key, a)
 	case opGetIndex:
 		return ex.index(op, *ex.reg(b), Int(int64(c)), a)
 	case opGetField:
@@ -1365,16 +1378,23 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 }
 
 // constField does R[dst] = obj[K[kc]] for GETFIELD and SELF, when obj is a table and the
-// key is in it or one cached __index hop away, with the key's compile-time hash. It learns
-// the site's hint and reports whether it was done; the general index does the rest.
+// key is in it or one cached __index hop away, or obj is a string and the key is in the
+// string library, with the key's compile-time hash. It learns the site's hint and reports
+// whether it was done; the general index does the rest.
 func (ex *executor) constField(obj Value, kc, dst int) bool {
-	if !obj.isObj(kindTable) {
+	var t *Table
+	hops := 0
+	switch {
+	case obj.isObj(kindTable):
+		t = (*Table)(obj.p)
+	case obj.isString() && ex.strIdx != nil:
+		t, hops = ex.strIdx, 1 // already one hop, through the string metatable
+	default:
 		return false
 	}
 	p := ex.st.cl.p
 	key, h := p.k[kc], p.khash[kc]
-	t := (*Table)(obj.p)
-	for hops := 0; hops < 2; hops++ {
+	for ; hops < 2; hops++ {
 		if idx := t.findNode(&key, h); idx >= 0 && !t.nodes[idx].v.IsNil() {
 			learn(&p.hints[ex.aux()], idx)
 			*ex.reg(dst) = t.nodes[idx].v

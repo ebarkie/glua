@@ -84,6 +84,7 @@ type executor struct {
 	tbc     []int                    // stack indices of active to-be-closed variables, innermost last
 	cont    []int32                  // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
 	strMeta *Table                   // the metatable all strings share; the string library sets it
+	strIdx  *Table                   // strMeta's __index when it is a table and strMeta is frozen, for s:method()
 	goErrs  map[unsafe.Pointer]error // Go errors by the data of their message, so raising it again keeps the chain
 	co      *coroutine               // the running coroutine, nil on the main thread
 	mainCo  *coroutine               // stands for the main thread in coroutine.running

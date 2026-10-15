@@ -460,6 +460,11 @@ func (rt *Runtime) newExecutor() *executor {
 	ex.rt = rt
 	ex.types = rt.plans()
 	ex.strMeta = rt.strMeta
+	if rt.strMeta != nil && rt.strMeta.flags&tabFrozen != 0 {
+		if h := rt.strMeta.metaGet("__index"); h.isObj(kindTable) {
+			ex.strIdx = (*Table)(h.p)
+		}
+	}
 	ex.randSeed = rt.randSeed
 	ex.checked = rt.checked
 	if rt.out != nil {

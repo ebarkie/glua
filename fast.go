@@ -570,8 +570,13 @@ dispatch:
 
 		case opSelf: // R[A+1] = R[B]; R[A] = R[B][K[C]]; the aux word is the site number
 			obj, key := &regs[uint8(i>>16)], kAt(k, i>>24)
+			var t *Table
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
-				t := (*Table)(obj.p)
+				t = (*Table)(obj.p)
+			} else if obj.n>>56 == kindString && !isScalar(obj.p) {
+				t = ex.strIdx // s:method(): the string library, when the metatable is frozen
+			}
+			if t != nil {
 				slot := atomic.LoadUint32(hintAt(cl.p, *(*uint32)(pc))) & hintSlotMask
 				if int(slot) < len(t.nodes) {
 					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) {

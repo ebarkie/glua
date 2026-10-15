@@ -29,18 +29,26 @@ func mix(a, b uint64) uint64 {
 // cannot be set, and SetHashSeed needs one that can.
 //
 // It reads through offsets that stay inside the string: advancing p past the last block
-// would make a pointer one past the allocation, which invariant 3 forbids.
+// would make a pointer one past the allocation, which invariant 3 forbids. A string's last
+// partial block is read as the 8 bytes that end the string, overlapping the block before it,
+// and a short string as two overlapping 4-byte words or three bytes, so that no byte loop runs.
 func hashString(p unsafe.Pointer, n int) uint64 {
 	h := hashSeed ^ uint64(n)*m1
-	i := 0
-	for ; i+8 <= n; i += 8 {
-		h = mix(h^*(*uint64)(unsafe.Add(p, i)), m2)
+	var a uint64
+	switch {
+	case n > 8:
+		for i := 0; i+8 < n; i += 8 {
+			h = mix(h^*(*uint64)(unsafe.Add(p, i)), m2)
+		}
+		a = *(*uint64)(unsafe.Add(p, n-8))
+	case n == 8:
+		a = *(*uint64)(p)
+	case n >= 4:
+		a = uint64(*(*uint32)(p))<<32 | uint64(*(*uint32)(unsafe.Add(p, n-4)))
+	case n > 0:
+		a = uint64(*(*byte)(p))<<16 | uint64(*(*byte)(unsafe.Add(p, n/2)))<<8 | uint64(*(*byte)(unsafe.Add(p, n-1)))
 	}
-	var tail uint64
-	for j := 0; i+j < n; j++ {
-		tail |= uint64(*(*byte)(unsafe.Add(p, i+j))) << (8 * j)
-	}
-	return mix(h^tail, m1^hashSeed)
+	return mix(h^a, m1^hashSeed)
 }
 
 // hashWord hashes an integer, float bits or an address.
