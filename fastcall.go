@@ -20,6 +20,7 @@ const (
 	fastStrLen
 	fastStrByte
 	fastStrSub
+	fastSelect
 
 	numFast
 )
@@ -29,6 +30,7 @@ var fastIDs = map[string]uint8{
 	"math.abs": fastMathAbs, "math.floor": fastMathFloor, "math.ceil": fastMathCeil,
 	"math.sqrt": fastMathSqrt, "math.max": fastMathMax, "math.min": fastMathMin,
 	"type": fastType, "string.len": fastStrLen, "string.byte": fastStrByte, "string.sub": fastStrSub,
+	"select": fastSelect,
 }
 
 // methodIDs maps a method name to the built-in that s:name(...) calls when s is a string,
@@ -184,6 +186,61 @@ func fastBuiltin(id uint8, nargs int, x, y, z Value) (r Value, ok bool) {
 			j = int64(z.n)
 		}
 		return subString(x, strStart(int64(y.n), n), strEnd(j, n)), true
+	case fastSelect:
+		if x.isString() && x.n&lenMask == 1 && *(*byte)(x.p) == '#' {
+			return Int(int64(nargs - 1)), true
+		}
+		if x.p != tInt() || int64(x.n) < 1 || nargs > 3 && int64(x.n) > 2 {
+			return // negative and out of range indexes, and arguments fastCall did not read
+		}
+		switch int64(x.n) {
+		case 1:
+			if nargs >= 2 {
+				return y, true
+			}
+		case 2:
+			if nargs >= 3 {
+				return z, true
+			}
+		}
+		return Value{}, true // past the last argument: no result
 	}
 	return
+}
+
+// fastSelect does the FASTSELECT at pc-1: select(R[A+1], ...) with one result, read from the
+// frame's varargs without copying them, when R[A] is the built-in select. It then skips the
+// VARARG and CALL that follow. Otherwise it does nothing, and they run.
+func (ex *executor) fastSelect(i uint32) {
+	st := &ex.st
+	a := decA(i)
+	f := *ex.reg(a)
+	if call := ex.instr(st.pc + 1); !f.isObj(kindGoFn) || (*goFunc)(f.p).fast != fastSelect || uint8(call) != opCall || decC(call) != 2 || st.ticks <= 0 {
+		return
+	}
+	nextra := 0
+	if ex.pframes[st.nf-1]&frVararg != 0 {
+		nextra = int(ex.nvar[st.nf-1])
+	}
+	var r Value
+	switch x := *ex.reg(a + 1); {
+	case x.isString() && x.n&lenMask == 1 && *(*byte)(x.p) == '#':
+		r = Int(int64(nextra))
+	case x.p == tInt():
+		n := int64(x.n)
+		if n < 0 {
+			n += int64(nextra) + 1
+		}
+		if n < 1 {
+			return // out of range: the call reports it
+		}
+		if n <= int64(nextra) {
+			r = ex.stack[st.base-1-nextra+int(n)-1]
+		}
+	default:
+		return
+	}
+	st.ticks-- // a call ticks
+	*ex.reg(a) = r
+	st.pc += 2 // past the VARARG and the CALL
 }

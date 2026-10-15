@@ -1245,6 +1245,9 @@ func (fs *fstate) finishCall(base int, args []syntax.Expr, line int, fast uint8)
 		if i > 0 && last.k != eVoid {
 			fs.exp2nextreg(&last)
 		}
+		if _, isVararg := a.(*syntax.VarargExpr); isVararg && fast == fastSelect && i == 1 && len(args) == 2 {
+			fs.abc(opFastSelect, base, 0, 0) // select(x, ...): before the VARARG, which it may skip
+		}
 		last = fs.expr(a)
 		nargs++
 	}

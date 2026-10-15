@@ -75,3 +75,50 @@ for i = 1, 1000 do
   if s:sub(1, 5) == "/api/" then n = n + s:len() + s:byte(6) end
 end
 return n
+--== select over varargs, three
+local function f(...)
+  return select("#", ...), (select(1, ...)), (select(2, ...)), (select(4, ...)),
+    (select(9, ...)), (select(2.0, ...)), (select("2", ...))
+end
+return f(10, 20, 30)
+--== select over varargs, none
+local function f(...)
+  return select("#", ...), (select(1, ...)), (select(2, ...)), (select(4, ...)),
+    (select(9, ...)), (select(2.0, ...)), (select("2", ...))
+end
+return f()
+--== select over varargs, two nils
+local function f(...)
+  return select("#", ...), (select(1, ...)), (select(2, ...)), (select(4, ...)),
+    (select(9, ...)), (select(2.0, ...)), (select("2", ...))
+end
+return f(nil, nil)
+--== select over varargs, from the end
+local function g(...) return (select(-1, ...)), (select(-3, ...)), (select(-4, ...)) end
+return g(1, 2, 3, 4)
+--== select over varargs: the errors are the ordinary call's
+local function e(i, ...) return pcall(function(...) return (select(i, ...)) end, ...) end
+return select(2, e(0, 1, 2)), select(2, e(-3, 1, 2)), select(2, e("x", 1)), select(2, e(nil, 1)), select(2, e(1.5, 1))
+--== select over varargs with open results is the ordinary call
+local function f(...) return select(2, ...) end
+local function g(...) return select("#", select(2, ...)) end
+return g(1, 2, 3), f(1, 2, 3)
+--== select with fixed arguments
+return select("#"), select("#", 1, nil), (select(1, "a", "b")), (select(2, "a", "b")), (select(3, "a", "b")),
+  (select(2, "a", "b", "c", "d")), (select(4, "a", "b", "c", "d")), (select(-1, "a", "b"))
+--== a redefined select is not the built-in
+local saved = select
+select = function(...) return "mine" end
+local function f(...) return (select(1, ...)) end
+local r = f(1)
+select = saved
+return r, f(1)
+--== a local alias of select
+local sel = select
+local function f(...) return sel("#", ...), (sel(2, ...)) end
+return f("a", "b")
+--== select over varargs in loops and arithmetic
+local function sum(...) local s = 0 for i = 1, select("#", ...) do s = s + (select(i, ...)) end return s end
+local t = 0
+for i = 1, 300 do t = t + sum(i, 2, 3, 4) + sum() + sum(i) end
+return t

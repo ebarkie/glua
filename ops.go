@@ -323,6 +323,9 @@ func (ex *executor) slowOp() error {
 	case opFastCall:
 		ex.fastCall(i)
 		return nil
+	case opFastSelect:
+		ex.fastSelect(i)
+		return nil
 	case opTForCall:
 		base := st.base + a
 		if done, err := ex.builtinIter(base, c); done {

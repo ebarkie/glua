@@ -211,6 +211,19 @@ func (v *verifier) instr(pc int) error {
 			return fail("unknown built-in %d", aux)
 		}
 		return reg(a + b - 1)
+	case opFastSelect:
+		// select(R[A+1], ...): a VARARG of all the varargs to R[A+2] and a CALL with them follow,
+		// or a TAILCALL, which FASTSELECT leaves alone
+		if next >= len(p.code)-1 || uint8(p.code[next]) != opVararg || uint8(p.code[next+1]) != opCall && uint8(p.code[next+1]) != opTailCall {
+			return fail("not followed by VARARG and CALL")
+		}
+		if vi, ci := p.code[next], p.code[next+1]; decA(vi) != a+2 || decC(vi) != 0 || decA(ci) != a || decB(ci) != 0 {
+			return fail("does not match its VARARG and CALL")
+		}
+		if !p.vararg {
+			return fail("in a function without varargs")
+		}
+		return reg(a + 1)
 	case opClosure:
 		for _, u := range p.protos[bx].upvals {
 			if u.fromStack {

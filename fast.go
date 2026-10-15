@@ -91,6 +91,8 @@ dispatch:
 				}
 			}
 
+		case opVarargPrep: // the frame was adjusted when the call pushed it
+
 		case opLoadFalse:
 			setBool(&regs[uint8(i>>8)], 0)
 
@@ -237,6 +239,12 @@ dispatch:
 				break dispatch
 			}
 			pc = unsafe.Add(pc, 4) // not the built-in: the CALL
+
+		case opFastSelect: // select(R[A+1], ...); the VARARG and CALL it stands for follow
+			if f := &regs[uint8(i>>8)]; f.n == kindGoFn<<56 && !isScalar(f.p) && (*goFunc)(f.p).fast == fastSelect {
+				e = exSlowOp // the driver does it, or falls through to the VARARG
+				break dispatch
+			}
 
 		case opLen: // R[A] = #R[B], for a string, or a table whose length its array part shows
 			x := &regs[uint8(i>>16)]

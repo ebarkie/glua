@@ -120,6 +120,10 @@ const (
 	// arguments: if R[A] is built-in aux and its inline form applies, it does the call and
 	// skips the CALL; otherwise it falls through to it.
 	opFastCall
+	// FASTSELECT stands right before the VARARG and CALL (or TAILCALL) of select(x, ...): if
+	// R[A] is the built-in select and the CALL wants one result, it reads the result from the
+	// frame and skips both.
+	opFastSelect
 
 	numOps
 )
@@ -240,6 +244,7 @@ var opTable = [numOps]opInfo{
 	opTBC:        {"TBC", oReg, oNone, oNone, false, oNone},
 	opClose:      {"CLOSE", oReg, oNone, oNone, false, oNone},
 	opFastCall:   {"FASTCALL", oReg, oInt, oNone, false, oSize},
+	opFastSelect: {"FASTSELECT", oReg, oNone, oNone, false, oNone},
 }
 
 // hasAux reports whether an opcode is followed by an auxiliary word.
