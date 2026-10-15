@@ -46,6 +46,9 @@ func TestValueOf(t *testing.T) {
 		{ValueOf(userID(9)), "9"},
 		{ValueOf(1500 * time.Millisecond), "1.5"},
 		{ValueOf(time.Unix(100, 0)), "100"},
+		{ValueOf(time.Unix(100, 5e8)), "100.5"},
+		{ValueOf(time.Date(2300, 1, 1, 0, 0, 0, 5e8, time.UTC)), "10413792000.5"}, // past UnixNano's range
+		{ValueOf(time.Date(1600, 1, 1, 0, 0, 0, 25e7, time.UTC)), "-11676095999.75"},
 		{ValueOf([]byte("raw")), "raw"},
 		{ValueOf(Int(3)), "3"},
 		{ValueOf[*Table](nil), "nil"},

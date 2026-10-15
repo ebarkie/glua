@@ -229,7 +229,7 @@ func timeValue(t time.Time) Value {
 	if t.Nanosecond() == 0 {
 		return Int(t.Unix())
 	}
-	return Float(float64(t.UnixNano()) / 1e9)
+	return Float(float64(t.Unix()) + float64(t.Nanosecond())/1e9) // UnixNano overflows outside 1678 to 2262
 }
 
 // As converts v to T by the built-in rules and registered conversions.
