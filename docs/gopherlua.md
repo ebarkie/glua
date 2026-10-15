@@ -60,7 +60,7 @@ that one goroutine at a time may use, which is closer to an LState.
 | --- | --- | --- |
 | Set up | `lua.NewState(opts)` | `lua.New(opts...)` |
 | Run a chunk | `L.DoString(src)`, `L.DoFile(path)` | `rt.Load(ctx, name, src)`; `lua.Eval[R](ctx, src)` for one-off use |
-| Compile once, run many times | `L.LoadString`, then call the `*LFunction` | `rt.Load`, then call the Script's functions |
+| Compile once, run many times | `L.LoadString`, then call the `*LFunction` | `rt.Load`, then call the Script's functions; or `lua.Compile`, then `vm.Call(ctx, vm.Function(chunk), args...)` |
 | Release | `L.Close()` | Nothing to close |
 | Concurrent use | One LState per goroutine | One Script for all goroutines; one VM per goroutine at a time |
 

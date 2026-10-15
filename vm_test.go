@@ -137,3 +137,48 @@ func TestVMNewVMFails(t *testing.T) {
 		t.Errorf("NewVM: %v", err)
 	}
 }
+
+// A Chunk as a function of a VM runs in the VM's environment, with its arguments as ...,
+// returning all it returns, afresh at each call; another VM's runs in that one's.
+func TestVMFunction(t *testing.T) {
+	ctx := context.Background()
+	ch, err := Compile("job.lua", "local a, b = ...\ncount = (count or 0) + 1\nreturn a + b + base, select('#', ...), count, nil")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := mustLoad(t, MustNew(), "base = 0")
+	vm, err := s.NewVM(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.NewVM(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := vm.Function(ch)
+	for i, want := range []string{"3 2 1 nil", "3 2 2 nil"} {
+		res, err := vm.CallN(ctx, nil, job, Int(1), Int(2))
+		got := make([]string, len(res))
+		for j, v := range res {
+			got[j] = v.String()
+		}
+		if err != nil || strings.Join(got, " ") != want {
+			t.Errorf("call %d: %v, %v; want %s", i+1, got, err, want)
+		}
+	}
+	if n, err := vm.Get[int64]("count"); err != nil || n != 2 {
+		t.Errorf("the VM's count is %d, %v; want 2", n, err)
+	}
+	if err := other.Set("base", 10); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := other.CallN(ctx, nil, other.Function(ch), Int(1), Int(1)); err != nil || n[0].String() != "12" || n[2].String() != "1" {
+		t.Errorf("another VM's: %v, %v", n, err)
+	}
+	if _, err := vm.Call(ctx, job, Int(1)); err == nil || !strings.HasPrefix(err.Error(), "job.lua:3: attempt to perform arithmetic on a nil value") {
+		t.Errorf("an error from the chunk: %v", err)
+	}
+	if v := vm.Function(nil); !v.IsNil() || !vm.Function(&Chunk{}).IsNil() {
+		t.Errorf("no chunk gave %v", v)
+	}
+}

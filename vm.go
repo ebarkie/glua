@@ -40,6 +40,18 @@ func (s *Script) NewVM(ctx context.Context) (*VM, error) {
 	return vm, nil
 }
 
+// Function returns ch as a function of this VM, as Lua's load gives one: a Value for Call or
+// CallN, which runs ch's top level in the VM's environment, with the call's arguments as its
+// ..., and returns what the chunk returns. Unlike require, each call runs the chunk again. Its
+// _ENV is the function's, as with load: a chunk that assigns it changes it for later calls.
+// A nil or zero Chunk gives nil.
+func (vm *VM) Function(ch *Chunk) Value {
+	if ch == nil || ch.p == nil {
+		return Value{}
+	}
+	return luaFnValue(newMainClosure(ch.p, ch.info, vm.env))
+}
+
 // executor returns the VM's executor, a fresh one after an abnormal end.
 func (vm *VM) executor() *executor {
 	if vm.ex == nil || vm.ex.poisoned {

@@ -10,7 +10,7 @@ const idSize = 60 // LUA_IDSIZE: the room a chunk name gets in messages
 
 // Chunk is compiled Lua source, as Compile makes it; the zero Chunk is not one. It never
 // changes, so one Chunk can serve any number of Runtimes and goroutines; each environment
-// that requires it runs it afresh.
+// that requires it runs it afresh, and VM.Function makes it a function of a VM.
 type Chunk struct {
 	p    *proto
 	info *syntax.Info
