@@ -87,7 +87,7 @@ func baseSetMetatable(c *Call) error {
 		return err
 	}
 	mtv := c.Value(1)
-	if !mtv.IsNil() && !mtv.isObj(kindTable) {
+	if c.Len() < 2 || !mtv.IsNil() && !mtv.isObj(kindTable) { // as C Lua's luaL_argexpected: no value is not nil
 		return c.typeArgError(1, "setmetatable", "nil or table")
 	}
 	if t.meta != nil && !t.meta.Get(String("__metatable")).IsNil() {
