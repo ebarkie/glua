@@ -224,8 +224,7 @@ checkmessage("local a = setmetatable({}, {__index = 10}).x",
 
 -- numeric for loops
 checkmessage("for i = {}, 10 do end", "table")
--- glua: no io library
--- checkmessage("for i = io.stdin, 10 do end", "FILE")
+checkmessage("for i = io.stdin, 10 do end", "FILE")
 checkmessage("for i = {}, 10 do end", "initial value")
 checkmessage("for i = 1, 'x', 10 do end", "string")
 checkmessage("for i = 1, {}, 10 do end", "limit")
@@ -251,12 +250,10 @@ do   -- named objects (field '__name')
 -- glua: no io library
 --   checkmessage("io.input(XX)", "(FILE* expected, got My Type)")
   checkmessage("return XX + 1", "on a My Type value")
--- glua: no io library
---   checkmessage("return ~io.stdin", "on a FILE* value")
+  checkmessage("return ~io.stdin", "on a FILE* value")
   checkmessage("return XX < XX", "two My Type values")
   checkmessage("return {} < XX", "table with My Type")
--- glua: no io library
---   checkmessage("return XX < io.stdin", "My Type with FILE*")
+  checkmessage("return XX < io.stdin", "My Type with FILE*")
   _G.XX = nil
 
   if T then   -- extra tests for 'luaL_tolstring'
@@ -277,8 +274,7 @@ do   -- named objects (field '__name')
 end
 
 -- global functions
--- glua: no io library
--- checkmessage("(io.write or print){}", "io.write")
+checkmessage("(io.write or print){}", "io.write")
 checkmessage("(collectgarbage or print){}", "collectgarbage")
 
 -- glua: no string.dump: glua loads text chunks only
@@ -345,8 +341,7 @@ checkmessage([[x = print .. "a"]], "concatenate")
 checkmessage([[x = "a" .. false]], "concatenate")
 checkmessage([[x = {} .. 2]], "concatenate")
 
--- glua: no io library
--- checkmessage("getmetatable(io.stdin).__gc()", "no value")
+checkmessage("getmetatable(io.stdin).__gc()", "no value")
 
 checkmessage([[
 local Var

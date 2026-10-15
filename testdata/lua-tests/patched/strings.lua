@@ -168,9 +168,8 @@ do  -- tests for '%p' format
   assert(string.format("%p", {}) ~= null)
   assert(string.format("%p", print) ~= null)
   assert(string.format("%p", coroutine.running()) ~= null)
--- glua: no io library
---   assert(string.format("%p", io.stdin) ~= null)
---   assert(string.format("%p", io.stdin) == string.format("%p", io.stdin))
+  assert(string.format("%p", io.stdin) ~= null)
+  assert(string.format("%p", io.stdin) == string.format("%p", io.stdin))
   assert(string.format("%p", print) == string.format("%p", print))
   assert(string.format("%p", print) ~= string.format("%p", assert))
 

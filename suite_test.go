@@ -180,13 +180,14 @@ func loadSuiteChunk(path string, g *Table) (*closure, error) {
 // suiteGlobals is testGlobals with what the suite needs from the libraries glua leaves out.
 func suiteGlobals() *Table {
 	g := testGlobals()
+	openIO(g, nil) // the subset: the suite uses io.stdin and io.write as a userdata and a library function
 	g.Set(String("gofirst"), Value{})
 	g.Set(String("_soft"), Bool(true)) // skip the long-running tests
 	g.Set(String("_port"), Bool(true)) // skip the tests that depend on the platform
 	addSuiteDebug(g)
 
 	loaded := NewTable(0, 16)
-	for _, name := range []string{"_G", "string", "table", "math", "utf8", "coroutine", "debug"} {
+	for _, name := range []string{"_G", "string", "table", "math", "utf8", "coroutine", "debug", "io"} {
 		if name == "_G" {
 			loaded.Set(String(name), tableValue(g))
 		} else {
