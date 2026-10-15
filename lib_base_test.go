@@ -62,3 +62,16 @@ func TestWarn(t *testing.T) {
 		t.Fatalf("got %q", out)
 	}
 }
+
+// A Go function that Go code called has no call-site name, even when it runs from the
+// trampoline: as in C Lua, its argument errors use its library name.
+func TestArgErrorNameThroughTrampoline(t *testing.T) {
+	out, _ := runWithOutput(t, `
+		print(select(2, pcall(pcall, string.rep)))
+		print(coroutine.resume(coroutine.create(string.rep)))
+		print(pcall(coroutine.wrap(string.rep)))`)
+	want := strings.Repeat("false\tbad argument #1 to 'string.rep' (string expected, got no value)\n", 3)
+	if out != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}

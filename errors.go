@@ -123,13 +123,25 @@ func (ex *executor) captureTrace(le *Error, nf0 int) {
 // Unwrap returns the Go error behind e, if any.
 func (e *Error) Unwrap() error { return e.cause }
 
-// where reports the current position as source:line, from the instruction at pc-1.
+// where reports the current position as source:line, from the instruction at pc-1. In the
+// trampoline, which runs a Go function that Go code called, it is the Lua code that called the
+// trampoline, or none when Go did.
 func (ex *executor) where() string {
-	if ex.st.cl == nil {
+	cl, base, pc, nf := ex.st.cl, ex.st.base, ex.st.pc, ex.st.nf
+	for cl != nil && cl.p == trampoline.p {
+		if nf == 0 || ex.pframes[nf-1]&frGoEntry != 0 {
+			return ""
+		}
+		fr := ex.pframes[nf-1]
+		base -= int(fr >> 32 & 0xffffff)
+		cl = (*closure)(ex.stack[base-1].p)
+		pc = int(uint32(fr))
+		nf--
+	}
+	if cl == nil {
 		return ""
 	}
-	p := ex.st.cl.p
-	return fmt.Sprintf("%s:%d", p.source, p.lineAt(max(ex.st.pc-1, 0))) // a call ticks before its first instruction
+	return fmt.Sprintf("%s:%d", cl.p.source, cl.p.lineAt(max(pc-1, 0))) // a call ticks before its first instruction
 }
 
 // errorf raises an ordinary, catchable runtime error at the current position. As in C Lua,

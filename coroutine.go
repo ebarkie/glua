@@ -125,6 +125,9 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		} else if ex.mainCo != nil {
 			ex.mainCo.status = coRunning
 		}
+		if le, ok := err.(*Error); ok && le.terminal && le.where == "" {
+			le.where = ex.where() // raised by a Go body, which has no position: the resume's
+		}
 	}()
 
 	if !co.started {

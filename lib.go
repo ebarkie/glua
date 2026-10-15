@@ -37,10 +37,11 @@ func (c *Call) argError(n int, fname, msg string) error {
 }
 
 // callSiteName returns the name the calling Lua code used for the function, and whether
-// it was a method call. It is empty when Go code, such as pcall, made the call.
+// it was a method call. It is empty when Go code, such as pcall, made the call, directly or
+// through the trampoline.
 func (c *Call) callSiteName() (string, bool) {
 	ex := c.ex
-	if !c.fromLua || ex.st.cl == nil || ex.st.pc < 1 {
+	if !c.fromLua || ex.st.cl == nil || ex.st.cl.p == trampoline.p || ex.st.pc < 1 {
 		return "", false
 	}
 	i := ex.instr(ex.st.pc - 1)

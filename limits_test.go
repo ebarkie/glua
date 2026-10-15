@@ -200,3 +200,19 @@ func TestCallbacksDoNotClimbStack(t *testing.T) {
 		t.Errorf("the stack grew to %d slots", len(ex.stack))
 	}
 }
+
+// A Go function that Go code called runs from the trampoline. A limit hit there is reported
+// at the Lua code that made the call, not at the trampoline: the pcall, or the resume.
+func TestLimitPositionThroughTrampoline(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"\n\npcall(pcall, string.rep, 'x', 1e8)", "t.lua:3: "},
+		{"local co = coroutine.wrap(string.rep)\n\nco('x', 1e8)", "t.lua:3: "},
+		{"local co = coroutine.create(string.rep)\n\ncoroutine.resume(co, 'x', 1e8)", "t.lua:3: "},
+	} {
+		rt := MustNew(LibSafe|LibCoroutine, Limits{AllocBytes: 1 << 20})
+		_, err := rt.Load(context.Background(), "t.lua", tc.src)
+		if !errors.Is(err, ErrAlloc) || !strings.HasPrefix(err.Error(), tc.want) {
+			t.Errorf("%q: got %v, want %q", tc.src, err, tc.want)
+		}
+	}
+}
