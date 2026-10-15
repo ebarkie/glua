@@ -1215,7 +1215,7 @@ func (fs *fstate) methodCall(n *syntax.MethodCallExpr) expdesc {
 		fs.abc(opGetTable, base, base+1, base)
 	}
 	fs.freereg = base + 1 // the function; self is the first argument
-	return fs.finishCall(base, append([]syntax.Expr{nil}, n.Args...), n.Line, 0)
+	return fs.finishCall(base, append([]syntax.Expr{nil}, n.Args...), n.Line, methodIDs[n.Name])
 }
 
 // finishCall compiles the arguments of a call whose function is in register base. A nil

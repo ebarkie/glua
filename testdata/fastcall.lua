@@ -49,3 +49,29 @@ local floor = math.floor
 local r1 = floor(1.5)
 floor = function() return "mine" end
 return r1, floor(1.5)
+--== string.sub
+local s = "hello world"
+return string.sub(s, 1, 5), string.sub(s, 7), string.sub(s, -5), string.sub(s, -5, -2), string.sub(s, 0),
+  string.sub(s, 3, 2), string.sub(s, 20), string.sub(s, -100, 3), string.sub(s, 5, 100), string.sub("", 1, 1),
+  string.sub(s, math.mininteger, math.maxinteger), string.sub(s, math.maxinteger), #string.sub(s, 12)
+--== string.sub with arguments the ordinary call converts
+local s = "hello"
+return string.sub(s, 2.0, 3.0), string.sub(s, "2", "3"), string.sub(123456, 2, 3), string.sub(s, 2, nil),
+  select(2, pcall(string.sub, s)), select(2, pcall(string.sub, s, 1.5)), select(2, pcall(string.sub, s, {}))
+--== string methods
+local s = "hello"
+return s:sub(2, 3), s:sub(-3), s:len(), s:byte(), s:byte(-1), ("abc"):sub(2), ("xyz"):byte(2), (""):len(),
+  s:sub(2.0), s:byte(1, 3), select("#", s:byte(10))
+--== a method of the same name on a table is not the built-in
+local t = {sub = function(self, i, j) return "mine", i, j end, len = function() return 42 end}
+return t:sub(1, 2), t:len()
+--== string.sub through a table is not a string receiver
+local t = {sub = string.sub}
+return select(2, pcall(function() return t:sub(1, 2) end))
+--== methods in a loop
+local n = 0
+for i = 1, 1000 do
+  local s = "/api/" .. i
+  if s:sub(1, 5) == "/api/" then n = n + s:len() + s:byte(6) end
+end
+return n

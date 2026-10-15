@@ -19,6 +19,7 @@ const (
 	fastType
 	fastStrLen
 	fastStrByte
+	fastStrSub
 
 	numFast
 )
@@ -27,8 +28,12 @@ const (
 var fastIDs = map[string]uint8{
 	"math.abs": fastMathAbs, "math.floor": fastMathFloor, "math.ceil": fastMathCeil,
 	"math.sqrt": fastMathSqrt, "math.max": fastMathMax, "math.min": fastMathMin,
-	"type": fastType, "string.len": fastStrLen, "string.byte": fastStrByte,
+	"type": fastType, "string.len": fastStrLen, "string.byte": fastStrByte, "string.sub": fastStrSub,
 }
+
+// methodIDs maps a method name to the built-in that s:name(...) calls when s is a string,
+// through the string metatable. FASTCALL checks at run time that the method found is it.
+var methodIDs = map[string]uint8{"len": fastStrLen, "byte": fastStrByte, "sub": fastStrSub}
 
 // typeNames are the results of type, by Kind, with the pointers of the compiler's
 // constants, so that type(x) == "table" compares pointers.
@@ -59,8 +64,11 @@ func (ex *executor) fastCall(i uint32) {
 	if uint32(id) != ex.aux0() {
 		return
 	}
-	x, y := ex.stack[st.base+a+1], ex.stack[st.base+a+2]
-	r, ok := fastBuiltin(id, nargs, x, y)
+	x, y, z := ex.stack[st.base+a+1], ex.stack[st.base+a+2], Value{}
+	if nargs >= 3 {
+		z = ex.stack[st.base+a+3]
+	}
+	r, ok := fastBuiltin(id, nargs, x, y, z)
 	if !ok {
 		return
 	}
@@ -74,9 +82,9 @@ func (ex *executor) fastCall(i uint32) {
 // aux0 returns the aux word of the instruction before the CALL at pc.
 func (ex *executor) aux0() uint32 { return ex.st.cl.p.code[ex.st.pc-1] }
 
-// fastBuiltin computes built-in id on the arguments x and y, nargs of them, if its inline
+// fastBuiltin computes built-in id on the arguments x, y and z, nargs of them, if its inline
 // form applies; ok is false otherwise, and the ordinary call does the work.
-func fastBuiltin(id uint8, nargs int, x, y Value) (r Value, ok bool) {
+func fastBuiltin(id uint8, nargs int, x, y, z Value) (r Value, ok bool) {
 	switch id {
 	case fastMathAbs:
 		if nargs != 1 {
@@ -167,6 +175,15 @@ func fastBuiltin(id uint8, nargs int, x, y Value) (r Value, ok bool) {
 			return Int(int64(*(*byte)(unsafe.Add(x.p, at-1)))), true
 		}
 		return Value{}, true // no byte there: no result
+	case fastStrSub:
+		if !x.isString() || y.p != tInt() || !(nargs == 2 || nargs == 3 && z.p == tInt()) {
+			return
+		}
+		n, j := int(x.n&lenMask), int64(-1)
+		if nargs == 3 {
+			j = int64(z.n)
+		}
+		return subString(x, strStart(int64(y.n), n), strEnd(j, n)), true
 	}
 	return
 }
