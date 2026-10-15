@@ -204,6 +204,7 @@ func TestGlobalsAndModules(t *testing.T) {
 	}
 	for _, tc := range []struct{ src, want string }{
 		{"return env, n, ratio, flags[1], flags[2], cfg.port", "prod\t42\t0.5\ttrue\tfalse\t8080"},
+		{"return pcall(table.sort, flags, function(a, b) return b end)", "false\tattempt to modify a frozen table"},
 		{"return double(21), kv.version, kv.sub.name, kv.get('a')", "42\t3\tinner\tv:a"},
 		{"return require('kv') == kv, package.loaded.kv == kv", "true\ttrue"},
 		{"local u = require('util') return u.twice(4), require('util') == u", "8\ttrue"},

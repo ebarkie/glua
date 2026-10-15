@@ -19,3 +19,5 @@ utf8.charpattern	3 | str:5b002d7fc22dfd5d5b802dbf5d2a
 integer extremes as strings	str:696e7465676572 | -9223372036854775808 | str:666c6f6174 | str:666c6f6174
 the %z class	2 | str:780078 | 2
 math.log of subnormals, and modf of -0.0	-744.44007192138 | -323.30621534312 | -310.0 | -1074.0 | -649.73001502971 | -708.39641853226 | 0 | str:696e7465676572 | 0 | -0.5
+sort while the order function changes the table	true | str:312c322c332c342c3130312c352c362c313032 | 3 | str:312c332c342c6e696c2c6e696c | 3 | str:312c332c342c6e696c2c6e696c | str:6e696c2c6e696c2c312c322c33 | 2 | str:312c332c6e696c | str:61626364
+unpack from the array part and past it	str:312c322c6e696c2c34 | str:322c6e696c2c342c6e696c2c6e696c | str:312c32302c332c3430 | str:612c62 | str:6e696c2c6e696c | str:6e696c2c6e696c2c31 | str:

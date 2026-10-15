@@ -90,3 +90,35 @@ return ("a\0b"):find("%z"), ("a\0b"):gsub("%Z", "x")
 --== math.log of subnormals, and modf of -0.0
 return math.log(5e-324), math.log(5e-324, 10), math.log(1e-310, 10), math.log(5e-324, 2), math.log(1e-310, 3),
   math.log(2^-1022), math.modf(-0.0), math.type((math.modf(-0.0))), math.modf(-0.5)
+--== sort while the order function changes the table
+local function all(t, n) local o = {} for i = 1, n do o[i] = tostring(t[i]) end return table.concat(o, ",") end
+local reads, calls = 0, 0
+local t = {5, nil, 3, nil, 1, 4, 2, 6}
+table.sort(t, function(a, b)
+  calls = calls + 1
+  if calls == 2 then setmetatable(t, {__index = function(_, k) reads = reads + 1 return 100 + k end}) end
+  return (a or 0) < (b or 0)
+end)
+local writes = 0
+local w = {3, nil, 1, nil, 4}
+table.sort(w, function(a, b)
+  if not getmetatable(w) then setmetatable(w, {__newindex = function(t, k, v) writes = writes + 1 rawset(t, k, v) end}) end
+  return (a or 100) < (b or 100)
+end)
+local counted = 0
+local c = setmetatable({3, nil, 1, nil, 4}, {__newindex = function(t, k, v) counted = counted + 1 rawset(t, k, v) end})
+table.sort(c, function(a, b) return (a or 100) < (b or 100) end)
+local x = setmetatable({3, 1, 2}, {__len = function() return 5 end})
+table.sort(x, function(a, b) setmetatable(x, nil) return (a or 0) < (b or 0) end)
+local u = {3, nil, 1}
+table.sort(u, function(a, b) return (a or 100) < (b or 100) end)
+local v = {"b", "a", "d", "c"}
+table.sort(v)
+return reads > 0, all(t, 8), writes, all(w, 5), counted, all(c, 5), all(x, 5), #u, all(u, 3), table.concat(v)
+--== unpack from the array part and past it
+local t = {1, 2, nil, 4}
+local m = setmetatable({1, nil, 3}, {__index = function(_, k) return k * 10 end})
+local h = {[1] = "a", [2] = "b", x = 1}
+local function all(...) local o = {} for i = 1, select("#", ...) do o[i] = tostring((select(i, ...))) end return table.concat(o, ",") end
+return all(table.unpack(t)), all(table.unpack(t, 2, 6)), all(table.unpack(m, 1, 4)), all(table.unpack(h)),
+  all(table.unpack({}, 1, 2)), all(table.unpack({1, 2, 3}, -1, 1)), all(table.unpack({1, 2, 3}, 3, 2))

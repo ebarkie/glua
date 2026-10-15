@@ -2,6 +2,7 @@ package glua
 
 import (
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -320,13 +321,20 @@ func tabUnpack(c *Call) error {
 	if n >= 1<<20 { // the register stack's fixed cap
 		return c.libErrorf("too many results to unpack")
 	}
-	vals := make([]Value, 0, n+1)
+	c.res = slices.Grow(c.res, int(n+1)) // the results, built where ReturnValues would copy them
+	// a plain table's array part, read directly: it runs no Lua as it is unpacked, so it stays so
+	var arr []Value
+	if t.isObj(kindTable) && (*Table)(t.p).meta == nil {
+		arr = (*Table)(t.p).arr
+	}
 	for k := i; ; k++ {
-		v, err := c.index(t, Int(k))
-		if err != nil {
+		var v Value
+		if uint64(k-1) < uint64(len(arr)) {
+			v = arr[k-1]
+		} else if v, err = c.index(t, Int(k)); err != nil {
 			return err
 		}
-		vals = append(vals, v)
+		c.res = append(c.res, v)
 		if err := c.tickEvery(k); err != nil {
 			return err
 		}
@@ -334,7 +342,7 @@ func tabUnpack(c *Call) error {
 			break
 		}
 	}
-	return c.ReturnValues(vals...)
+	return nil
 }
 
 // table.sort: C Lua's quicksort, so that invalid order functions are detected the same way.
@@ -342,6 +350,7 @@ func tabUnpack(c *Call) error {
 type sorter struct {
 	c    *Call
 	t    Value
+	tab  *Table // t, when it is a table: get and set reach its array part directly while it is plain
 	comp Value
 	err  error
 }
@@ -349,6 +358,10 @@ type sorter struct {
 func (s *sorter) get(i int64) Value {
 	if s.err != nil {
 		return Value{}
+	}
+	// the order function may change the table, so whether it is plain is asked each time
+	if t := s.tab; t != nil && t.meta == nil && uint64(i-1) < uint64(len(t.arr)) {
+		return t.arr[i-1]
 	}
 	v, err := s.c.index(s.t, Int(i))
 	if err != nil {
@@ -358,9 +371,14 @@ func (s *sorter) get(i int64) Value {
 }
 
 func (s *sorter) set(i int64, v Value) {
-	if s.err == nil {
-		s.err = s.c.setIndex(s.t, Int(i), v)
+	if s.err != nil {
+		return
 	}
+	if t := s.tab; t != nil && t.meta == nil && t.flags&tabFrozen == 0 && uint64(i-1) < uint64(len(t.arr)) {
+		t.arr[i-1] = v // as SETTABLE's inline store does
+		return
+	}
+	s.err = s.c.setIndex(s.t, Int(i), v)
 }
 
 // less is a < b with the order function, or the < operator. Each comparison charges a step.
@@ -495,6 +513,9 @@ func tabSort(c *Call) error {
 			return c.typeArgError(1, "sort", "function")
 		}
 		s := &sorter{c: c, t: t, comp: comp}
+		if t.isObj(kindTable) {
+			s.tab = (*Table)(t.p)
+		}
 		s.sort(1, n)
 		if s.err != nil {
 			return s.err
