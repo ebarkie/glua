@@ -3,6 +3,7 @@ package glua
 import (
 	"math"
 	"strings"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -95,7 +96,19 @@ func (ex *executor) slowOp() error {
 	case opGetGlobal:
 		return ex.index(op, envValue(st.cl), p.k[decBx(i)], a)
 	case opSetGlobal:
-		return ex.newindex(op, envValue(st.cl), p.k[decBx(i)], *ex.reg(a))
+		key, val := &p.k[decBx(i)], ex.reg(a)
+		if t := st.cl.env; t != nil && t.flags&tabFrozen == 0 && ex.assignableName(key) {
+			// a name found not reserved before, in a guarded environment: what newindex would do
+			// for a key already there, a nil store included, which only marks it deleted
+			if slot := int(atomic.LoadUint32(&p.hints[ex.aux()]) & hintSlotMask); slot < len(t.nodes) {
+				if nd := &t.nodes[slot]; same(&nd.k, key) && nd.v.p != nil {
+					setValue(&nd.v, val)
+					ex.skipAux(op)
+					return nil
+				}
+			}
+		}
+		return ex.newindex(op, envValue(st.cl), *key, *val)
 	case opGetEnv:
 		*ex.reg(a) = envValue(st.cl)
 	case opGetTable:
@@ -546,6 +559,16 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 	return ex.errorf("'__index' chain too long; possibly a loop")
 }
 
+// assignableName reports whether newindex found the global name key not reserved.
+func (ex *executor) assignableName(key *Value) bool {
+	for i := range ex.assignable {
+		if same(&ex.assignable[i], key) {
+			return true
+		}
+	}
+	return false
+}
+
 // newindex does obj[key] = val for the instruction op, with __newindex.
 func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 	for hops := 0; hops < maxIndexHops; hops++ {
@@ -580,9 +603,20 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 				return err
 			}
 			if (op == opSetField || op == opSetFieldK || op == opSetGlobal) && hops == 0 && k.isString() {
-				// learn where the key lives, so the next write at this site is inline
-				if idx := t.findNode(&k, hashValue(k)); idx >= 0 {
-					learn(&ex.st.cl.p.hints[ex.aux()], idx)
+				// learn where the key lives, so the next write at this site is inline. A guarded
+				// SETGLOBAL comes here whatever its hint, so one that holds the slot is no miss
+				h := hashValue(k)
+				if idx := t.findNode(&k, h); idx >= 0 {
+					hint := &ex.st.cl.p.hints[ex.aux()]
+					if op != opSetGlobal || int(atomic.LoadUint32(hint)&hintSlotMask) != idx {
+						learn(hint, idx)
+					}
+				}
+				// not reserved, as asked above, for a guarded table only: an unguarded one was not
+				// asked. A "__" name is left out, since writing it clears the caches of a metatable
+				if op == opSetGlobal && t.flags&tabGuarded != 0 && !(k.n&lenMask >= 2 && *(*uint16)(k.p) == 0x5f5f) && !ex.assignableName(&k) {
+					ex.assignable[ex.nextAssignable%len(ex.assignable)] = k
+					ex.nextAssignable++
 				}
 			}
 			ex.skipAux(op)

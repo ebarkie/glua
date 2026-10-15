@@ -234,6 +234,77 @@ func TestGlobalsAndModules(t *testing.T) {
 	}
 }
 
+// A name assigned in a guarded environment is assigned again without asking whether it is
+// reserved; a reserved name stays refused, a frozen environment frozen, and a "__" name
+// still clears the caches of a metatable.
+func TestGlobalWrites(t *testing.T) {
+	res, err := runInEnv(t, MustNew(), `
+		local s = 0
+		for i = 1, 3 do
+			g1 = i g2 = i g3 = i g4 = i g5 = i g6 = i g7 = i g8 = i g9 = i g10 = i g11 = i g12 = i
+			s = s + g1 + g12
+		end
+		local ok, e = pcall(function() for i = 1, 3 do x = i print = i end end)
+		for i = 1, 3 do y = i end
+		y = nil
+		local t, v = setmetatable({}, _G), ""
+		for i = 1, 3 do __index = {v = i} v = v .. t.v end
+		return s, g7, ok, e, x, y, v`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := joinValues(res); got != "12\t3\tfalse\ttest:7: attempt to assign to reserved name 'print'\t1\tnil\t123" {
+		t.Errorf("got %q", got)
+	}
+	s := mustLoad(t, MustNew(), "function f(v) x = v end f(1) f(2)")
+	f, _ := s.Func1[int64, struct{}]("f")
+	if _, err := f(context.Background(), 3); err == nil || !strings.Contains(err.Error(), "attempt to modify a frozen table") {
+		t.Errorf("a frozen environment: %v", err)
+	}
+	// a name assigned before and deleted since is new again: __newindex sees it
+	res, err = runInEnv(t, MustNew(), `
+		local function set(v) x = v end
+		set(1) set(2)
+		x = nil
+		setmetatable(_ENV, {__newindex = function(t, k, v) rawset(t, k, v * 10) end})
+		set(3)
+		return x`)
+	if err != nil || joinValues(res) != "30" {
+		t.Errorf("a deleted global: %v, %v", joinValues(res), err)
+	}
+	// more names than the cache holds cost slow writes, never their sites' hints
+	p0, info0, err := compileChunk("test", "for i = 1, 6 do a1 = i a2 = i a3 = i a4 = i a5 = i a6 = i a7 = i a8 = i a9 = i a10 = i a11 = i a12 = i end")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt0 := MustNew()
+	ex0 := rt0.pool.Get().(*executor)
+	ex0.setLimits(&rt0.run)
+	if _, err := runClosure(context.Background(), ex0, newMainClosure(p0, info0, rt0.newEnv(newEnvLoader(rt0)))); err != nil {
+		t.Fatal(err)
+	}
+	release(&rt0.pool, ex0)
+	for i, h := range p0.hints {
+		if h == megamorphic {
+			t.Errorf("site %d gave up its hint", i)
+		}
+	}
+	// one compiled chunk under two Runtimes: what one may assign, the other may still reserve
+	p, info, err := compileChunk("test", "for i = 1, 3 do print = i end")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rt := range []*Runtime{MustNew(Without("print")), MustNew()} {
+		ex := rt.pool.Get().(*executor)
+		ex.setLimits(&rt.run)
+		_, err := runClosure(context.Background(), ex, newMainClosure(p, info, rt.newEnv(newEnvLoader(rt))))
+		release(&rt.pool, ex)
+		if rt.reserved["print"] != (err != nil) {
+			t.Errorf("print reserved %v: %v", rt.reserved["print"], err)
+		}
+	}
+}
+
 func TestLoader(t *testing.T) {
 	var asked []string
 	errNoFile := errors.New("no such file")

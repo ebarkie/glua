@@ -121,6 +121,12 @@ type executor struct {
 
 	// what the entry used before its last Renew, which CallStats adds to what it used since
 	renewedSteps, renewedAlloc int64
+
+	// assignable holds the last global names newindex found the Runtime does not reserve, so
+	// that assigning them again in a guarded environment need not ask; nextAssignable is the
+	// slot the next one takes
+	assignable     [8]Value
+	nextAssignable int
 }
 
 // write sends text from print or warn to the output.
