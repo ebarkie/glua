@@ -51,12 +51,14 @@ a library function with hidden state (a `gmatch` iterator, a `coroutine.wrap` fu
 Names defined by the libraries and by the host (`print`, `string`, a host global `upper`, a
 host module `kv`) cannot be assigned, by any route: `string = nil`, `_G.print = f` and
 `rawset(_G, "kv", 1)` all raise `attempt to assign to reserved name`. A local of the same
-name is fine. `_G`, `package`, `require` and `load` are reserved too.
+name is fine. `_G` is reserved too, and so are `package`, `require` and `load` when their
+libraries are open. A name the host leaves out with `Without` is not reserved.
 
 ## Libraries
 
 The host chooses the libraries. The default set is the base library, `string`, `table`,
-`math` and `utf8`.
+`math` and `utf8`. `Without` leaves out single names, such as `collectgarbage` or
+`string.rep`, and the host may define its own global under a global left out.
 
 | Library | In glua |
 | --- | --- |

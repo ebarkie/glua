@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ type Runtime struct {
 	loader  func(name string) (string, error)
 
 	reserved map[string]bool // names a script cannot assign
+	without  map[string]bool // the names Without left out of each environment
 	strMeta  *Table          // the metatable all strings share
 	out      writeFunc       // nil discards
 	randSeed *uint64
@@ -120,6 +122,7 @@ type options struct {
 	modules  []namedValue
 	sources  []namedValue
 	loader   func(string) (string, error)
+	without  []string
 	output   writeFunc
 	randSeed *uint64
 	clock    func() time.Time
@@ -164,6 +167,16 @@ func SourceModule(name, src string) Option {
 // only while a script loads.
 func Loader(find func(name string) (src string, err error)) Option {
 	return optionFunc(func(o *options) { o.loader = find })
+}
+
+// Without leaves out names the libraries define: globals such as "collectgarbage" or
+// "require", or library members such as "string.rep". A global left out is free, so the
+// host may define its own under it with Global or Module, and a script may assign it. Strings'
+// methods are the string library's, so leaving out "string.rep" takes s:rep too, while
+// leaving out "string" takes only the global. Naming something the libraries do not define
+// is an error from New.
+func Without(names ...string) Option {
+	return optionFunc(func(o *options) { o.without = append(o.without, names...) })
 }
 
 // Output is where print and warn write; the default discards. Writes are serialised, so w
@@ -237,6 +250,7 @@ func New(opts ...Option) (*Runtime, error) {
 		hardened: o.hardened,
 		checked:  defaultChecked || o.hardened,
 		reserved: map[string]bool{},
+		without:  map[string]bool{},
 		sources:  map[string]*sourceModule{},
 	}
 	if o.libsSet {
@@ -382,11 +396,16 @@ func (rt *Runtime) buildLayer(o *options) error {
 		g.Set(String("coroutine"), tableValue(coroutineLib()))
 	}
 	g.Set(String("_G"), Value{}) // per environment
+	if err := rt.leaveOut(g, o.without); err != nil {
+		return err
+	}
 	for k := range g.All() {
 		rt.reserved[k.str()] = true
 	}
 	for _, name := range []string{"_G", "package", "require", "load"} {
-		rt.reserved[name] = true
+		if rt.envName(name) && !rt.without[name] {
+			rt.reserved[name] = true
+		}
 	}
 	define := func(name string, v Value) error {
 		if v.n>>56 == kindUser && !isScalar(v.p) {
@@ -440,6 +459,9 @@ func (rt *Runtime) buildLayer(o *options) error {
 	fr := newFreezer()
 	fr.plans, fr.intern = rt.plans(), true
 	fr.add(tableValue(g), "globals")
+	if rt.strMeta != nil {
+		fr.add(tableValue(rt.strMeta), "the string metatable") // its library, even when Without left out the global
+	}
 	if err := fr.walk(); err != nil {
 		return &BindError{Reason: err.Error()}
 	}
@@ -447,11 +469,54 @@ func (rt *Runtime) buildLayer(o *options) error {
 	if err := freezeValue(tableValue(rt.modules), "package.loaded"); err != nil { // the modules are frozen already
 		return &BindError{Reason: err.Error()}
 	}
-	if rt.strMeta != nil {
-		rt.strMeta.freeze()
-	}
 	rt.layer = g
 	return nil
+}
+
+// leaveOut removes the names given to Without from the libraries in g. Every name is found
+// before any is removed, so their order does not matter. The names newEnv gives each
+// environment are recorded in rt.without for newEnv to leave out.
+func (rt *Runtime) leaveOut(g *Table, names []string) error {
+	type member struct {
+		t   *Table
+		key Value
+	}
+	var drop []member
+	for _, name := range names {
+		if rt.envName(name) {
+			rt.without[name] = true
+			continue
+		}
+		t, key := g, name
+		if lib, k, ok := strings.Cut(name, "."); ok {
+			t, key = nil, k
+			if v := g.Get(String(lib)); v.isObj(kindTable) {
+				t = (*Table)(v.p)
+			}
+		}
+		if t == nil || t.Get(String(key)).IsNil() {
+			return &BindError{Name: name, Reason: "the libraries define no such name"}
+		}
+		drop = append(drop, member{t, String(key)})
+	}
+	for _, m := range drop {
+		m.t.Set(m.key, Value{})
+	}
+	return nil
+}
+
+// envName reports whether name is one of the globals newEnv gives each environment rather
+// than the layer: _G, and package, require and load when their libraries are open.
+func (rt *Runtime) envName(name string) bool {
+	switch name {
+	case "_G":
+		return true
+	case "package", "require":
+		return rt.libs&LibBase != 0
+	case "load":
+		return rt.libs&LibLoad != 0
+	}
+	return false
 }
 
 // compileModule compiles the source of a module.
@@ -557,22 +622,29 @@ func hostValue(name string, v any) (Value, error) {
 	return val, nil
 }
 
-// newEnv builds the globals table of a new environment: the Runtime's layer, plus _G,
-// package, require and, with LibLoad, load, which belong to the environment.
+// newEnv builds the globals table of a new environment: the Runtime's layer, plus what
+// belongs to the environment, but for what Without left out: _G; package and require with
+// LibBase; load with LibLoad.
 func (rt *Runtime) newEnv(ld *envLoader) *Table {
 	env := NewTable(0, rt.layer.used+8)
 	for k, v := range rt.layer.All() {
 		env.set(k, v)
 	}
-	env.set(String("_G"), tableValue(env))
-	if rt.libs&LibLoad != 0 {
+	if !rt.without["_G"] {
+		env.set(String("_G"), tableValue(env))
+	}
+	if rt.libs&LibLoad != 0 && !rt.without["load"] {
 		env.set(String("load"), goFnValue(&goFunc{name: "load", f: func(c *Call) error { return baseLoad(c, env) }}))
 	}
 	if rt.libs&LibBase != 0 {
-		pkg := NewTable(0, 2)
-		pkg.set(String("loaded"), tableValue(ld.loaded))
-		env.set(String("package"), tableValue(pkg))
-		env.set(String("require"), goFnValue(&goFunc{name: "require", f: ld.require}))
+		if !rt.without["package"] {
+			pkg := NewTable(0, 2)
+			pkg.set(String("loaded"), tableValue(ld.loaded))
+			env.set(String("package"), tableValue(pkg))
+		}
+		if !rt.without["require"] {
+			env.set(String("require"), goFnValue(&goFunc{name: "require", f: ld.require}))
+		}
 	}
 	if rt.strict {
 		mt := NewTable(0, 1)

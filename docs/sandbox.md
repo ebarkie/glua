@@ -29,7 +29,8 @@ passes in, or timing side channels.
 | Limits | Defaults; `NoLimit` allowed | Defaults; `NoLimit` refused |
 
 `LibSafe` is the base library, `string`, `table`, `math` and `utf8`. The `io` library gives a
-script the file system, and is meant for trusted scripts only.
+script the file system, and is meant for trusted scripts only. `Without` trims single names
+from what the libraries give, such as `string.rep` or `collectgarbage`.
 
 ## Limits
 
