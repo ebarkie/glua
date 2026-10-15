@@ -55,6 +55,22 @@ jobs:
       - name: Test with the stack moving at every growth check
         run: go test -tags lua_stackstress ./...
 
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Fuzz each target for a minute
+        run: |
+          for t in FuzzCompile FuzzRun FuzzVerifiedCode FuzzPatterns; do
+            go test -run '^$' -fuzz "^$t\$" -fuzztime 1m . || exit 1
+          done
+          go test -run '^$' -fuzz '^FuzzParser$' -fuzztime 1m ./internal/syntax
+          go test -run '^$' -fuzz '^FuzzLexer$' -fuzztime 1m ./internal/syntax
+
   cross:
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
