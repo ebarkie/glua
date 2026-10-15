@@ -39,6 +39,7 @@ of continuous fuzzing; until then every Runtime runs the bounds-checked loop.
 - [The language](docs/language.md): how glua differs from Lua 5.4, and which libraries it has.
 - [Sandbox and limits](docs/sandbox.md): what a script can and cannot do, the limits and the
   fixed caps.
+- [GopherLua and glua side by side](docs/gopherlua.md): how common tasks look in each.
 - Benchmark results by milestone are in [bench](bench).
 
 ## License
