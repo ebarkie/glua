@@ -109,8 +109,7 @@ assert(string.rep('teste', 0) == '')
 assert(string.rep('tés\00tê', 2) == 'tés\0têtés\000tê')
 assert(string.rep('', 10) == '')
 
--- glua: no string.packsize until string.pack lands; a C int is 4 bytes
-if true then -- string.packsize("i") == 4
+if string.packsize("i") == 4 then
   -- result length would be 2^31 (int overflow)
   checkerror("too large", string.rep, 'aa', (1 << 30))
   checkerror("too large", string.rep, 'a', (1 << 30), ',')
