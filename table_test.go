@@ -204,3 +204,46 @@ func TestMetamethodCache(t *testing.T) {
 		t.Fatal("reading a frozen metatable wrote its flags")
 	}
 }
+
+// TestStringKeyLookup exercises the interpreter loop's inline lookup of short string keys:
+// lengths around its 16-byte limit, keys equal to a table's key behind another pointer,
+// keys of the same length that differ, deleted keys and __index, on both loops.
+func TestStringKeyLookup(t *testing.T) {
+	src := `
+		local keys, t = {}, {}
+		for n = 0, 20 do
+			local k = string.rep("k", n)
+			keys[#keys + 1] = k
+			t[k] = n
+			local other = string.rep("j", n) -- the same length, another string
+			assert(t[other] == nil or n == 0)
+		end
+		for _, k in ipairs(keys) do
+			local again = string.sub(k .. "!", 1, #k) -- equal, behind another pointer
+			assert(t[k] == #k, k)
+			assert(t[again] == #k, again)
+		end
+		local seen = 0
+		for i = 1, 200 do -- same-length keys that collide in a small table
+			local s = {["ab" .. i % 10] = i}
+			if s["ab" .. i % 10] == i and s["xy" .. i % 10] == nil then seen = seen + 1 end
+		end
+		assert(seen == 200)
+		local base = {gone = "from __index", miss = "from __index too"}
+		local d = setmetatable({gone = 1}, {__index = base})
+		local key = "gone"
+		assert(d[key] == 1)
+		d.gone = nil -- a deleted key must consult __index
+		assert(d[key] == "from __index")
+		local m = "miss"
+		assert(d[m] == "from __index too")
+		local plain = {}
+		assert(plain[key] == nil)
+		return "ok"`
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(withLoop(checked)), src)
+		if err != nil || len(res) != 1 || res[0].String() != "ok" {
+			t.Errorf("checked=%v: %v %v", checked, res, err)
+		}
+	}
+}

@@ -505,6 +505,41 @@ dispatch:
 				idx = uint64(uint8(i>>24)) - 1
 			} else if key := &regs[uint8(i>>24)]; key.p == tInt() {
 				idx = key.n - 1
+			} else if key.n>>56 == kindString && !isScalar(key.p) && key.n&lenMask <= 16 && obj.n == kindTable<<56 && !isScalar(obj.p) {
+				// a short string key: hash it and probe inline, as hashString and keyEq would
+				t, n := (*Table)(obj.p), key.n&lenMask
+				if len(t.nodes) > 0 {
+					w1, w2 := strWords(key.p, n)
+					h, mask := hashShort(w1, w2, n), uint64(len(t.nodes)-1)
+					for j := uint64(0); j < 8; j++ {
+						nd := &t.nodes[(h+j)&mask]
+						if nd.k.n == key.n && !isScalar(nd.k.p) { // a string of the same length
+							if nd.k.p != key.p {
+								if key.n&lenMask != 0 && *(*byte)(nd.k.p) != *(*byte)(key.p) {
+									continue // another string: they differ in the first byte
+								}
+								break // perhaps the same string behind another pointer: the driver decides
+							}
+							if nd.v.p == nil && t.meta != nil {
+								break // a deleted key: __index decides
+							}
+							setValue(&regs[uint8(*(*uint32)(unsafe.Add(pc, -4))>>8)], &nd.v) // i reloaded: keeping it live spills it in the head
+							continue dispatch
+						}
+						if nd.k.p == nil {
+							if t.meta != nil {
+								break
+							}
+							regs[uint8(*(*uint32)(unsafe.Add(pc, -4))>>8)] = Value{}
+							continue dispatch
+						}
+					}
+				} else if t.meta == nil {
+					regs[uint8(*(*uint32)(unsafe.Add(pc, -4))>>8)] = Value{}
+					continue
+				}
+				e = exSlowOp // a long probe, or __index
+				break dispatch
 			} else {
 				e = exSlowOp
 				break dispatch

@@ -2,9 +2,10 @@
 # Opcodes not listed must have none. Written by go run ./bench/asmgate -update.
 amd64-v1 head 1
 amd64-v1 opGetField 6
-amd64-v1 opJmp 1
+amd64-v1 opGetTable,opGetIndex 2
+amd64-v1 opJmp 3
 amd64-v1 opSelf 1
-amd64-v3 head 1
+amd64-v3 head 2
 amd64-v3 opGetField 8
-amd64-v3 opGetTable,opGetIndex 1
+amd64-v3 opGetTable,opGetIndex 5
 amd64-v3 opSelf 1
