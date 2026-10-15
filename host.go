@@ -118,6 +118,17 @@ func (c *Call) ReturnValues(vs ...Value) error {
 	return nil
 }
 
+// Charge counts work a host function does for the script against the entry's budgets: n
+// bytes against AllocBytes and a step per 64 of them, as library functions charge for
+// what they make. Call it before allocating. Running out is a terminal error, which the
+// function should return.
+func (c *Call) Charge(n int) error {
+	if n < 0 {
+		return nil
+	}
+	return c.ex.produce(n)
+}
+
 // Errorf returns an error with a formatted message, for a host function to return.
 func (c *Call) Errorf(format string, args ...any) error {
 	return fmt.Errorf(format, args...)
