@@ -83,3 +83,22 @@ r[#r + 1] = tostring(seen)
 local g = setmetatable({}, {__concat = setmetatable({}, {__call = gofirst})})
 r[#r + 1] = type(g .. "x")
 return table.unpack(r)
+--== assigning __index in an environment that serves as a metatable
+local A, B = {x = "A"}, {x = "B"}
+local env = setmetatable({}, {__index = _G})
+local f = load([[
+  local A, B = ...
+  local o = setmetatable({}, _ENV)
+  local p = setmetatable({}, {__index = o})
+  local r = {}
+  for i = 1, 4 do
+    __index = (i % 2 == 1) and A or B
+    r[#r + 1] = o.x .. p.x
+  end
+  for i = 1, 4 do
+    __index = (i % 2 == 0) and A or nil
+    r[#r + 1] = tostring(o.x)
+  end
+  return table.concat(r, " ")
+]], "env", "t", env)
+return f(A, B)

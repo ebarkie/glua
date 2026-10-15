@@ -393,7 +393,8 @@ dispatch:
 						pc++
 						continue
 					}
-					if t.flags&(tabFrozen|tabGuarded) == 0 && regs[uint8(i>>8)].p != nil { // a nil store may shrink: the driver
+					// a nil store may shrink, and a "__" name clears a metatable's caches: the driver
+					if t.flags&(tabFrozen|tabGuarded) == 0 && regs[uint8(i>>8)].p != nil && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
 						setValue(&nd.v, &regs[uint8(i>>8)])
 						pc++
 						continue
