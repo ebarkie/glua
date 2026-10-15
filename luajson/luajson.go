@@ -8,9 +8,8 @@
 // than 64 deep, and tables that contain themselves, are errors.
 //
 // Decoding gives tables, strings, booleans and numbers: an integer for a number written
-// without a fraction or exponent that fits in 64 bits, a float otherwise; -0 is the float -0.0,
-// as only a float keeps its sign. A JSON null is nil, so a null in an array leaves a hole and a
-// null member is absent.
+// without a fraction or exponent that fits in 64 bits, a float otherwise. A JSON null is nil,
+// so a null in an array leaves a hole and a null member is absent.
 package luajson
 
 import (
@@ -217,7 +216,7 @@ func (d *decoder) value(depth int) (lua.Value, error) {
 		return lua.String(s), nil
 	case '0':
 		raw := tok.String()
-		if !strings.ContainsAny(raw, ".eE") && raw != "-0" {
+		if !strings.ContainsAny(raw, ".eE") {
 			if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
 				return lua.Int(i), nil
 			}
