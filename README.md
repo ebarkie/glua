@@ -40,7 +40,8 @@ of continuous fuzzing; until then every Runtime runs the bounds-checked loop.
 - [Sandbox and limits](docs/sandbox.md): what a script can and cannot do, the limits and the
   fixed caps.
 - [GopherLua and glua side by side](docs/gopherlua.md): how common tasks look in each.
-- Benchmark results by milestone are in [bench](bench).
+- [Benchmarks](docs/benchmarks.md): small scripts in C Lua, glua and other Lua implementations
+  for Go. Results by milestone are in [bench](bench).
 
 ## License
 
