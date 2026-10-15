@@ -6,6 +6,14 @@ A pure-Go Lua 5.4 for embedding small scripts in Go programs: rules, policies, h
 configuration. Scripts are loaded once, frozen, and then called from any goroutine as typed Go
 functions, under limits on steps, memory and nesting.
 
+## Goals
+
+- **Easy to use.** A small, modern Go API: generics for typed calls, `context.Context` for
+  cancellation, plain Go values in and out. Pure Go with no cgo, so it cross-compiles and
+  builds anywhere Go does.
+- **Performant.** A register VM tuned for the hot paths of embedded scripts, measured against
+  C Lua and other Go implementations (see [Performance](#performance)).
+
 ## Examples
 
 ```go

@@ -104,6 +104,18 @@ func TestDecode(t *testing.T) {
 	}
 }
 
+func TestDecodeNegativeZero(t *testing.T) {
+	v, err := eval(t, `
+		local z, nz = json.decode('0'), json.decode('-0')
+		return string.format("%s %s %s %s", math.type(z), math.type(nz), 1/nz, json.encode(nz))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustStr(v); got != "integer float -inf -0" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	in := `{"cfg":{"hosts":["a","b"],"port":8080,"ratio":0.25,"tls":true},"name":"svc"}`
 	v, err := luajson.Unmarshal([]byte(in))
