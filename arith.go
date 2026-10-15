@@ -126,7 +126,8 @@ var zero float64
 // luaPow is C Lua's luai_numpow: x*x for an exponent of 2, else C's pow. A NaN operand
 // passes through, and an invalid operation gives the hardware's NaN; the sign of a NaN from
 // pow differs between C libraries anyway. Powers of two are computed exactly, as a correctly
-// rounded pow does; math.Pow is not correctly rounded and can be off in the last bit elsewhere.
+// rounded pow does, and finite operands go through powPos, which is far closer to C's pow
+// than math.Pow.
 func luaPow(x, y float64) float64 {
 	switch {
 	case y == 2:
@@ -141,6 +142,18 @@ func luaPow(x, y float64) float64 {
 	if frac, exp := math.Frexp(x); frac == 0.5 && x > 0 {
 		if e := float64(exp-1) * y; e == math.Trunc(e) && e >= -1074 && e <= 1023 {
 			return math.Ldexp(1, int(e))
+		}
+	}
+	if !math.IsInf(x, 0) && !math.IsInf(y, 0) && x != 0 {
+		switch {
+		case x > 0:
+			return powPos(x, y)
+		case y == math.Trunc(y): // a negative base: the sign comes from the exponent's parity
+			r := powPos(-x, y)
+			if math.Mod(y, 2) != 0 {
+				r = -r
+			}
+			return r
 		}
 	}
 	r := math.Pow(x, y)
