@@ -169,7 +169,8 @@ func Loader(find func(name string) (src string, err error)) Option {
 // need not be safe for concurrent use.
 func Output(w io.Writer) Option { return optionFunc(func(o *options) { o.output = w }) }
 
-// RandSeed seeds math.random at the start of every entry, for reproducible runs.
+// RandSeed seeds math.random at the start of every entry, for reproducible runs. It also
+// makes math.randomseed() without arguments reproducible: it takes its seed from the generator.
 func RandSeed(seed uint64) Option { return optionFunc(func(o *options) { o.randSeed = &seed }) }
 
 // Clock is the time source of the os library.

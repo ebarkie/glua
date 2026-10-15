@@ -314,9 +314,12 @@ func mathRandom(c *Call) error {
 func mathRandomseed(c *Call) error {
 	s := c.ex.randState()
 	var n1, n2 uint64
-	if c.Len() == 0 {
+	switch {
+	case c.Len() == 0 && c.ex.randSeed != nil:
+		n1, n2 = xoshiroNext(s), xoshiroNext(s) // under RandSeed, still reproducible
+	case c.Len() == 0:
 		n1, n2 = rand.Uint64(), rand.Uint64()
-	} else {
+	default:
 		v, err := c.checkInt(0, "randomseed")
 		if err != nil {
 			return err

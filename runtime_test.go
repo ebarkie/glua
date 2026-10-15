@@ -225,8 +225,8 @@ func TestOutput(t *testing.T) {
 
 func TestRandSeed(t *testing.T) {
 	rt := MustNew(RandSeed(7))
-	a, _ := runInEnv(t, rt, "return math.random(1, 1000000), math.random()")
-	b, _ := runInEnv(t, rt, "return math.random(1, 1000000), math.random()")
+	a, _ := runInEnv(t, rt, "math.randomseed() return math.random(1, 1000000), math.random(), math.randomseed()")
+	b, _ := runInEnv(t, rt, "math.randomseed() return math.random(1, 1000000), math.random(), math.randomseed()")
 	if joinValues(a) != joinValues(b) {
 		t.Errorf("RandSeed: %s and %s differ", joinValues(a), joinValues(b))
 	}

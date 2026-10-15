@@ -1,0 +1,2 @@
+go test fuzz v1
+string("math.random(1)math.random()math.random(\nmath.randomseed())mathrandom(1)")
