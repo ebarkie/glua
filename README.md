@@ -1,5 +1,7 @@
 # glua
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/folbricht/glua.svg)](https://pkg.go.dev/github.com/folbricht/glua)
+
 A pure-Go Lua 5.4 for embedding small scripts in Go programs: rules, policies, handlers and
 configuration. Scripts are loaded once, frozen, and then called from any goroutine as typed Go
 functions, under limits on steps, memory and nesting.
@@ -103,6 +105,8 @@ of continuous fuzzing; until then every Runtime runs the bounds-checked loop.
 
 - [Package documentation](https://pkg.go.dev/github.com/folbricht/glua): the API, with runnable
   examples.
+- [luajson](https://pkg.go.dev/github.com/folbricht/glua/luajson): converting between Lua
+  values and JSON, and a `json` module for scripts.
 - [The language](docs/language.md): how glua differs from Lua 5.4, and which libraries it has.
 - [Sandbox and limits](docs/sandbox.md): what a script can and cannot do, the limits and the
   fixed caps.
