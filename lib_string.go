@@ -295,7 +295,7 @@ func strGmatch(c *Call) error {
 				return ms.err
 			}
 		}
-		return c.ReturnValues(Value{})
+		return c.ReturnValues() // no match: no results, as C Lua's gmatch_aux returns 0
 	}
 	return c.ReturnValues(goFnValue(it))
 }
