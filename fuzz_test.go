@@ -77,7 +77,7 @@ func fuzzOutcome(t *testing.T, src string, checked bool) string {
 		case KindTable, KindFunction, KindThread, KindUserdata:
 			parts = append(parts, v.Kind().String())
 		default:
-			parts = append(parts, v.String())
+			parts = append(parts, addrs.ReplaceAllString(v.String(), "0x"))
 		}
 	}
 	return strings.Join(parts, "\t")
