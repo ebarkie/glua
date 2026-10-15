@@ -83,3 +83,14 @@ r[#r + 1] = tostring(seen)
 local g = setmetatable({}, {__concat = setmetatable({}, {__call = gofirst})})
 r[#r + 1] = type(g .. "x")
 return table.unpack(r)
+--== __index and __newindex chains that loop
+local L = {}
+L.__index = L
+L.__newindex = L
+setmetatable(L, L)
+local o = setmetatable({}, L)
+local ok1, e1 = pcall(function() return o.nothing end)
+local ok2, e2 = pcall(function() o.nothing = 1 end)
+local ok3, e3 = pcall(table.unpack, setmetatable({}, {__index = L}), 1, 1)
+local ok4, e4 = pcall(table.insert, setmetatable({}, {__newindex = L}), 1)
+return ok1, e1, ok2, e2, ok3, e3, ok4, e4

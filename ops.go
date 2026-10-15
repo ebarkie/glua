@@ -543,7 +543,7 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 			return ex.errorf("attempt to index a %s value ('__index')", typeName(obj))
 		}
 	}
-	return ex.errorf("'__index' chain too long; possibly a loop")
+	return ex.errorf("'__index' chain too long; possible loop")
 }
 
 // newindex does obj[key] = val for the instruction op, with __newindex.
@@ -600,7 +600,7 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			return ex.errorf("attempt to index a %s value ('__newindex')", typeName(obj))
 		}
 	}
-	return ex.errorf("'__newindex' chain too long; possibly a loop")
+	return ex.errorf("'__newindex' chain too long; possible loop")
 }
 
 // metaCallee resolves the metamethod h of event to a function to call, as luaD_call does: a
@@ -617,7 +617,7 @@ func (ex *executor) metaCallee(event string, h Value, args []Value) (Value, []Va
 		args = append([]Value{h}, args...)
 		h = tm
 	}
-	return Value{}, nil, ex.errorf("'__call' chain too long; possibly a loop")
+	return Value{}, nil, ex.errorf("'__call' chain too long; possible loop")
 }
 
 // callMeta calls the metamethod h of event for the instruction at pc-1. A Lua handler runs in a

@@ -90,7 +90,8 @@ These hold even with `NoLimit`, because what they prevent would end the process.
 | Syntax nesting in the parser | 200 levels | `chunk has too many syntax levels` |
 | Depth of the syntax tree, chains such as `a.b.c` and `1+2+3` included | 2,000 | `chunk has too many syntax levels` |
 | Pattern matching recursion | 200 levels; 32 captures | `pattern too complex`, `too many captures` |
-| `__index`, `__newindex` and `__call` chains | 2,000 | `'__index' chain too long; possibly a loop` |
+| `__index` and `__newindex` chains | 2,000 | `'__index' chain too long; possible loop`, and the same for `__newindex` |
+| `__call` chains | 2,000 | `stack overflow`; `'__call' chain too long; possible loop` for a metamethod; `attempt to call a table value` from `pcall` |
 | Register stack | 1 million slots | `stack overflow` |
 | Lua frames with `CallDepth: NoLimit` | about 1 million | `stack overflow` |
 | Nesting of Go and Lua with `HostDepth: NoLimit` | 10,000 | `ErrHostDepth` |

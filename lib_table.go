@@ -41,7 +41,7 @@ func (c *Call) setIndex(obj, key, val Value) error {
 		}
 		obj = h
 	}
-	return c.libErrorf("'__newindex' chain too long; possibly a loop")
+	return c.libErrorf("'__newindex' chain too long; possible loop")
 }
 
 func (c *Call) rawSet(t *Table, key, val Value) error {

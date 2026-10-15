@@ -198,7 +198,7 @@ func (c *Call) index(obj, key Value) (Value, error) {
 		}
 		obj = h
 	}
-	return Value{}, c.libErrorf("'__index' chain too long; possibly a loop")
+	return Value{}, c.libErrorf("'__index' chain too long; possible loop")
 }
 
 // tostring converts v as Lua's tostring does: __tostring, then __name, then the default.
