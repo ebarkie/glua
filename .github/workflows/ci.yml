@@ -65,7 +65,7 @@ jobs:
           go-version-file: go.mod
       - name: Fuzz each target for a minute
         run: |
-          for t in FuzzCompile FuzzRun FuzzVerifiedCode FuzzPatterns; do
+          for t in FuzzCompile FuzzRun FuzzVerifiedCode FuzzPatterns FuzzConvert; do
             go test -run '^$' -fuzz "^$t\$" -fuzztime 1m . || exit 1
           done
           go test -run '^$' -fuzz '^FuzzParser$' -fuzztime 1m ./internal/syntax

@@ -302,10 +302,11 @@ func decodeReflect(v Value, rv reflect.Value, path string, depth int) error {
 		return nil
 	case durationType:
 		f, ok := v.Float()
-		if !ok || math.IsNaN(f) || math.Abs(f*1e9) >= 1<<63 {
-			return convError(path, v, t, "")
+		ns := math.Round(f * 1e9) // f*1e9 can land just below a whole number of nanoseconds
+		if !ok || math.IsNaN(f) || ns >= 1<<63 || ns < -(1<<63) {
+			return convError(path, v, t, "out of range")
 		}
-		rv.SetInt(int64(f * 1e9))
+		rv.SetInt(int64(ns))
 		return nil
 	case timeType:
 		var tm time.Time
@@ -316,9 +317,9 @@ func decodeReflect(v Value, rv reflect.Value, path string, depth int) error {
 			}
 		} else if i, ok := v.Int(); ok {
 			tm = time.Unix(i, 0)
-		} else if f, ok := v.Float(); ok && !math.IsNaN(f) && !math.IsInf(f, 0) {
+		} else if f, ok := v.Float(); ok && f >= -(1<<63) && f < 1<<63 { // NaN fails both
 			sec, frac := math.Modf(f)
-			tm = time.Unix(int64(sec), int64(frac*1e9))
+			tm = time.Unix(int64(sec), int64(math.Round(frac*1e9)))
 		} else {
 			return convError(path, v, t, "")
 		}
@@ -357,6 +358,9 @@ func decodeReflect(v Value, rv reflect.Value, path string, depth int) error {
 		f, ok := v.Float()
 		if !ok {
 			return convError(path, v, t, "")
+		}
+		if rv.OverflowFloat(f) && !math.IsInf(f, 0) {
+			return convError(path, v, t, fmt.Sprintf("%g is out of range", f))
 		}
 		rv.SetFloat(f)
 	case reflect.String:
