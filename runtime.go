@@ -1,6 +1,7 @@
 package glua
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +28,7 @@ type Runtime struct {
 
 	reserved map[string]bool // names a script cannot assign
 	strMeta  *Table          // the metatable all strings share
-	out      *syncWriter     // nil discards
+	out      writeFunc       // nil discards
 	randSeed *uint64
 	clock    func() time.Time
 	started  time.Time // when New ran, by the clock: os.clock counts from here
@@ -119,7 +120,7 @@ type options struct {
 	modules  []namedValue
 	sources  []namedValue
 	loader   func(string) (string, error)
-	output   io.Writer
+	output   writeFunc
 	randSeed *uint64
 	clock    func() time.Time
 	observe  func(CallStats)
@@ -166,8 +167,19 @@ func Loader(find func(name string) (src string, err error)) Option {
 }
 
 // Output is where print and warn write; the default discards. Writes are serialised, so w
-// need not be safe for concurrent use.
-func Output(w io.Writer) Option { return optionFunc(func(o *options) { o.output = w }) }
+// need not be safe for concurrent use. Of Output and OutputFunc, the last given wins.
+func Output(w io.Writer) Option {
+	return optionFunc(func(o *options) { o.output = writerOutput(w) })
+}
+
+// OutputFunc is Output for a host that needs to know which entry wrote: f receives what
+// Output's writer would, one call for each print, warn or io.write, with the entry's
+// context, so it can tag the text with the request or tenant behind it. Calls are not
+// serialised: f must be safe for concurrent use. An error it returns is raised in the
+// script, as a write error is.
+func OutputFunc(f func(ctx context.Context, s string) error) Option {
+	return optionFunc(func(o *options) { o.output = f })
+}
 
 // RandSeed seeds math.random at the start of every entry, for reproducible runs. It also
 // makes math.randomseed() without arguments reproducible: it takes its seed from the generator.
@@ -236,9 +248,7 @@ func New(opts ...Option) (*Runtime, error) {
 	if o.checked != nil && !o.hardened {
 		rt.checked = *o.checked
 	}
-	if o.output != nil {
-		rt.out = &syncWriter{w: o.output}
-	}
+	rt.out = o.output
 	if rt.clock == nil {
 		rt.clock = time.Now
 	}
@@ -467,9 +477,7 @@ func (rt *Runtime) newExecutor() *executor {
 	}
 	ex.randSeed = rt.randSeed
 	ex.checked = rt.checked
-	if rt.out != nil {
-		ex.output = rt.out
-	}
+	ex.output = rt.out
 	return ex
 }
 
@@ -479,17 +487,21 @@ func (ex *executor) setLimits(l *limits) {
 	ex.maxCallDepth, ex.maxHostDepth = l.callDepth, l.hostDepth
 }
 
-// syncWriter serialises writes to the Output writer.
-type syncWriter struct {
-	mu sync.Mutex
-	w  io.Writer
-}
+// writeFunc is where print and warn write: the Output writer or the OutputFunc function.
+type writeFunc func(ctx context.Context, s string) error
 
-// Write writes b to the underlying writer, one call at a time.
-func (s *syncWriter) Write(b []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.w.Write(b)
+// writerOutput is the output of an Output writer: one write at a time. A nil writer discards.
+func writerOutput(w io.Writer) writeFunc {
+	if w == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	return func(_ context.Context, s string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		_, err := io.WriteString(w, s)
+		return err
+	}
 }
 
 // isName reports whether s is a Lua name: letters, digits and underscores, not starting

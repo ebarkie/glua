@@ -109,5 +109,6 @@ becomes the default, and `Hardened` keeps the checked one.
   `recover` stops.
 - **Go values and functions given to `Global` and `Module`** are reachable from every script
   of the Runtime.
-- **A script's output** goes to the `Output` writer, serialised by the Runtime. Errors carry
-  script text and values: decide what reaches your logs and users.
+- **A script's output** goes to the `Output` writer, serialised by the Runtime, or to the
+  `OutputFunc` function with the entry's context, unserialised. Errors carry script text and
+  values: decide what reaches your logs and users.

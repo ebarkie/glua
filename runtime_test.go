@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"math"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -220,6 +223,71 @@ func TestOutput(t *testing.T) {
 	}
 	if _, err := runInEnv(t, MustNew(), "print('discarded')"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOutputSerialised(t *testing.T) {
+	var buf bytes.Buffer // not safe for concurrent use: Output's lock must make it so
+	rt := MustNew(Output(&buf))
+	s := mustLoad(t, rt, "function f() for i = 1, 100 do print('line') end end")
+	f, _ := s.Func0[struct{}]("f")
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() { f(context.Background()) })
+	}
+	wg.Wait()
+	if buf.String() != strings.Repeat("line\n", 400) {
+		t.Errorf("output of %d bytes is torn", buf.Len())
+	}
+}
+
+func TestOutputFunc(t *testing.T) {
+	type tenantKey struct{}
+	var got []string
+	f := func(ctx context.Context, s string) error {
+		if s == "full\n" {
+			return errors.New("output is full")
+		}
+		tenant, _ := ctx.Value(tenantKey{}).(string)
+		got = append(got, tenant+": "+s)
+		return nil
+	}
+	invoke := GoFunc(func(c *Call) error { _, err := c.Invoke(c.Value(0)); return err })
+	rt := MustNew(LibSafe|LibIO, Output(io.Discard), OutputFunc(f), Global("invoke", invoke))
+	s, err := rt.Load(context.WithValue(context.Background(), tenantKey{}, "a"), "out.lua", `
+		print("loading")
+		function f()
+			print("called", 1)
+			warn("@on") warn("warned")
+			io.write("written\n")
+			invoke(function() print("from Go") end)
+			return select(2, pcall(print, "full"))
+		end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := s.Func0[string]("f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := call(context.WithValue(context.Background(), tenantKey{}, "b"))
+	if err != nil || msg != "output is full" {
+		t.Errorf("a failing write: got %q, %v", msg, err)
+	}
+	want := []string{"a: loading\n", "b: called\t1\n", "b: Lua warning: warned\n", "b: written\n", "b: from Go\n"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+
+	var buf bytes.Buffer
+	if _, err := runInEnv(t, MustNew(OutputFunc(f), Output(&buf)), "print('last wins')"); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "last wins\n" {
+		t.Errorf("output %q", buf.String())
+	}
+	if _, err := runInEnv(t, MustNew(Output(&buf), Output(nil)), "print('discarded')"); err != nil || buf.String() != "last wins\n" {
+		t.Errorf("Output(nil): %v, output %q", err, buf.String())
 	}
 }
 

@@ -2,7 +2,6 @@ package glua
 
 import (
 	"context"
-	"io"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -106,7 +105,7 @@ type executor struct {
 	allocLeft    int64 // what is left of it in the current entry
 
 	checked    bool      // run the bounds-checked loop
-	output     io.Writer // where print and warn write; nil discards
+	output     writeFunc // where print and warn write; nil discards
 	warnOn     bool      // warn("@on") was called
 	rand       [4]uint64 // math.random's state, per entry
 	randSeeded bool
@@ -123,8 +122,7 @@ func (ex *executor) write(s string) error {
 	if ex.output == nil {
 		return nil
 	}
-	_, err := io.WriteString(ex.output, s)
-	return err
+	return ex.output(ex.ctx, s)
 }
 
 // runBase returns the frame index of the goEntry frame of the current run.
