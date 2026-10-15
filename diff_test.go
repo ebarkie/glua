@@ -2,6 +2,7 @@ package glua
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -84,11 +85,12 @@ func TestDifferential(t *testing.T) {
 				t.Logf("%s took %v in glua:\n%s", c.name, d, c.src)
 			}
 			norm := func(s string) string {
+				s = hexAddrs(s)
 				return fmodArg.ReplaceAllString(nanSign.Replace(addrs.ReplaceAllString(s, "0x")), "#? to 'fmod' (number expected)")
 			}
 			if norm(got) != norm(want[c.name]) {
 				t.Errorf("%s differs (seed %d)\n%s\n got: %s\nwant: %s", c.name, seed, c.src, got, want[c.name])
-				if failed++; failed > 5 {
+				if failed++; failed > 5 && os.Getenv("GLUA_DIFF_ALL") == "" {
 					t.FailNow()
 				}
 			}
@@ -98,6 +100,20 @@ func TestDifferential(t *testing.T) {
 		}
 	}
 }
+
+// hexAddrs hides addresses inside the hex-encoded strings of a rendered result, as addrs
+// does outside them: tostring of a table or function gives one.
+func hexAddrs(s string) string {
+	return hexStr.ReplaceAllStringFunc(s, func(m string) string {
+		b, err := hex.DecodeString(m[4:])
+		if err != nil {
+			return m
+		}
+		return "str:" + hex.EncodeToString([]byte(addrs.ReplaceAllString(string(b), "0x")))
+	})
+}
+
+var hexStr = regexp.MustCompile(`str:[0-9a-f]*`)
 
 // fmodArg hides which argument math.fmod names when neither is a number: C Lua checks both
 // in one call expression, so the order depends on the compiler, and gcc differs between
@@ -117,6 +133,9 @@ type progGen struct {
 func (g *progGen) pick(xs ...string) string { return xs[g.r.IntN(len(xs))] }
 
 func (g *progGen) program() string {
+	if g.r.IntN(3) == 0 {
+		return g.libProgram()
+	}
 	g.b.Reset()
 	g.vars, g.names = g.vars[:0], g.names[:0]
 	for range 2 + g.r.IntN(4) {
