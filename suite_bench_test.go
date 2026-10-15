@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// The milestone 3 benchmark suite: small scripts in bench/lua/suite, each returning its work
-// function. `go run ./bench/compare -suite` times them against C Lua.
+// The benchmark suite: small scripts in bench/lua/suite, each returning its work function. `go run ./bench/compare -suite` times them against C Lua.
 
 const benchSuiteDir = "bench/lua/suite"
 

@@ -156,7 +156,7 @@ func main() {
 	fmt.Printf("\nRaw Go results for benchstat: %s\n", *out)
 }
 
-// apiBoundary are the boundary rows through the public API, with the targets of milestone 2.
+// apiBoundary are the boundary rows through the public API.
 var apiBoundary = []struct{ name, bench, target string }{
 	{"`function(x) return x + 1 end`, typed, private VM", "BenchmarkAPICallPrivate", "50"},
 	{"Same, shared Script, executor from the pool", "BenchmarkAPICallPooled", "75"},
@@ -193,10 +193,10 @@ func compareBoundary(testBin string, rounds int, out string) {
 	check(os.WriteFile(out, raw.Bytes(), 0o644))
 	fmt.Printf("Machine: %s, %d CPUs, governor %s. %s.\n", cpuModel(), runtime.NumCPU(), governor(), goVersion())
 	fmt.Printf("%d interleaved rounds; medians, with the range. %s.\n\n", rounds, time.Now().Format("2 January 2006"))
-	fmt.Println("| Call from Go | ns, checked loop | ns, fast loop | Target | Allocations |")
-	fmt.Println("| --- | --- | --- | --- | --- |")
+	fmt.Println("| Call from Go | ns, checked loop | ns, fast loop | Allocations |")
+	fmt.Println("| --- | --- | --- | --- |")
 	for i, b := range apiBoundary {
-		fmt.Printf("| %s | %s | %s | %s | %s |\n", b.name, spreadNs(chk[i]), spreadNs(fast[i]), b.target, allocs[i])
+		fmt.Printf("| %s | %s | %s | %s |\n", b.name, spreadNs(chk[i]), spreadNs(fast[i]), allocs[i])
 	}
 	fmt.Printf("\nRaw Go results for benchstat (checked loop): %s\n", out)
 }

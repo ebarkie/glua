@@ -101,6 +101,19 @@ Status: feature-complete and tested against the Lua 5.4.9 test suite and against
 differential fuzzing. The faster, unchecked interpreter loop becomes the default after a week
 of continuous fuzzing; until then every Runtime runs the bounds-checked loop.
 
+## Performance
+
+Time to run a suite of 21 small scripts, relative to C Lua 5.4.9 (geometric mean; lower is
+faster). Details, per-script numbers and method are in [the benchmarks](docs/benchmarks.md).
+
+| Engine | Relative to C Lua |
+| --- | --- |
+| C Lua 5.4.9 | 1.00x |
+| glua | 1.55x |
+| wangshu | 4.31x |
+| GopherLua | 5.42x |
+| golua | 6.09x |
+
 ## Documentation
 
 - [Package documentation](https://pkg.go.dev/github.com/folbricht/glua): the API, with runnable
@@ -112,7 +125,7 @@ of continuous fuzzing; until then every Runtime runs the bounds-checked loop.
   fixed caps.
 - [GopherLua and glua side by side](docs/gopherlua.md): how common tasks look in each.
 - [Benchmarks](docs/benchmarks.md): small scripts in C Lua, glua and other Lua implementations
-  for Go. Results by milestone are in [bench](bench).
+  for Go, glua's two interpreter loops, and the cost of calls between Go and Lua.
 
 ## License
 

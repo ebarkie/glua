@@ -137,7 +137,7 @@ func (ex *executor) runBase() int {
 }
 
 // defaultChecked selects the loop new executors run. The checked loop is the default until
-// milestone 4's fuzzing exit is met.
+// a week of continuous fuzzing of both loops has run clean.
 var defaultChecked = true
 
 func newExecutor() *executor {
@@ -325,8 +325,7 @@ func (ex *executor) moveStack(size int) {
 }
 
 // charge takes n bytes from the entry's allocation budget, before the allocation. Running
-// out is a terminal error. Milestone 2 charges every allocation site; this covers the ones
-// that can grow without bound.
+// out is a terminal error.
 func (ex *executor) charge(n int) error {
 	if n > maxAlloc {
 		return ex.terminal(ErrAlloc)

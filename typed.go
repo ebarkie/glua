@@ -7,8 +7,8 @@ import (
 	"unsafe"
 )
 
-// engine stands in for the Runtime until milestone 2: it owns the executor pool. Executors
-// hold no script state, so one pool serves every function and rule.
+// engine is a bare executor pool, for the tests and benchmarks of the executor that run
+// hand-assembled programs without a Runtime.
 type engine struct {
 	pool sync.Pool
 }

@@ -65,7 +65,7 @@ type goFunc struct {
 func luaFnValue(cl *closure) Value { return Value{p: unsafe.Pointer(cl), n: kindLuaFn << 56} }
 func goFnValue(g *goFunc) Value    { return Value{p: unsafe.Pointer(g), n: kindGoFn << 56} }
 
-// asm assembles a prototype by hand. It stands in for the compiler until milestone 1.
+// asm assembles a prototype by hand, for tests that need code the compiler would not emit.
 type asm struct {
 	p      proto
 	labels map[string]int
