@@ -102,18 +102,22 @@ func TestDifferential(t *testing.T) {
 }
 
 // hexAddrs hides addresses inside the hex-encoded strings of a rendered result, as addrs
-// does outside them: tostring of a table or function gives one.
+// does outside them: tostring of a table or function gives one. Padding around an address,
+// from string.format's widths, goes too, as its length depends on the address's.
 func hexAddrs(s string) string {
 	return hexStr.ReplaceAllStringFunc(s, func(m string) string {
 		b, err := hex.DecodeString(m[4:])
 		if err != nil {
 			return m
 		}
-		return "str:" + hex.EncodeToString([]byte(addrs.ReplaceAllString(string(b), "0x")))
+		return "str:" + hex.EncodeToString([]byte(paddedAddr.ReplaceAllString(string(b), "$1 0x")))
 	})
 }
 
-var hexStr = regexp.MustCompile(`str:[0-9a-f]*`)
+var (
+	hexStr     = regexp.MustCompile(`str:[0-9a-f]*`)
+	paddedAddr = regexp.MustCompile(` *([a-z]+:) 0x[0-9a-f]+ *`)
+)
 
 // fmodArg hides which argument math.fmod names when neither is a number: C Lua checks both
 // in one call expression, so the order depends on the compiler, and gcc differs between
