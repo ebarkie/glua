@@ -73,7 +73,9 @@
 // context are terminal errors: pcall cannot catch them, and the entry returns them as an
 // [*Error] that wraps [ErrSteps], [ErrAlloc], [ErrHostDepth] or the context's cause. A host
 // function ends the entry the same way by returning an error made with [Terminate]. A set of
-// fixed caps holds even with [NoLimit]. [Hardened] is the profile for untrusted scripts.
+// fixed caps holds even with [NoLimit]. [Hardened] is the profile for untrusted scripts. An
+// entry that runs long and waits on its host can have its budgets renewed after each wait,
+// with [Call.Renew].
 //
 // The documents under docs/ in the repository describe the sandbox and limits in full, the
 // ways glua differs from Lua 5.4, and how common tasks look in GopherLua and in glua.

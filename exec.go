@@ -115,6 +115,12 @@ type executor struct {
 	ectx       *entryCtx // the context host functions of this entry see, made on first use
 
 	running, poisoned bool
+	// Renew does nothing: the entry borrows its parent's budgets, or closers are running on
+	// the grace budget of a terminal error
+	fixed bool
+
+	// what the entry used before its last Renew, which CallStats adds to what it used since
+	renewedSteps, renewedAlloc int64
 }
 
 // write sends text from print or warn to the output.
@@ -169,8 +175,9 @@ func (ex *executor) call(ctx context.Context, cl *closure, fn, nargs int) (err e
 	// list when it meets a type bound since
 	ex.running, ex.ctx = true, ctx
 	q := min(tickQuantum, ex.maxSteps)
-	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q) // budgets are set here only: nested entries share them
+	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q) // set as the entry starts, and by Renew: a nested run shares them
 	ex.allocLeft = ex.maxAlloc
+	ex.fixed = parent != nil
 	completed := false
 	defer func() {
 		ex.running = false
@@ -252,6 +259,7 @@ func (ex *executor) reset() {
 		ex.ectx = nil
 	}
 	ex.co, ex.nny, ex.fatal = nil, 0, nil
+	ex.renewedSteps, ex.renewedAlloc = 0, 0
 	ex.randSeeded = false
 }
 

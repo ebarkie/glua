@@ -104,8 +104,8 @@ func (rt *Runtime) report(ex *executor, script, fn string, err error) {
 	rt.observe(CallStats{
 		Script:     script,
 		Func:       fn,
-		Steps:      ex.maxSteps - ex.steps - int64(max(ex.st.ticks, 0)),
-		AllocBytes: ex.maxAlloc - ex.allocLeft,
+		Steps:      ex.renewedSteps + ex.maxSteps - ex.steps - int64(max(ex.st.ticks, 0)),
+		AllocBytes: ex.renewedAlloc + ex.maxAlloc - ex.allocLeft,
 		Err:        err,
 	})
 }

@@ -132,6 +132,37 @@ func (c *Call) Charge(n int) error {
 	return c.ex.produce(n)
 }
 
+// Renew gives the entry its step and allocation budgets afresh, as they were when it
+// started. It is for an entry that runs long and waits on its host, such as a session that
+// reads input or a worker that waits for events: a host function that renews after each
+// wait bounds the work between waits rather than over the entry's whole life. Renew only
+// after a real wait: a script that loops on a function that renews at once is bounded by its
+// context alone. A limit already exceeded stays exceeded. Renew does nothing in an entry
+// made with another entry's Context, which shares that entry's budgets, nor in closers
+// running after a terminal error.
+func (c *Call) Renew() {
+	ex := c.ex
+	if ex.fatal != nil || ex.fixed { // a terminal error, a borrowed entry, the grace budget
+		return
+	}
+	if ex.allocLeft < 0 {
+		ex.charge(0) // the stack grew past the budget, and this is the charge that fails
+		return
+	}
+	if ex.ectx != nil && ex.payBorrowed() != nil {
+		return // what nested entries used came out of the old budgets, and ran them out
+	}
+	ex.renewedSteps += ex.maxSteps - ex.steps - int64(max(ex.st.ticks, 0))
+	ex.renewedAlloc += ex.maxAlloc - ex.allocLeft
+	q := min(tickQuantum, ex.maxSteps)
+	ex.steps, ex.st.ticks = ex.maxSteps-q, int(q)
+	ex.allocLeft = ex.maxAlloc
+	if e := ex.ectx; e != nil { // a context the function took before carries the budgets afresh
+		e.steps.Store(ex.maxSteps)
+		e.alloc.Store(ex.maxAlloc)
+	}
+}
+
 // Errorf returns an error with a formatted message, for a host function to return.
 func (c *Call) Errorf(format string, args ...any) error {
 	return fmt.Errorf(format, args...)

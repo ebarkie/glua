@@ -50,7 +50,7 @@ func baseCollectGarbage(c *Call) error {
 	// that returns its neutral value, except count
 	switch opt {
 	case "count":
-		used := float64(c.ex.maxAlloc-c.ex.allocLeft) / 1024
+		used := float64(c.ex.renewedAlloc+c.ex.maxAlloc-c.ex.allocLeft) / 1024
 		return c.ReturnValues(Float(used))
 	case "collect", "step":
 		if opt == "step" {

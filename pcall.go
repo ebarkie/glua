@@ -370,8 +370,8 @@ func (ex *executor) closeTerminal(level int, le *Error) {
 	if len(ex.tbc) == 0 || ex.tbc[len(ex.tbc)-1] < level || ex.st.cl == nil {
 		return
 	}
-	steps, ticks, alloc, fatal := ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal
-	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal = 0, tickQuantum, 4<<10, nil
+	steps, ticks, alloc, fatal, fixed := ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal, ex.fixed
+	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal, ex.fixed = 0, tickQuantum, 4<<10, nil, true
 	ctx := ex.ctx
 	if ctx.Err() != nil {
 		ex.ctx = context.WithoutCancel(ctx) // let the closers run after a cancellation
@@ -379,7 +379,7 @@ func (ex *executor) closeTerminal(level int, le *Error) {
 	ex.closeOnError(level, le.Value)
 	ex.dropTBC(level)
 	ex.ctx = ctx
-	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal = steps, ticks, alloc, fatal
+	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal, ex.fixed = steps, ticks, alloc, fatal, fixed
 }
 
 // dropTBC forgets the to-be-closed variables at stack index level and above.
