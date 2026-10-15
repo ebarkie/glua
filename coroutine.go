@@ -80,15 +80,48 @@ var trampoline = func() *closure {
 	return &closure{p: p.protos[0]}
 }()
 
+// coStackSize is the register stack a coroutine starts with: room for its body's frame,
+// which pushFrame wants with twice stackSlack above it, so that the first resume need not
+// move it.
+const coStackSize = 2 * initStack
+
 // newCoroutine creates a coroutine for function f, charging its stack to the budget.
 func (ex *executor) newCoroutine(f Value) (*coroutine, error) {
-	if err := ex.charge(initStack*16 + 4<<10); err != nil {
+	if err := ex.charge(coStackSize*16 + 4<<10); err != nil {
 		return nil, err
 	}
 	co := &coroutine{fn: f}
-	co.stack = make([]Value, initStack)
-	co.pframes = make([]uint64, 16)
+	if n := len(ex.coStacks); n > 0 {
+		co.stack, co.pframes = ex.coStacks[n-1].stack, ex.coStacks[n-1].pframes
+		ex.coStacks[n-1] = coStack{}
+		ex.coStacks = ex.coStacks[:n-1]
+	} else {
+		co.stack = make([]Value, coStackSize)
+		co.pframes = make([]uint64, 16)
+	}
 	return co, nil
+}
+
+// coStack is the register stack and frame list of a coroutine that returned, kept for the
+// next one made in the same entry: a dead coroutine never runs again, and nothing outside it
+// points into its stack.
+type coStack struct {
+	stack   []Value
+	pframes []uint64
+}
+
+// maxCoStacks is how many such stacks an executor keeps: enough for coroutines made one
+// after another, as generators are.
+const maxCoStacks = 4
+
+// keepStack takes the stacks of co, which returned, for the next coroutine. A register
+// stack that grew is not kept: its growth was charged, and the next coroutine's would not be.
+func (ex *executor) keepStack(co *coroutine) {
+	if len(ex.coStacks) < maxCoStacks && len(co.stack) == coStackSize {
+		clear(co.stack[:co.st.hi]) // above the high-water mark every slot is nil
+		ex.coStacks = append(ex.coStacks, coStack{co.stack, co.pframes})
+	}
+	co.stack, co.pframes = nil, nil
 }
 
 // resume runs co with args until it yields, returns or fails. ok is false when the body
@@ -115,6 +148,7 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 	ex.co = co
 	co.status = coRunning
 	co.nnyBase = ex.nny
+	returned := false
 	defer func() {
 		co.threadState = ex.saveThread()
 		saved.st.ticks = ex.st.ticks
@@ -127,6 +161,9 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		}
 		if le, ok := err.(*Error); ok && le.terminal && le.where == "" {
 			le.where = ex.where() // raised by a Go body, which has no position: the resume's
+		}
+		if returned {
+			ex.keepStack(co)
 		}
 	}()
 
@@ -172,7 +209,7 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 	err = ex.drive(0)
 	switch {
 	case err == nil:
-		co.status = coDead
+		co.status, returned = coDead, true
 		return append([]Value(nil), ex.stack[0:ex.top]...), true, nil
 	case err == errYield:
 		co.status = coSuspended

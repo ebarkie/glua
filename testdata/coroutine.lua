@@ -167,3 +167,19 @@ end)
 co()
 local n = co(1)
 return table.concat(res, ","), n
+--== coroutines one after another
+local function wide(n) local a, b, c, d, e, f, g, h = n, 2, 3, 4, 5, 6, 7, 8 return a + h end
+local function fresh(...) local x, y, z return select("#", ...), x, y, z end
+local r = {}
+for i = 1, 6 do
+  r[#r + 1] = coroutine.wrap(wide)(i)
+  local n, x, y, z = coroutine.wrap(fresh)()
+  r[#r + 1] = n .. tostring(x) .. tostring(y) .. tostring(z)
+  local ok, e = coroutine.resume(coroutine.create(function() error("e" .. i, 0) end))
+  r[#r + 1] = tostring(ok) .. e
+  local held = coroutine.create(function() coroutine.yield(i) return "late" end)
+  r[#r + 1] = select(2, coroutine.resume(held))
+  r[#r + 1] = coroutine.wrap(function() return coroutine.wrap(function() return i * 2 end)() + 1 end)()
+  r[#r + 1] = select(2, coroutine.resume(held))
+end
+return table.concat(r, ",")

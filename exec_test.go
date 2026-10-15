@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -578,5 +580,63 @@ func TestYieldAcrossGoCall(t *testing.T) {
 	}
 	if res[0].Truthy() || !strings.Contains(res[1].String(), "attempt to yield across a C-call boundary") {
 		t.Fatalf("got %v %v", res[0], res[1])
+	}
+}
+
+// A coroutine that returned leaves its stack to the next one the entry makes, and a new
+// coroutine's stack is already big enough for its body's frame, so a loop of short
+// coroutines allocates no stacks after the first.
+func TestCoroutineStacksReused(t *testing.T) {
+	if stackStress {
+		t.Skip("lua_stackstress allocates a stack at every check")
+	}
+	s := mustLoad(t, MustNew(LibSafe|LibCoroutine), `local f = function() return 1 end
+		function work(n) for i = 1, n do coroutine.wrap(f)() end end`)
+	work, _ := s.Func1[int64, struct{}]("work")
+	ctx := context.Background()
+	if _, err := work(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	if _, err := work(ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+	if per := (after.TotalAlloc - before.TotalAlloc) / 1000; per > 2<<10 {
+		t.Errorf("%d bytes allocated for each coroutine", per)
+	}
+}
+
+// A kept stack holds nothing of the coroutine that left it, and reset lets it go.
+func TestCoroutineStacksKeptClean(t *testing.T) {
+	var kept int
+	check := GoFunc(func(c *Call) error {
+		for _, k := range c.ex.coStacks {
+			if len(k.stack) != coStackSize || slices.ContainsFunc(k.stack, func(v Value) bool { return !v.IsNil() }) {
+				return c.Errorf("a kept stack of %d slots holds values", len(k.stack))
+			}
+		}
+		kept = len(c.ex.coStacks)
+		return nil
+	})
+	rt := MustNew(LibSafe|LibCoroutine, Global("check", check))
+	_, err := runInEnv(t, rt, `
+		local function wide(...) local a, b, c, d, e, f = {}, "x", 1, {}, "y", 2 return select("#", ...) end
+		local function deep(n) if n == 0 then return 0 end return 1 + deep(n - 1) end
+		coroutine.wrap(deep)(2000)
+		coroutine.wrap(wide)(1, 2, 3)
+		check()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 && !stackStress {
+		t.Errorf("%d stacks kept, want the one that did not grow", kept)
+	}
+	ex := rt.newExecutor()
+	ex.coStacks = append(ex.coStacks, coStack{make([]Value, coStackSize), nil})
+	ex.reset()
+	if len(ex.coStacks) != 0 || ex.coStacks[:1][0].stack != nil {
+		t.Error("reset kept the stacks")
 	}
 }
