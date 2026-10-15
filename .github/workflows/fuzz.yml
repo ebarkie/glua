@@ -1,0 +1,92 @@
+name: Fuzz
+
+# Long-running fuzzing: every six hours, each target fuzzes for five and a half, so that the
+# runs follow one another. Each target keeps its corpus in the Actions cache from run to run.
+# A failure fails the run and uploads the failing inputs as an artifact.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes per target
+        default: "330"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+env:
+  CGO_ENABLED: "0"
+  MINUTES: ${{ inputs.minutes || '330' }}
+
+jobs:
+  fuzz:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: run, pkg: ., target: FuzzRun, tags: "" }
+          - { name: run-stress, pkg: ., target: FuzzRun, tags: lua_stackstress }
+          - { name: compile, pkg: ., target: FuzzCompile, tags: "" }
+          - { name: verified, pkg: ., target: FuzzVerifiedCode, tags: "" }
+          - { name: patterns, pkg: ., target: FuzzPatterns, tags: "" }
+          - { name: parser, pkg: ./internal/syntax, target: FuzzParser, tags: "" }
+          - { name: lexer, pkg: ./internal/syntax, target: FuzzLexer, tags: "" }
+          - { name: differential, pkg: ., target: "", tags: "" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the corpus
+        id: corpus
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        if: matrix.target != ''
+        with:
+          path: ${{ steps.corpus.outputs.dir }}
+          key: fuzz-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.name }}-
+
+      - name: Fuzz
+        if: matrix.target != ''
+        run: go test -run '^$' -tags '${{ matrix.tags }}' -fuzz '^${{ matrix.target }}$' -fuzztime "${MINUTES}m" ${{ matrix.pkg }}
+
+      - name: Build C Lua
+        if: matrix.name == 'differential'
+        run: sh bench/build-clua.sh
+      - name: Compare random programs with C Lua
+        if: matrix.name == 'differential'
+        run: |
+          test -x bench/.clua/lua-5.4.9/src/lua # without it the test skips
+          end=$((SECONDS + MINUTES * 60))
+          n=0
+          while [ $SECONDS -lt $end ]; do
+            n=$((n + 1))
+            GLUA_DIFF_N=200000 GLUA_DIFF_SEED=$((GITHUB_RUN_ID * 1000 + n)) \
+              go test -count=1 -timeout 30m -run '^TestDifferential$' .
+          done
+          echo "$n batches of 200000 programs"
+
+      - uses: actions/cache/save@v4
+        if: always() && matrix.target != ''
+        with:
+          path: ${{ steps.corpus.outputs.dir }}
+          key: fuzz-${{ matrix.name }}-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.name }}-${{ github.run_id }}
+          path: |
+            testdata/fuzz
+            internal/syntax/testdata/fuzz
+          if-no-files-found: ignore
