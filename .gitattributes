@@ -1,0 +1,3 @@
+# Never convert line endings: the vendored Lua test suite is checked against the release's
+# sha256 sums, and the generator and tests read Go and Lua sources byte for byte.
+* -text

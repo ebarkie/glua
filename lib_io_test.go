@@ -69,7 +69,7 @@ func TestIOLibrary(t *testing.T) {
 		t.Errorf("file %q", b)
 	}
 	// a file cannot be part of a shared script's state
-	_, err = rt.Load(context.Background(), "keep.lua", "f = io.open(path)")
+	_, err = rt.Load(context.Background(), "keep.lua", "f = io.open(path) f:close()") // closed: Windows cannot remove an open file
 	if err == nil || !strings.Contains(err.Error(), "global 'f' is a FILE*, which has hidden state") {
 		t.Errorf("a file in the globals: %v", err)
 	}
