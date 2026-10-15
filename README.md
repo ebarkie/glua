@@ -65,7 +65,7 @@ itself:
 
 ```go
 clamp := lua.GoFunc(func(c *lua.Call) error {
-	x, lo, hi := c.Arg[float64](0), c.Arg[float64](1), c.Arg[float64](2)
+	x, lo, hi := c.Arg[int64](0), c.Arg[int64](1), c.Arg[int64](2)
 	return c.Return(min(max(x, lo), hi))
 })
 
@@ -75,11 +75,11 @@ rt := lua.MustNew(
 	lua.Global("clamp", clamp),
 )
 script, err := rt.Load(ctx, "main.lua", `
-	print(upper("hello"), clamp(15, 0, 10)) -- HELLO   10.0
-	function shout(s) return upper(s) .. "!" end`)
+	print(upper("hello"), clamp(15, 0, 10)) -- HELLO   10
+	function level(n) return upper("level ") .. clamp(n, 1, 5) end`)
 
-shout, err := script.Func1[string, string]("shout")
-out, err := shout(ctx, "hi") // "HI!"
+level, err := script.Func1[int64, string]("level") // takes an int64, returns a string
+out, err := level(ctx, 7) // "LEVEL 5"
 ```
 
 A Go error returned by a host function becomes a Lua error, which the script can catch with
