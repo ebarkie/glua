@@ -121,6 +121,8 @@ type executor struct {
 
 	// what the entry used before its last Renew, which CallStats adds to what it used since
 	renewedSteps, renewedAlloc int64
+
+	coStacks []coStack // stacks of coroutines that returned in this entry, for the next ones
 }
 
 // write sends text from print or warn to the output.
@@ -261,6 +263,10 @@ func (ex *executor) reset() {
 	ex.co, ex.nny, ex.fatal = nil, 0, nil
 	ex.renewedSteps, ex.renewedAlloc = 0, 0
 	ex.randSeeded = false
+	if len(ex.coStacks) > 0 { // kept for the entry, not between entries
+		clear(ex.coStacks)
+		ex.coStacks = ex.coStacks[:0]
+	}
 }
 
 // release returns an executor to the pool, unless it ended abnormally or has grown large.
