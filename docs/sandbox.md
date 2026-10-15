@@ -105,7 +105,9 @@ becomes the default, and `Hardened` keeps the checked one.
 ## What remains the host's job
 
 - **Host functions must be safe for concurrent use.** A shared script calls them from every
-  goroutine that calls the script.
+  goroutine that calls the script. So must the functions given to `Loader` and `ChunkLoader`,
+  which run for every goroutine that loads a script or makes a VM; what they return, error
+  text and chunk names included, reaches the script.
 - **Go values passed in are shared, not copied**, except structs passed by value and, under
   `Hardened`, slices and maps. No goroutine may write a value while a script can read it. Such
   a race can tear a string header or hit `concurrent map read and map write`, which no

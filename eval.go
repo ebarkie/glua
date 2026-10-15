@@ -24,7 +24,7 @@ func Eval[R any](ctx context.Context, src string) (R, error) {
 	return dec.decode(s.result)
 }
 
-// used is set by the first Runtime: from then on the hash seed is fixed.
+// used is set by the first Runtime or Compile: from then on the hash seed is fixed.
 var used atomic.Bool
 
 // SetHashSeed fixes the process-wide hash seed, and with it the order of pairs and the
@@ -32,7 +32,7 @@ var used atomic.Bool
 // before any other use of the package; afterwards it panics.
 func SetHashSeed(seed uint64) {
 	if used.Load() {
-		panic("glua: SetHashSeed after the first Runtime was made")
+		panic("glua: SetHashSeed after the first Runtime or Compile")
 	}
 	s := seed
 	hashSeed = splitmix(&s)

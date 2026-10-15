@@ -26,11 +26,10 @@ type Script struct {
 // Load compiles src, runs its top level once under the init limits, then freezes everything
 // it built: the globals, what the chunk returned, and the modules it required.
 func (rt *Runtime) Load(ctx context.Context, name, src string) (*Script, error) {
-	p, info, err := compileChunk(chunkID("@"+name), src)
+	p, info, err := compile("@"+name, src)
 	if err != nil {
-		return nil, syntaxError(err)
+		return nil, err
 	}
-	setChunkName(p, "@"+name)
 	ld := newEnvLoader(rt)
 	env := rt.newEnv(ld)
 	cl := newMainClosure(p, info, env)

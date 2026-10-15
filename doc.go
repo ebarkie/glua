@@ -83,6 +83,7 @@
 // A runtime error is an [*Error]: Error returns one line such as "policy.lua:4: boom",
 // [Error.Traceback] the frames it passed through, and Unwrap the Go error behind it. A Go
 // error returned by a host function is a string inside Lua; if that same string leaves Lua,
-// errors.Is and errors.As still find the original. Code that does not compile gives a
-// [*SyntaxError], and a binding that cannot work a [*BindError], before anything runs.
+// errors.Is and errors.As still find the original, as they find the error of a module that
+// require could not load. Code that does not compile gives a [*SyntaxError], and a binding
+// that cannot work a [*BindError], before anything runs.
 package glua
