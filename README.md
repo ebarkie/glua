@@ -83,7 +83,7 @@ out, err := level(ctx, 7) // "LEVEL 5"
 ```
 
 A Go error returned by a host function becomes a Lua error, which the script can catch with
-`pcall`.
+`pcall`, unless the host made it with `lua.Terminate` to end the call.
 
 ### Rules over a Go struct
 

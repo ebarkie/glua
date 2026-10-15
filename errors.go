@@ -20,6 +20,28 @@ var (
 	ErrNotFunction = errors.New("glua: value is not a function")                  // FuncN, Call or CallN got something else
 )
 
+// Terminate wraps err so that a host function returning it ends the whole entry, as running
+// out of steps does: pcall, xpcall and coroutine.resume do not see it, __close handlers run
+// on the grace budget, and the entry returns an *Error that unwraps to err. It must be
+// returned as it is: wrapped again, as by fmt.Errorf with %w, it is an ordinary error. It is
+// for a host that finds the script must not go on, for a permission it lacks or a quota it
+// spent. A terminal error that already stands wins. Terminate(nil) is nil.
+func Terminate(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &terminateError{err}
+}
+
+// terminateError is an error from Terminate.
+type terminateError struct{ err error }
+
+// Error returns err's message.
+func (e *terminateError) Error() string { return e.err.Error() }
+
+// Unwrap returns err.
+func (e *terminateError) Unwrap() error { return e.err }
+
 // errDone tells the driver that a general RETURN ended the run's goEntry frame.
 var errDone = errors.New("glua: done")
 
@@ -28,7 +50,7 @@ type Error struct {
 	Value    Value // what was raised: for VM errors a message with its position; a string for Go errors
 	where    string
 	cause    error // the Go error, a limit error or the context's cause
-	terminal bool  // limits, cancellation, host depth: pcall cannot catch it
+	terminal bool  // limits, cancellation, host depth, Terminate: pcall cannot catch it
 	trace    []traceEntry
 }
 
@@ -152,7 +174,8 @@ func (ex *executor) typeError(what string, v Value, reg int) error {
 	return ex.errorf("attempt to %s a %s value%s", what, typeName(v), info)
 }
 
-// terminal raises an error that pcall cannot catch: limits, context cancellation, host depth.
+// terminal raises an error that pcall cannot catch: limits, context cancellation, host depth,
+// Terminate.
 func (ex *executor) terminal(cause error) error {
 	err := &Error{Value: String(cause.Error()), where: ex.where(), cause: cause, terminal: true}
 	if ex.fatal == nil {

@@ -52,13 +52,15 @@ options is bounded; `lua.NoLimit` switches a limit off.
 
 ### Terminal errors
 
-Running out of steps or bytes, nesting too deep, and a cancelled context end the entry:
+Running out of steps or bytes, nesting too deep, a cancelled context, and a host function
+returning an error made with `lua.Terminate`, end the entry:
 
 - `pcall`, `xpcall`, message handlers and `coroutine.resume` never see them.
 - After a host function returns, the error stands, whatever the function did with it.
 - `__close` handlers written in Lua still run, sharing a grace budget of 1,024 steps and 4 KB.
-- The entry returns an `*lua.Error` that unwraps to `ErrSteps`, `ErrAlloc`, `ErrHostDepth` or
-  the context's cause, with the script's position and traceback.
+- The entry returns an `*lua.Error` that unwraps to `ErrSteps`, `ErrAlloc`, `ErrHostDepth`,
+  the context's cause or the error given to `Terminate`, with the script's position and
+  traceback.
 
 ### Budgets across scripts
 

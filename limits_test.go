@@ -3,6 +3,7 @@ package glua
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,53 @@ func TestCancellation(t *testing.T) {
 	cancel2(cause)
 	if _, err := runLimited(t, rt, cctx, "function f() end"); !errors.Is(err, cause) {
 		t.Errorf("cause: %v", err)
+	}
+}
+
+func TestTerminate(t *testing.T) {
+	denied := errors.New("permission denied")
+	var after int
+	var stop context.CancelFunc
+	rt := MustNew(LibSafe|LibCoroutine,
+		Global("deny", GoFunc(func(c *Call) error { return Terminate(denied) })),
+		Global("cancelDeny", GoFunc(func(c *Call) error { stop(); return Terminate(denied) })),
+		Global("wrapped", GoFunc(func(c *Call) error { return fmt.Errorf("deny: %w", Terminate(denied)) })),
+		Global("after", Do0(func() { after++ })))
+	for _, src := range []string{
+		"function f() deny() after() end",
+		"function f() pcall(deny) after() end",
+		"function f() xpcall(deny, function() after() end) after() end",
+		"function f() coroutine.resume(coroutine.create(function() deny() end)) after() end",
+		"function f() coroutine.wrap(function() pcall(deny) end)() after() end",
+		"function f() table.sort({1, 2, 3}, function() deny() end) after() end",
+	} {
+		after = 0
+		_, err := runLimited(t, rt, context.Background(), src)
+		var le *Error
+		if !errors.As(err, &le) || errors.Unwrap(le) != denied || !le.terminal || !strings.HasPrefix(le.Error(), "hostile.lua:1:") {
+			t.Errorf("%s: got %v", src, err)
+		}
+		if after != 0 {
+			t.Errorf("%s: the script went on", src)
+		}
+	}
+	after = 0
+	if _, err := runLimited(t, rt, context.Background(), "function f() local t <close> = setmetatable({}, {__close = after}) deny() end"); !errors.Is(err, denied) || after != 1 {
+		t.Errorf("closer: %v, ran %d times", err, after)
+	}
+	// wrapped again, it is an ordinary error
+	if v, err := runLimited(t, rt, context.Background(), "function f() return select(2, pcall(wrapped)) end"); err != nil || v.String() != "deny: permission denied" {
+		t.Errorf("wrapped: got %v, %v", v, err)
+	}
+	// a Terminate wins over the context it cancelled on its way out
+	ctx, cancel := context.WithCancel(context.Background())
+	stop = cancel
+	if _, err := runLimited(t, rt, ctx, "function f() pcall(cancelDeny) end"); !errors.Is(err, denied) {
+		t.Errorf("Terminate after cancelling: %v", err)
+	}
+	cancel()
+	if Terminate(nil) != nil {
+		t.Error("Terminate(nil) is not nil")
 	}
 }
 

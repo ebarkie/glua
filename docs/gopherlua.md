@@ -162,7 +162,7 @@ becomes a Lua error. `lua.Reflect(f)` wraps any function by reflection.
 | Raw argument | `L.Get(n)` | `c.Value(i)` |
 | Number of arguments | `L.GetTop()` | `c.Len()` |
 | Return results | `L.Push(v)` …; `return n` | `c.Return(v)`, `c.Return2(a, b)`, `c.ReturnValues(vs...)` |
-| Raise an error | `L.RaiseError(format, ...)`, `L.ArgError(n, msg)` | return an `error`; `c.Errorf(format, ...)` |
+| Raise an error | `L.RaiseError(format, ...)`, `L.ArgError(n, msg)` | return an `error`; `c.Errorf(format, ...)`; `lua.Terminate(err)` to end the call |
 | Call back into Lua | `L.CallByParam(...)` | `c.Invoke(fn, args...)`, `c.InvokeN` |
 | Context | `L.Context()` | `c.Context()` |
 
@@ -222,7 +222,8 @@ flags, and `os` and `io` are subsets. `lua.Hardened()` is a profile for untruste
 | Stack sizes | `Options.CallStackSize`, `RegistrySize`, `RegistryMaxSize` | `Limits.CallDepth`, `Limits.HostDepth` |
 
 In glua, running out of a limit and cancellation end the whole call: `pcall` inside the script
-does not catch them.
+does not catch them. A host function ends the call the same way by returning an error made
+with `lua.Terminate`.
 
 ## Errors
 

@@ -275,9 +275,13 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 }
 
 // hostFailed turns the error a host function returned into a Lua error, or into a terminal
-// one when the entry's context ended: a host function that waited on the context and
-// returned its error must not leave the script to catch it.
+// one when the function asked for that with Terminate, or when the entry's context ended (a
+// host function that waited on the context and returned its error must not leave the script
+// to catch it).
 func (ex *executor) hostFailed(err error) error {
+	if te, ok := err.(*terminateError); ok {
+		return ex.terminal(te.err)
+	}
 	if ex.ctx.Err() != nil {
 		return ex.terminal(ctxError(ex.ctx))
 	}

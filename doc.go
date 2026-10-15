@@ -71,7 +71,8 @@
 // and a depth of nesting between Go and Lua. A zero field takes its default, so a Runtime made
 // with no options is bounded. Running out of steps or bytes, nesting too deep and a cancelled
 // context are terminal errors: pcall cannot catch them, and the entry returns them as an
-// [*Error] that wraps [ErrSteps], [ErrAlloc], [ErrHostDepth] or the context's cause. A set of
+// [*Error] that wraps [ErrSteps], [ErrAlloc], [ErrHostDepth] or the context's cause. A host
+// function ends the entry the same way by returning an error made with [Terminate]. A set of
 // fixed caps holds even with [NoLimit]. [Hardened] is the profile for untrusted scripts.
 //
 // The documents under docs/ in the repository describe the sandbox and limits in full, the

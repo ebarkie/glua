@@ -85,9 +85,10 @@ The host chooses the libraries. The default set is the base library, `string`, `
 - **Nesting between Go and Lua is bounded and terminal.** C Lua raises a catchable `C stack
   overflow` when Lua and C call each other too deeply. In glua the host's `HostDepth` limit
   ends the whole call, and `pcall` cannot catch it.
-- **Limits end the call.** Running out of the step or memory budget, or a cancelled context,
-  ends the whole call into the script: `pcall`, `xpcall` and `coroutine.resume` do not see
-  these errors. `__close` handlers still run, within a small grace budget.
+- **Terminal errors end the call.** Running out of the step or memory budget, a cancelled
+  context, or an error a host function made with `Terminate`, ends the whole call into the
+  script: `pcall`, `xpcall` and `coroutine.resume` do not see these errors. `__close` handlers
+  still run, within a small grace budget.
 - **Closers of an error.** `__close` handlers that run because of an error run on top of the
   failing frames, so a traceback from them shows those frames, and they cannot yield.
 - **Errors in message handlers.** An error inside an `xpcall` message handler gives `error in
