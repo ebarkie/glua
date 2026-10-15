@@ -179,11 +179,8 @@ func osDate(c *Call) error {
 			i++
 			conv = format[i] // the C locale has no alternative forms
 		case strings.IndexByte(dateSingle, conv) < 0 || conv == 'E' || conv == 'O':
-			spec := format[i:min(i+1, len(format))]
-			if conv == 'E' || conv == 'O' {
-				spec = format[i:min(i+2, len(format))]
-			}
-			return c.argError(1, "date", fmt.Sprintf("invalid conversion specifier '%%%s'", spec))
+			// as C Lua: the message quotes the rest of the format from the bad conversion
+			return c.argError(1, "date", fmt.Sprintf("invalid conversion specifier '%%%s'", format[i:]))
 		}
 		strftime(&b, conv, tm)
 	}

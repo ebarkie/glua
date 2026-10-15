@@ -87,3 +87,6 @@ return n, utf8.charpattern
 return math.type(tonumber(tostring(math.mininteger))), tonumber("-9223372036854775808"), math.type(tonumber("-9223372036854775809")), math.type(-9223372036854775808)
 --== the %z class
 return ("a\0b"):find("%z"), ("a\0b"):gsub("%Z", "x")
+--== math.log of subnormals, and modf of -0.0
+return math.log(5e-324), math.log(5e-324, 10), math.log(1e-310, 10), math.log(5e-324, 2), math.log(1e-310, 3),
+  math.log(2^-1022), math.modf(-0.0), math.type((math.modf(-0.0))), math.modf(-0.5)

@@ -128,7 +128,7 @@ func mathLog(c *Call) error {
 		return err
 	}
 	if c.Value(1).IsNil() {
-		return c.ReturnValues(Float(math.Log(x)))
+		return c.ReturnValues(Float(logC(x)))
 	}
 	base, err := c.checkFloat(1, "log")
 	if err != nil {
@@ -138,10 +138,24 @@ func mathLog(c *Call) error {
 	case 2:
 		return c.ReturnValues(Float(math.Log2(x)))
 	case 10:
+		if isSubnormal(x) {
+			return c.ReturnValues(Float(math.Log10(x*0x1p54) - 54*math.Log10(2)))
+		}
 		return c.ReturnValues(Float(math.Log10(x)))
 	}
-	return c.ReturnValues(Float(math.Log(x) / math.Log(base)))
+	return c.ReturnValues(Float(logC(x) / logC(base)))
 }
+
+// logC is the natural logarithm. Go's math.Log is wrong for subnormals on amd64, giving about
+// -709 for 5e-324 instead of -744.4, so they are scaled into the normal range first, exactly.
+func logC(x float64) float64 {
+	if isSubnormal(x) {
+		return math.Log(x*0x1p54) - 54*math.Ln2
+	}
+	return math.Log(x)
+}
+
+func isSubnormal(x float64) bool { return x > 0 && x < 0x1p-1022 }
 
 func mathMinMax(c *Call, name string, max bool) error {
 	n := c.Len()

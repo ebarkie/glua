@@ -1,6 +1,7 @@
 package glua
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"strconv"
@@ -525,15 +526,14 @@ func strFormat(c *Call) error {
 			if err := checkSpec(flags, true); err != nil {
 				return err
 			}
-			switch conv {
-			case 'd', 'i':
-				b.WriteString(fmt.Sprintf("%"+spec+"d", n))
-			case 'u':
-				b.WriteString(fmt.Sprintf("%"+spec+"d", uint64(n)))
-			default:
-				b.WriteString(fmt.Sprintf("%"+spec+string(conv), uint64(n)))
-			}
+			b.WriteString(formatIntC(spec, conv, n))
 		case 'a', 'A', 'e', 'E', 'f', 'g', 'G':
+			// as C Lua 5.4.9's str_format: %a checks the spec before the argument, the others after
+			if conv == 'a' || conv == 'A' {
+				if err := checkSpec(fmtFlagsF, true); err != nil {
+					return err
+				}
+			}
 			x, err := c.checkFloat(arg, "format")
 			if err != nil {
 				return err
@@ -611,6 +611,67 @@ func pad(spec, s string) string {
 	return fill + s
 }
 
+// formatIntC formats n as C's printf formats an integer conversion: d and i signed, u, o, x
+// and X unsigned. Go's fmt differs at the edges: it drops the sign of a zero printed with
+// precision 0, gives # a 0x prefix for zero, and counts the prefix out of the zero padding.
+func formatIntC(spec string, conv byte, n int64) string {
+	flags := spec[:len(spec)-len(strings.TrimLeft(spec, "-+ #0"))]
+	width, precision, hasPrec := strings.Cut(spec[len(flags):], ".")
+	w, _ := strconv.Atoi(width)
+	prec, _ := strconv.Atoi(precision)
+	u, sign := uint64(n), ""
+	if conv == 'd' || conv == 'i' {
+		switch {
+		case n < 0:
+			u, sign = -u, "-" // minint's magnitude, as an unsigned
+		case strings.Contains(flags, "+"):
+			sign = "+"
+		case strings.Contains(flags, " "):
+			sign = " "
+		}
+	}
+	base := 10
+	switch conv {
+	case 'o':
+		base = 8
+	case 'x', 'X':
+		base = 16
+	}
+	digits := strconv.FormatUint(u, base)
+	if conv == 'X' {
+		digits = strings.ToUpper(digits)
+	}
+	if hasPrec {
+		if prec == 0 && u == 0 {
+			digits = "" // C: precision 0 prints no digits for zero
+		}
+		if len(digits) < prec {
+			digits = strings.Repeat("0", prec-len(digits)) + digits
+		}
+	}
+	prefix := ""
+	if strings.Contains(flags, "#") {
+		switch {
+		case conv == 'o' && !strings.HasPrefix(digits, "0"):
+			digits = "0" + digits
+		case conv == 'x' && u != 0:
+			prefix = "0x"
+		case conv == 'X' && u != 0:
+			prefix = "0X"
+		}
+	}
+	size := len(sign) + len(prefix) + len(digits)
+	switch {
+	case size >= w:
+		return sign + prefix + digits
+	case strings.Contains(flags, "-"):
+		return sign + prefix + digits + strings.Repeat(" ", w-size)
+	case strings.Contains(flags, "0") && !hasPrec:
+		return sign + prefix + strings.Repeat("0", w-size) + digits
+	}
+	return strings.Repeat(" ", w-size) + sign + prefix + digits
+}
+
 // formatFloatC formats x like C's printf with the given spec and conversion: Go's fmt
 // does most of it, but not inf, nan or %a in C's form.
 func formatFloatC(spec string, conv byte, x float64) string {
@@ -633,10 +694,10 @@ func formatFloatC(spec string, conv byte, x float64) string {
 		if upper {
 			s = strings.ToUpper(s)
 		}
-		return pad(strings.ReplaceAll(spec, "0", ""), s)
+		return pad(spec, s) // pad fills with spaces: the 0 flag does not apply to inf and nan
 	}
 	if conv == 'a' || conv == 'A' {
-		return pad(spec, hexFloat(spec, x, upper))
+		return hexFloat(spec, x, upper)
 	}
 	if (conv == 'g' || conv == 'G') && !strings.Contains(spec, ".") {
 		spec += ".6" // C's default precision; Go's %g would give the shortest form instead
@@ -644,31 +705,96 @@ func formatFloatC(spec string, conv byte, x float64) string {
 	return fmt.Sprintf("%"+spec+string(conv), x)
 }
 
-// hexFloat formats x as C's %a does: 0x1.8p+0, with the precision of spec if it has one.
+// hexFloat formats x as glibc's printf formats %a, which is what C Lua gives on Linux: the
+// leading digit is 1, or 0 for zero and subnormals, which keep the exponent -1022; rounding to
+// the precision is half to even, and a carry goes into the leading digit (0x2.0p+5) rather than
+// the exponent; # keeps the point, and the 0 flag pads after the 0x. The result is padded to
+// the width of spec.
 func hexFloat(spec string, x float64, upper bool) string {
+	flags := spec[:len(spec)-len(strings.TrimLeft(spec, "-+ #0"))]
 	prec := -1
 	if dot := strings.IndexByte(spec, '.'); dot >= 0 {
 		prec, _ = strconv.Atoi(spec[dot+1:])
 	}
-	s := strconv.FormatFloat(x, 'x', prec, 64) // like "0x1.8p+00"
-	// C writes the exponent without leading zeros
-	if i := strings.IndexByte(s, 'p'); i >= 0 {
-		exp := s[i+2:]
-		exp = strings.TrimLeft(exp, "0")
-		if exp == "" {
-			exp = "0"
+	bits := math.Float64bits(x)
+	biased, mant := int(bits>>52&0x7ff), bits&(1<<52-1)
+	lead, exp := 1, biased-1023
+	if biased == 0 {
+		lead, exp = 0, -1022
+		if mant == 0 {
+			exp = 0
 		}
-		s = s[:i+2] + exp
 	}
-	if strings.Contains(spec, "+") && x >= 0 {
-		s = "+" + s
-	} else if strings.Contains(spec, " ") && x >= 0 {
-		s = " " + s
+	digits := []byte(fmt.Sprintf("%013x", mant))
+	switch {
+	case prec < 0:
+		digits = bytes.TrimRight(digits, "0")
+	case prec < len(digits):
+		rest := digits[prec:]
+		digits = digits[:prec]
+		odd := lead&1 == 1
+		if prec > 0 {
+			odd = hexVal(digits[prec-1])&1 == 1
+		}
+		more := len(bytes.TrimRight(rest[1:], "0")) > 0
+		if h := hexVal(rest[0]); h > 8 || h == 8 && (more || odd) {
+			carry := true
+			for i := prec - 1; i >= 0 && carry; i-- {
+				if digits[i] == 'f' {
+					digits[i] = '0'
+				} else {
+					digits[i] = "0123456789abcdef"[hexVal(digits[i])+1]
+					carry = false
+				}
+			}
+			if carry {
+				lead++
+			}
+		}
+	default:
+		digits = append(digits, bytes.Repeat([]byte("0"), prec-len(digits))...)
 	}
+	sign := ""
+	switch {
+	case bits>>63 != 0:
+		sign = "-"
+	case strings.Contains(flags, "+"):
+		sign = "+"
+	case strings.Contains(flags, " "):
+		sign = " "
+	}
+	body := strconv.Itoa(lead)
+	if len(digits) > 0 || strings.Contains(flags, "#") {
+		body += "."
+	}
+	body += string(digits) + "p"
+	if exp >= 0 {
+		body += "+"
+	}
+	body += strconv.Itoa(exp)
+	prefix := "0x"
 	if upper {
-		s = strings.ToUpper(s)
+		prefix, body = "0X", strings.ToUpper(body)
 	}
-	return s
+	width, _, _ := strings.Cut(strings.TrimLeft(spec, "-+ #0"), ".")
+	w, _ := strconv.Atoi(width)
+	n := len(sign) + len(prefix) + len(body)
+	switch {
+	case n >= w:
+		return sign + prefix + body
+	case strings.Contains(flags, "-"):
+		return sign + prefix + body + strings.Repeat(" ", w-n)
+	case strings.Contains(flags, "0"):
+		return sign + prefix + strings.Repeat("0", w-n) + body
+	}
+	return strings.Repeat(" ", w-n) + sign + prefix + body
+}
+
+func hexVal(c byte) int {
+	if c >= 'a' {
+		return int(c-'a') + 10
+	}
+	return int(c - '0')
 }
 
 // quoteValue is %q: a value written so that Lua reads it back.

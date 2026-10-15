@@ -81,3 +81,12 @@ end
 return table.unpack(r)
 --== %q writes control characters as decimal escapes
 return string.format("%q", "a\rb\r1\0\0012\t\127x\200\n\"\\"), string.format("%q", "\r"), string.format("%q", "\r9")
+--== %a as glibc writes it: rounding carries, subnormals, # and the 0 flag
+return string.format("%.1a|%a|%a|%.0a|%#.0a|%010A|%-12a|%+a|% a|%.20a", 63, 1e-310, 5e-324, 1.5, -1, 0, 1, 2.5, 0.1, 1/3),
+  string.format("%.3a|%.1a|%.0a|%.0a|%.0a|%a|%a|%.13a|%.2a", 1/3, 1.96875, 1.5, 2.5, 3.5, -0.0, 2^-1022, 2^-1074, 0x1.ff8p0),
+  string.format("%q|%q|%q", 1e-310, 5e-324, -2.5)
+--== width applies to inf and nan, # adds no prefix to zero, the spec is checked before the argument
+return string.format("%10f|%-10e|%+10E|%010.3f|%#x|%#o|%#X|%#X", 1/0, -1/0, 1/0, -1/0, 0, 0, 0, 255),
+  select(2, pcall(string.format, "%#+100A", true)), select(2, pcall(string.format, "%10.123d", "x")),
+  select(2, pcall(string.format, "%10.123f", "x")), select(2, pcall(string.format, "%10.123c", "x")),
+  select(2, pcall(string.format, "%.123a", {}))

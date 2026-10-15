@@ -2,7 +2,6 @@ package glua
 
 import (
 	"fmt"
-	"math"
 )
 
 // Helpers for the standard library, which reports errors as C Lua's lauxlib does: with the
@@ -233,7 +232,7 @@ func newLib(lib string, funcs map[string]GoFunc) *Table {
 // intOrFloat returns f as an integer if it has an integral value that fits, else as a float,
 // as several math functions do.
 func intOrFloat(f float64) Value {
-	if i, ok := floatToInt(f); ok && !(f == 0 && math.Signbit(f)) {
+	if i, ok := floatToInt(f); ok { // -0.0 too: C's lua_numbertointeger makes it 0
 		return Int(i)
 	}
 	return Float(f)

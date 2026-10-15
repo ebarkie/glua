@@ -57,3 +57,6 @@ return os.time({year = "2000", month = "1", day = 1, hour = 12}) == base, os.tim
 local function e(...) return select(2, pcall(os.date, ...)) end
 return e("!%Y", 2^60), os.date("!%Y", 67767976233532799), os.date("!%Y", -67768040609740800), e("!%Y", -67768040609740801),
   e("!*t", 2^60)
+--== os.date quotes the rest of the format from a bad conversion
+local function e(...) return select(2, pcall(os.date, ...)) end
+return e("!x%qx%%-%m", 0), e("%Ez %A", 0), e("!%Q"), e("%E%W rest", 0)

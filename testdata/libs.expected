@@ -18,3 +18,4 @@ utf8 invalid input	nil | nil | str:696e76616c6964205554462d3820636f6465 | 1 | ni
 utf8.charpattern	3 | str:5b002d7fc22dfd5d5b802dbf5d2a
 integer extremes as strings	str:696e7465676572 | -9223372036854775808 | str:666c6f6174 | str:666c6f6174
 the %z class	2 | str:780078 | 2
+math.log of subnormals, and modf of -0.0	-744.44007192138 | -323.30621534312 | -310.0 | -1074.0 | -649.73001502971 | -708.39641853226 | 0 | str:696e7465676572 | 0 | -0.5
