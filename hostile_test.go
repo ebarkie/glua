@@ -126,9 +126,6 @@ func TestConversionDepthCap(t *testing.T) {
 	if _, err := res[0].As[any](); err == nil || !strings.Contains(err.Error(), "nested more than 64 levels") {
 		t.Errorf("decode a cycle: %v", err)
 	}
-	type node struct {
-		Next *node
-	}
 	if _, err := res[0].As[[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][]int](); err == nil {
 		t.Error("a deep slice type decoded a cycle")
 	}

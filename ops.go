@@ -1118,11 +1118,11 @@ func (ex *executor) markTBC(r int) error {
 	return nil
 }
 
-// closeTo calls the __close metamethods of the to-be-closed variables at stack index level
-// and above, the most recent first. A Lua handler runs in a continuation frame that comes
-// back to the same CLOSE instruction, which then closes the next one.
+// closeTo calls the __close metamethod of the most recent to-be-closed variable at stack
+// index level and above, if there is one. The handler runs in a continuation frame that
+// comes back to the same CLOSE instruction, which then closes the next one.
 func (ex *executor) closeTo(level int) error {
-	for len(ex.tbc) > 0 && ex.tbc[len(ex.tbc)-1] >= level {
+	if len(ex.tbc) > 0 && ex.tbc[len(ex.tbc)-1] >= level {
 		r := ex.tbc[len(ex.tbc)-1]
 		ex.tbc = ex.tbc[:len(ex.tbc)-1]
 		v := ex.stack[r]
