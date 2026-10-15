@@ -242,6 +242,9 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	}
 	if err != nil {
 		c.reset()
+		if g.host && ex.fatal == nil {
+			return 0, ex.hostFailed(err)
+		}
 		return 0, ex.hostError(err)
 	}
 	n := len(c.res)
@@ -269,6 +272,20 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	}
 	st.hi = max(st.hi, fn+n)
 	return n, nil
+}
+
+// hostFailed turns the error a host function returned into a Lua error, or into a terminal
+// one when the function asked for that with Terminate, or when the entry's context ended (a
+// host function that waited on the context and returned its error must not leave the script
+// to catch it).
+func (ex *executor) hostFailed(err error) error {
+	if te, ok := err.(*terminateError); ok {
+		return ex.terminal(te.err)
+	}
+	if ex.ctx.Err() != nil {
+		return ex.terminal(ctxError(ex.ctx))
+	}
+	return ex.hostError(err)
 }
 
 // invokeGo calls the host function g. An argument error that Arg raised by panic is

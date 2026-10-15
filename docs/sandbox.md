@@ -46,20 +46,22 @@ options is bounded; `lua.NoLimit` switches a limit off.
 | `CallDepth` | 10,000 | Lua frames | `stack overflow`, which `pcall` can catch |
 | `HostDepth` | 100 | Nesting of Go and Lua: host functions that call back into Lua, library callbacks such as sort's comparator, scripts called from host functions | `ErrHostDepth`, terminal |
 | `InitSteps`, `InitAllocBytes` | `Steps`, `AllocBytes` | The same, for the top level in `Load` and `NewVM` | As above |
-| context | none | Checked when the entry starts, and again every 1,024 steps | The context's cause, terminal |
+| context | none | Checked when the entry starts, again every 1,024 steps, and when a host function returns an error | The context's cause, terminal |
 
 `Script.WithLimits` gives the same code and state other limits, for example per tenant. The
 `Observe` option reports what each entry used.
 
 ### Terminal errors
 
-Running out of steps or bytes, nesting too deep, and a cancelled context end the entry:
+Running out of steps or bytes, nesting too deep, a cancelled context, and a host function
+returning an error made with `lua.Terminate`, end the entry:
 
 - `pcall`, `xpcall`, message handlers and `coroutine.resume` never see them.
 - After a host function returns, the error stands, whatever the function did with it.
 - `__close` handlers written in Lua still run, sharing a grace budget of 1,024 steps and 4 KB.
-- The entry returns an `*lua.Error` that unwraps to `ErrSteps`, `ErrAlloc`, `ErrHostDepth` or
-  the context's cause, with the script's position and traceback.
+- The entry returns an `*lua.Error` that unwraps to `ErrSteps`, `ErrAlloc`, `ErrHostDepth`,
+  the context's cause or the error given to `Terminate`, with the script's position and
+  traceback.
 
 ### Budgets across scripts
 
