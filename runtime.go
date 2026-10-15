@@ -84,8 +84,9 @@ const (
 
 func (l Lib) apply(o *options) { o.libs |= l; o.libsSet = true }
 
-// Limits apply to one entry from Go, including everything it re-enters. A zero field takes
-// the default. NoLimit switches a limit off.
+// Limits apply to one entry from Go, including everything it re-enters, until a host
+// function renews them with Call.Renew. A zero field takes the default. NoLimit switches a
+// limit off.
 type Limits struct {
 	Steps          int64 // default 10M. Back-edges, calls, and library work in proportion to its size
 	AllocBytes     int64 // default 64 MiB. Charged before each allocation made for the script

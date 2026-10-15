@@ -36,8 +36,9 @@ from what the libraries give, such as `string.rep` or `collectgarbage`.
 
 Limits apply to one entry from Go: a call through a function from `FuncN`, `Call` or
 `Rule.Eval`, or the top level that `Load` and `NewVM` run. They cover everything the entry
-runs, nested calls included. A zero field takes the default, so a `Runtime` made with no
-options is bounded; `lua.NoLimit` switches a limit off.
+runs, nested calls included, until a host function renews them ([Long entries](#long-entries)).
+A zero field takes the default, so a `Runtime` made with no options is bounded; `lua.NoLimit`
+switches a limit off.
 
 | Limit | Default | What it counts | When it runs out |
 | --- | --- | --- | --- |
@@ -68,6 +69,17 @@ returning an error made with `lua.Terminate`, end the entry:
 A host function that calls another script with `c.Context()` shares the entry's budgets: the
 nested call can use at most what the entry has left, and what it uses is charged back. A
 nested call made with an unrelated context gets budgets of its own.
+
+### Long entries
+
+An entry that runs long and waits on its host, such as a session that reads input or a worker
+that waits for events, would run out of any budget in the end. A host function that calls
+`c.Renew()` after each wait gives the entry its step and allocation budgets afresh, so they
+bound the work between waits rather than over the whole entry; `Observe` and
+`collectgarbage("count")` still count the whole. Renew only after a real wait: a script that
+loops on a function that renews at once is bounded by its context alone. A nested call made
+with `c.Context()` cannot renew the budgets it shares, and closers running on the grace budget
+cannot renew it.
 
 ## Fixed caps
 

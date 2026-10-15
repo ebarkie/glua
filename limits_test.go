@@ -203,6 +203,148 @@ func TestExactSteps(t *testing.T) {
 	}
 }
 
+func TestRenew(t *testing.T) {
+	var stats CallStats
+	renew := GoFunc(func(c *Call) error { c.Renew(); return nil })
+	rt := MustNew(LibSafe|LibCoroutine, Limits{Steps: 10_000, AllocBytes: 1 << 17},
+		Global("renew", renew), Global("wait", GoFunc(func(c *Call) error { return nil })),
+		Observe(func(cs CallStats) { stats = cs }))
+	s := mustLoad(t, rt, `
+		local function rounds(pause)
+			for i = 1, 10 do
+				local s = string.rep("x", 1 << 14)
+				for j = 1, 3000 do end
+				pause()
+			end
+		end
+		function renewed() rounds(renew) end
+		function waited() rounds(wait) end
+		function inCoroutine() coroutine.wrap(rounds)(renew) end
+		function count() rounds(renew) return collectgarbage("count") end`)
+	renewed, _ := s.Func0[struct{}]("renewed")
+	waited, _ := s.Func0[struct{}]("waited")
+	inCoroutine, _ := s.Func0[struct{}]("inCoroutine")
+	count, _ := s.Func0[float64]("count")
+	// ten rounds of some 3,500 steps and 32 KB fit only if each round has the budgets afresh
+	if _, err := renewed(context.Background()); err != nil {
+		t.Errorf("renewed: %v", err)
+	}
+	renewedStats := stats
+	unbounded := MustNew(Limits{Steps: NoLimit, AllocBytes: NoLimit}, Global("renew", renew), Global("wait", GoFunc(func(c *Call) error { return nil })),
+		Observe(func(cs CallStats) { stats = cs }))
+	waitedUnbounded, _ := mustLoad(t, unbounded, `
+		local function rounds(pause)
+			for i = 1, 10 do
+				local s = string.rep("x", 1 << 14)
+				for j = 1, 3000 do end
+				pause()
+			end
+		end
+		function waited() rounds(wait) end`).Func0[struct{}]("waited")
+	waitedUnbounded(context.Background())
+	// steps exactly; bytes at least the rounds' strings, since a fresh executor's stack growth
+	// is charged too, and which executor an entry gets is the pool's business
+	if renewedStats.Steps != stats.Steps || stats.Steps < 35_000 || renewedStats.AllocBytes < 10<<15 {
+		t.Errorf("renewed: CallStats %+v, but the same work unrenewed used %+v", renewedStats, stats)
+	}
+	if _, err := waited(context.Background()); !errors.Is(err, ErrSteps) {
+		t.Errorf("not renewed: %v", err)
+	}
+	renewed(context.Background())
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := renewed(cancelled); !errors.Is(err, context.Canceled) || stats.Steps > 10_000 { // what the last run renewed is not carried over
+		t.Errorf("an entry that never ran: %v, CallStats %+v", err, stats)
+	}
+	if _, err := inCoroutine(context.Background()); err != nil {
+		t.Errorf("renewed in a coroutine: %v", err)
+	}
+	if kb, err := count(context.Background()); err != nil || kb < 10<<15/1024 {
+		t.Errorf("collectgarbage('count') after renewing: %v KB, %v", kb, err)
+	}
+
+	// a limit already exceeded stays exceeded, even for Lua the host calls after renewing
+	late := GoFunc(func(c *Call) error {
+		c.Invoke(c.Value(0))
+		c.Renew()
+		c.Invoke(c.Value(0))
+		return nil
+	})
+	rt = MustNew(Limits{Steps: 10_000}, Global("late", late), Observe(func(cs CallStats) { stats = cs }))
+	_, err := runLimited(t, rt, context.Background(), "function f() late(function() while true do end end) end")
+	if !errors.Is(err, ErrSteps) || stats.Steps > 10_000 {
+		t.Errorf("after the limit: %v, after %d steps", err, stats.Steps)
+	}
+
+	// so does a stack that grew past the allocation budget: Renew is the charge that fails
+	rt = MustNew(Limits{AllocBytes: 2 << 10, InitAllocBytes: 1 << 20}, Global("renew", renew))
+	s = mustLoad(t, rt, "t = {} for i = 1, 5000 do t[i] = i end function f() renew(table.unpack(t)) renew() end")
+	f, _ := s.Func0[struct{}]("f")
+	if _, err := f(context.Background()); !errors.Is(err, ErrAlloc) && !stackStress { // lua_stackstress does not charge a moved stack
+		t.Errorf("overdrawn stack: %v", err)
+	}
+
+	// closers after a terminal error keep the grace budget
+	var calls int
+	rt = MustNew(Limits{Steps: 10_000}, Global("renew", renew), Global("call", Do0(func() { calls++ })))
+	_, err = runLimited(t, rt, context.Background(), `function f()
+		local t <close> = setmetatable({}, {__close = function() renew() while true do call() end end})
+		while true do end
+	end`)
+	if !errors.Is(err, ErrSteps) || calls == 0 || calls > tickQuantum+1 { // a back-edge a call, and one call before the first
+		t.Errorf("closer: %v after %d calls", err, calls)
+	}
+}
+
+func TestRenewNested(t *testing.T) {
+	var inner *Script
+	callInner := GoFunc(func(c *Call) error {
+		_, err := inner.Call(c.Context(), inner.Globals().Get(String(c.Arg[string](0))), c.Value(1))
+		return err
+	})
+	renew := GoFunc(func(c *Call) error { c.Renew(); return nil })
+	callRenew := GoFunc(func(c *Call) error { // a nested entry, then a wait, then Renew
+		_, err := inner.Call(c.Context(), inner.Globals().Get(String("spin")), c.Value(0))
+		c.Renew()
+		return err
+	})
+	rt := MustNew(Limits{Steps: 10_000}, Global("call_inner", callInner), Global("renew", renew), Global("call_renew", callRenew))
+	inner = mustLoad(t, rt, `
+		function spin(n) for i = 1, n do end end
+		function spinRenew(n) spin(n) renew() spin(n) end`)
+	outer := mustLoad(t, rt, `
+		function f(n) for i = 1, 4 do call_inner("spinRenew", n) end end
+		function g(n) for i = 1, 3 do call_renew(n) for j = 1, 1000 do end end end`)
+	f, _ := outer.Func1[int64, struct{}]("f")
+	// a nested entry shares the outer one's budgets, so its Renew does nothing: eight loops
+	// of 1,500 do not fit in 10,000 steps
+	if _, err := f(context.Background(), 1500); !errors.Is(err, ErrSteps) {
+		t.Errorf("nested: %v", err)
+	}
+	// what nested entries used is paid out of the budgets before they are renewed, not out of
+	// the new ones: rounds of 8,000 nested steps and 1,000 more fit
+	g, _ := outer.Func1[int64, struct{}]("g")
+	if _, err := g(context.Background(), 8000); err != nil {
+		t.Errorf("renewed after nested entries: %v", err)
+	}
+	// a context taken before Renew gives nested entries the renewed budgets: after 8,000
+	// steps, 5,000 nested ones fit only in renewed budgets
+	held := GoFunc(func(c *Call) error {
+		ctx := c.Context()
+		for range 3 {
+			c.Renew()
+			if _, err := inner.Call(ctx, inner.Globals().Get(String("spin")), Int(5000)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	rt2 := MustNew(Limits{Steps: 10_000}, Global("held", held))
+	if _, err := runLimited(t, rt2, context.Background(), "function f() for i = 1, 8000 do end held() end"); err != nil {
+		t.Errorf("a context held across Renew: %v", err)
+	}
+}
+
 func TestNestedScriptsShareBudget(t *testing.T) {
 	var inner *Script
 	callInner := GoFunc(func(c *Call) error {
