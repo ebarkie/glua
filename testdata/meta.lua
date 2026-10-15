@@ -102,3 +102,23 @@ local f = load([[
   return table.concat(r, " ")
 ]], "env", "t", env)
 return f(A, B)
+--== __index chains of classes
+local A = {} A.__index = A
+function A:who() return "A" end
+function A:get() return self.v end
+local B = setmetatable({}, A) B.__index = B
+function B:who() return "B" end
+local C = setmetatable({}, B) C.__index = C
+local o = setmetatable({v = 1}, C)
+local r = {}
+for i = 1, 3 do r[#r + 1] = o:who() .. o:get() .. tostring(o.missing) end
+B.who = nil
+for i = 1, 3 do r[#r + 1] = o:who() end
+local D = {who = function() return "D" end}
+B.__index = D
+for i = 1, 3 do r[#r + 1] = o:who() .. tostring(o.get) end
+B.__index = function(_, k) return k == "who" and function() return "f" end or nil end
+for i = 1, 3 do r[#r + 1] = o:who() .. tostring(o.get) end
+B.__index = nil
+for i = 1, 3 do r[#r + 1] = tostring(o.who) .. tostring(o.get) .. tostring(o.v) end
+return table.concat(r, " ")

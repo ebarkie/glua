@@ -23,8 +23,8 @@ type Table struct {
 	used  int    // nodes holding a key, deleted ones included
 	meta  *Table
 	// index caches this table's __index when it is a table and this table serves as a
-	// metatable, for the hot loop's inline hop. Writing a key that starts with "__" clears
-	// it; the driver fills it for a mutable metatable, and Freeze for a frozen one.
+	// metatable, for constField's hops. Writing a key that starts with "__" clears it; the
+	// driver fills it for a mutable metatable, and Freeze for a frozen one.
 	index *Table
 	flags uint8
 	// metaOK caches that setmetatable accepted this table as a metatable: no __mode, and no

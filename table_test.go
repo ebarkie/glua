@@ -203,6 +203,19 @@ func TestMetamethodCache(t *testing.T) {
 	if frozen.flags&tabAbsent != 0 {
 		t.Fatal("reading a frozen metatable wrote its flags")
 	}
+	// a lookup through classes caches every __index it passes, for the next one to follow
+	res, err := runSource("chain", `
+		local A = {} A.__index = A function A:get() return 1 end
+		local B = setmetatable({}, A) B.__index = B
+		local o = setmetatable({}, B)
+		return o:get(), A, B`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := (*Table)(res[1].p), (*Table)(res[2].p)
+	if a.index != a || b.index != b {
+		t.Error("the __index of a chain not cached")
+	}
 }
 
 // TestStringKeyLookup exercises the interpreter loop's inline lookup of short string keys:

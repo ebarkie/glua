@@ -502,8 +502,8 @@ func (ex *executor) index(op uint8, obj, key Value, dst int) error {
 				ex.skipAux(op)
 				return nil
 			}
-			if hops == 0 && h.isObj(kindTable) && t.meta.flags&tabFrozen == 0 {
-				t.meta.index = (*Table)(h.p) // for the hot loop's inline hop
+			if h.isObj(kindTable) && t.meta.flags&tabFrozen == 0 {
+				t.meta.index = (*Table)(h.p) // for constField's hops
 			}
 			if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
 				return ex.callMeta("__index", h, obj, key)
@@ -1387,9 +1387,10 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 }
 
 // constField does R[dst] = obj[K[kc]] for GETFIELD and SELF, when obj is a table and the
-// key is in it or one cached __index hop away, or obj is a string and the key is in the
-// string library, with the key's compile-time hash. It learns the site's hint and reports
-// whether it was done; the general index does the rest.
+// key is in it, cached __index hops away, as a class's methods are, or in none of them, or
+// obj is a string and the key is in the string library, with the key's compile-time hash.
+// It learns the site's hint within one hop and reports whether it was done; the general
+// index does the rest.
 func (ex *executor) constField(obj Value, kc, dst int) bool {
 	var t *Table
 	hops := 0
@@ -1403,17 +1404,16 @@ func (ex *executor) constField(obj Value, kc, dst int) bool {
 	}
 	p := ex.st.cl.p
 	key, h := p.k[kc], p.khash[kc]
-	for ; hops < 2; hops++ {
+	for ; hops < maxIndexHops; hops++ {
 		if idx := t.findNode(&key, h); idx >= 0 && !t.nodes[idx].v.IsNil() {
-			learn(&p.hints[ex.aux()], idx)
+			if hops <= 1 {
+				learn(&p.hints[ex.aux()], idx)
+			}
 			*ex.reg(dst) = t.nodes[idx].v
 			ex.st.pc++ // the aux word
 			return true
 		}
-		if t.meta == nil {
-			if hops > 0 {
-				return false
-			}
+		if t.meta == nil { // the end of the chain: the key is nowhere in it
 			*ex.reg(dst) = Value{}
 			ex.st.pc++
 			return true
