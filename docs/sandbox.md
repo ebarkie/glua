@@ -45,7 +45,7 @@ options is bounded; `lua.NoLimit` switches a limit off.
 | `CallDepth` | 10,000 | Lua frames | `stack overflow`, which `pcall` can catch |
 | `HostDepth` | 100 | Nesting of Go and Lua: host functions that call back into Lua, library callbacks such as sort's comparator, scripts called from host functions | `ErrHostDepth`, terminal |
 | `InitSteps`, `InitAllocBytes` | `Steps`, `AllocBytes` | The same, for the top level in `Load` and `NewVM` | As above |
-| context | none | Checked when the entry starts, and again every 1,024 steps | The context's cause, terminal |
+| context | none | Checked when the entry starts, again every 1,024 steps, and when a host function returns an error | The context's cause, terminal |
 
 `Script.WithLimits` gives the same code and state other limits, for example per tenant. The
 `Observe` option reports what each entry used.

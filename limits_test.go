@@ -98,6 +98,48 @@ func TestCancellation(t *testing.T) {
 	}
 }
 
+func TestCancelledHostError(t *testing.T) {
+	gone := errors.New("client left")
+	var stop context.CancelCauseFunc // the running entry's
+	var after int
+	rt := MustNew(
+		Global("wait", GoFunc(func(c *Call) error {
+			stop(gone)
+			<-c.Context().Done()
+			return context.Cause(c.Context())
+		})),
+		Global("fail", GoFunc(func(c *Call) error {
+			stop(gone)
+			return errors.New("unrelated")
+		})),
+		Global("hog", GoFunc(func(c *Call) error {
+			stop(gone)
+			return c.Charge(1 << 20)
+		})),
+		Global("after", Do0(func() { after++ })),
+		Limits{AllocBytes: 1 << 16})
+	for _, tc := range []struct {
+		src  string
+		want error
+	}{
+		{"function f() pcall(wait) after() end", gone},
+		{"function f() pcall(fail) after() end", gone},
+		{"function f() pcall(hog) after() end", ErrAlloc}, // a terminal error that stands is not replaced
+	} {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		stop, after = cancel, 0
+		_, err := runLimited(t, rt, ctx, tc.src)
+		cancel(nil)
+		var le *Error
+		if !errors.Is(err, tc.want) || !errors.As(err, &le) || !le.terminal {
+			t.Errorf("%s: got %v, want %v", tc.src, err, tc.want)
+		}
+		if after != 0 {
+			t.Errorf("%s: the script went on", tc.src)
+		}
+	}
+}
+
 func TestExactSteps(t *testing.T) {
 	// a loop of n iterations takes n-1 back-edges; the limit is exact
 	for _, n := range []int64{1, 100, 1023, 1024, 1025, 5000} {
