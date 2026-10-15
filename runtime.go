@@ -24,8 +24,9 @@ type Runtime struct {
 	init    limits // for the top level, in Load and NewVM
 	layer   *Table // frozen: the libraries, host globals and Go modules every environment starts with
 	modules *Table // frozen: the Go modules, by name, for package.loaded
-	sources map[string]*sourceModule
+	sources map[string]*Chunk
 	loader  func(name string) (string, error)
+	chunks  func(ctx context.Context, name string) (*Chunk, error) // ChunkLoader's
 
 	reserved map[string]bool // names a script cannot assign
 	without  map[string]bool // the names Without left out of each environment
@@ -47,13 +48,6 @@ type Runtime struct {
 	planMu     sync.Mutex
 
 	pool sync.Pool // executors; they hold no script state, so one pool serves every Script and Rule
-}
-
-// sourceModule is a module written in Lua, compiled once by New and run by require in each
-// environment that loads it.
-type sourceModule struct {
-	p    *proto
-	info *syntax.Info
 }
 
 // limits are resolved Limits: no zero means default, and no NoLimit.
@@ -122,6 +116,7 @@ type options struct {
 	modules  []namedValue
 	sources  []namedValue
 	loader   func(string) (string, error)
+	chunks   func(context.Context, string) (*Chunk, error)
 	without  []string
 	output   writeFunc
 	randSeed *uint64
@@ -164,7 +159,8 @@ func SourceModule(name, src string) Option {
 }
 
 // Loader gives require the source of modules not defined by Module or SourceModule. It runs
-// only while a script loads.
+// only while a script loads, or in a VM. An error it returns, or the *SyntaxError of its
+// source, is behind the error of require, for errors.Is and errors.As.
 func Loader(find func(name string) (src string, err error)) Option {
 	return optionFunc(func(o *options) { o.loader = find })
 }
@@ -177,6 +173,18 @@ func Loader(find func(name string) (src string, err error)) Option {
 // is an error from New.
 func Without(names ...string) Option {
 	return optionFunc(func(o *options) { o.without = append(o.without, names...) })
+}
+
+// ChunkLoader is Loader for a host that compiles modules itself: find receives the context
+// of the entry that requires name, so it can choose the module by who asks, and returns it
+// compiled, so it can name it in messages as it likes and give the same Chunk again rather
+// than have each environment compile it. Like Loader, it runs from any goroutine that loads
+// a Script or makes a VM, so it must be safe for concurrent use. An error from find says
+// the module was not found, or did not compile when it is or wraps a *SyntaxError; so does
+// a nil Chunk. A Chunk's source is not charged to the script, as a SourceModule's is not.
+// Loader and ChunkLoader cannot both be given.
+func ChunkLoader(find func(ctx context.Context, name string) (*Chunk, error)) Option {
+	return optionFunc(func(o *options) { o.chunks = find })
 }
 
 // Output is where print and warn write; the default discards. Writes are serialised, so w
@@ -231,7 +239,7 @@ type CallStats struct {
 }
 
 // New makes a Runtime. It reports bad options: a value that cannot be converted, a duplicate
-// name, a syntax error in a source module.
+// name, a syntax error in a source module, both Loader and ChunkLoader.
 func New(opts ...Option) (*Runtime, error) {
 	used.Store(true)
 	var o options
@@ -241,6 +249,7 @@ func New(opts ...Option) (*Runtime, error) {
 	rt := &Runtime{
 		libs:     LibSafe,
 		loader:   o.loader,
+		chunks:   o.chunks,
 		randSeed: o.randSeed,
 		clock:    o.clock,
 		observe:  o.observe,
@@ -251,7 +260,7 @@ func New(opts ...Option) (*Runtime, error) {
 		checked:  defaultChecked || o.hardened,
 		reserved: map[string]bool{},
 		without:  map[string]bool{},
-		sources:  map[string]*sourceModule{},
+		sources:  map[string]*Chunk{},
 	}
 	if o.libsSet {
 		rt.libs = o.libs &^ LibNone
@@ -267,6 +276,9 @@ func New(opts ...Option) (*Runtime, error) {
 		rt.clock = time.Now
 	}
 	rt.started = rt.clock()
+	if o.loader != nil && o.chunks != nil {
+		return nil, errors.New("glua: Loader and ChunkLoader cannot both be given")
+	}
 	if o.hardened {
 		if bad := rt.libs & (LibLoad | LibCoroutine | LibOS | LibIO); bad != 0 {
 			return nil, fmt.Errorf("glua: the hardened profile refuses %s", bad)
@@ -520,13 +532,12 @@ func (rt *Runtime) envName(name string) bool {
 }
 
 // compileModule compiles the source of a module.
-func compileModule(name, src string) (*sourceModule, error) {
-	p, info, err := compileChunk(chunkID("="+name), src)
+func compileModule(name, src string) (*Chunk, error) {
+	p, info, err := compile("="+name, src)
 	if err != nil {
-		return nil, syntaxError(err)
+		return nil, err
 	}
-	setChunkName(p, "="+name)
-	return &sourceModule{p: p, info: info}, nil
+	return &Chunk{p: p, info: info}, nil
 }
 
 // newExecutor makes an executor for this Runtime's pool.
@@ -682,7 +693,7 @@ func newEnvLoader(rt *Runtime) *envLoader {
 }
 
 // require is require(name): the module from package.loaded, or else a source module or
-// one the Loader finds, run now and recorded.
+// one the Loader or ChunkLoader finds, run now and recorded.
 func (ld *envLoader) require(c *Call) error {
 	name, err := c.checkString(0, "require")
 	if err != nil {
@@ -695,19 +706,28 @@ func (ld *envLoader) require(c *Call) error {
 		return c.libErrorf("module '%s' not found: modules can be loaded only while the script loads", name)
 	}
 	m := ld.rt.sources[name]
+	if m == nil && ld.rt.chunks != nil {
+		if m, err = ld.rt.chunks(c.Context(), name); err != nil {
+			var se *SyntaxError
+			if errors.As(err, &se) {
+				return c.libErrorCause(err, "error loading module '%s': %s", name, err.Error())
+			}
+			return c.libErrorCause(err, "module '%s' not found: %s", name, err.Error())
+		}
+	}
 	if m == nil && ld.rt.loader != nil {
 		src, err := ld.rt.loader(name)
 		if err != nil {
-			return c.libErrorf("module '%s' not found: %s", name, err.Error())
+			return c.libErrorCause(err, "module '%s' not found: %s", name, err.Error())
 		}
 		if err := c.ex.charge(len(src)); err != nil {
 			return err
 		}
 		if m, err = compileModule(name, src); err != nil {
-			return c.libErrorf("error loading module '%s': %s", name, err.Error())
+			return c.libErrorCause(err, "error loading module '%s': %s", name, err.Error())
 		}
 	}
-	if m == nil {
+	if m == nil || m.p == nil { // a zero Chunk from ChunkLoader is none
 		return c.libErrorf("module '%s' not found", name)
 	}
 	res, err := c.call(luaFnValue(newMainClosure(m.p, m.info, ld.env)), String(name))

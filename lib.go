@@ -9,11 +9,17 @@ import (
 
 // libErrorf raises an error with the caller's position, as luaL_error does.
 func (c *Call) libErrorf(format string, args ...any) error {
+	return c.libErrorCause(nil, format, args...)
+}
+
+// libErrorCause is libErrorf with a Go error behind the message, which errors.Is and
+// errors.As find when the error leaves the entry.
+func (c *Call) libErrorCause(cause error, format string, args ...any) error {
 	msg := fmt.Sprintf(format, args...)
 	if pos := c.ex.whereLevel(c, 1); pos != "" {
 		msg = pos + ": " + msg
 	}
-	return &Error{Value: String(msg)}
+	return &Error{Value: String(msg), cause: cause}
 }
 
 // argError raises "bad argument #n to 'f' (msg)", counting arguments from 1, as

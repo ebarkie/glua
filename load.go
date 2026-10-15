@@ -8,6 +8,35 @@ import (
 
 const idSize = 60 // LUA_IDSIZE: the room a chunk name gets in messages
 
+// Chunk is compiled Lua source, as Compile makes it; the zero Chunk is not one. It never
+// changes, so one Chunk can serve any number of Runtimes and goroutines; each environment
+// that requires it runs it afresh.
+type Chunk struct {
+	p    *proto
+	info *syntax.Info
+}
+
+// Compile compiles src under name, which messages and tracebacks show, as Load does. Code
+// that does not compile gives a *SyntaxError.
+func Compile(name, src string) (*Chunk, error) {
+	used.Store(true) // the chunk's constants are hashed with the seed
+	p, info, err := compile("@"+name, src)
+	if err != nil {
+		return nil, err
+	}
+	return &Chunk{p: p, info: info}, nil
+}
+
+// compile compiles src as the chunk named chunk, "@file" or "=name" as chunkID reads it.
+func compile(chunk, src string) (*proto, *syntax.Info, error) {
+	p, info, err := compileChunk(chunkID(chunk), src)
+	if err != nil {
+		return nil, nil, syntaxError(err)
+	}
+	setChunkName(p, chunk)
+	return p, info, nil
+}
+
 // chunkID formats a chunk name for messages, as C Lua's luaO_chunkid does: "=name" is
 // name, "@file" is the file name (shortened from the left), and anything else is source
 // text, shown as [string "first line..."].

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"slices"
@@ -139,6 +140,10 @@ func TestNewErrors(t *testing.T) {
 		{[]Option{Without("_G.print")}, "cannot bind '_G.print'"},
 		{[]Option{LibNone | LibMath, Without("require")}, "cannot bind 'require'"},
 		{[]Option{Without("string.rep"), Global("string", 1)}, "cannot bind 'string': the name is already defined"},
+		{[]Option{
+			Loader(func(string) (string, error) { return "", nil }),
+			ChunkLoader(func(context.Context, string) (*Chunk, error) { return nil, nil }),
+		}, "Loader and ChunkLoader cannot both be given"},
 	} {
 		_, err := New(tc.opts...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -230,10 +235,11 @@ func TestGlobalsAndModules(t *testing.T) {
 
 func TestLoader(t *testing.T) {
 	var asked []string
+	errNoFile := errors.New("no such file")
 	rt := MustNew(LibSafe|LibLoad, Loader(func(name string) (string, error) {
 		asked = append(asked, name)
 		if name == "missing" {
-			return "", errors.New("no such file")
+			return "", errNoFile
 		}
 		if name == "bad" {
 			return "return +", nil
@@ -254,6 +260,127 @@ func TestLoader(t *testing.T) {
 	}
 	if strings.Join(asked, ",") != "a,missing,bad" {
 		t.Errorf("loader asked for %v", asked)
+	}
+	var se *SyntaxError
+	if _, err := rt.Load(context.Background(), "m.lua", `require("missing")`); !errors.Is(err, errNoFile) {
+		t.Errorf("an error from the loader: %v", err)
+	}
+	if _, err := rt.Load(context.Background(), "m.lua", `require("bad")`); !errors.As(err, &se) || se.Source != "bad" {
+		t.Errorf("a module that does not compile: %v", err)
+	}
+}
+
+func TestChunkLoader(t *testing.T) {
+	type tenantKey struct{}
+	errNoPlugin := errors.New("no such plugin")
+	// a name too long for messages, shortened from the left as Load's are
+	long := strings.Repeat("dir/", 20) + "long.lua"
+	compiled := map[string]*Chunk{} // the tests call find one at a time; a host's cache needs a lock
+	var asked []string
+	find := func(ctx context.Context, name string) (*Chunk, error) {
+		asked = append(asked, name)
+		switch name {
+		case "missing":
+			return nil, errNoPlugin
+		case "absent":
+			return nil, nil
+		case "bad":
+			return Compile("plugins/bad.lua", "return +")
+		case "both":
+			ch, _ := Compile("plugins/both.lua", "return 1")
+			return ch, errors.New("broken")
+		case "wrapped":
+			_, err := Compile("plugins/wrapped.lua", "return +")
+			return nil, fmt.Errorf("tenant a: %w", err)
+		case "zero":
+			return &Chunk{}, nil
+		case "long":
+			return Compile(long, "error('boom')")
+		}
+		path := "plugins/" + ctx.Value(tenantKey{}).(string) + "/" + name + ".lua"
+		if ch := compiled[path]; ch != nil {
+			return ch, nil
+		}
+		ch, err := Compile(path, `local n = 0
+			return {name = ..., bump = function() n = n + 1 return n end, fail = function() error("boom") end}`)
+		compiled[path] = ch
+		return ch, err
+	}
+	src := `local m = require("rates")
+		function name() return m.name end
+		function bump() return m.bump() end
+		function fail() return select(2, pcall(m.fail)) end
+		function errs()
+			return select(2, pcall(require, "missing")), select(2, pcall(require, "absent")), select(2, pcall(require, "bad")),
+				select(2, pcall(require, "both")), select(2, pcall(require, "wrapped")), select(2, pcall(require, "zero"))
+		end
+		function late() return require("late") end`
+	vmOf := func(rt *Runtime, tenant string) *VM { // the Script requires the module, and the VM again
+		ctx := context.WithValue(context.Background(), tenantKey{}, tenant)
+		s, err := rt.Load(ctx, "main.lua", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		vm, err := s.NewVM(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return vm
+	}
+	call := func(vm *VM, fn string) string {
+		res, err := vm.CallN(context.Background(), nil, vm.Globals().Get(String(fn)))
+		if err != nil {
+			t.Fatalf("%s: %v", fn, err)
+		}
+		return joinValues(res)
+	}
+	rt1, rt2 := MustNew(ChunkLoader(find)), MustNew(ChunkLoader(find))
+	a1, a2, b := vmOf(rt1, "a"), vmOf(rt2, "a"), vmOf(rt1, "b")
+	if len(compiled) != 2 {
+		t.Errorf("compiled %d chunks for two tenants", len(compiled))
+	}
+	if got := call(a1, "name") + " " + call(a1, "bump") + call(a1, "bump") + call(a2, "bump") + call(b, "bump"); got != "rates 1211" {
+		t.Errorf("one chunk, its own state in each environment: got %q", got)
+	}
+	if got := call(a1, "fail") + ", " + call(b, "fail"); got != "plugins/a/rates.lua:2: boom, plugins/b/rates.lua:2: boom" {
+		t.Errorf("chunk names: got %q", got)
+	}
+	want := "module 'missing' not found: no such plugin\tmodule 'absent' not found\terror loading module 'bad': plugins/bad.lua:1: unexpected symbol near '+'\tmodule 'both' not found: broken" +
+		"\terror loading module 'wrapped': tenant a: plugins/wrapped.lua:1: unexpected symbol near '+'\tmodule 'zero' not found"
+	if got := call(a1, "errs"); got != want {
+		t.Errorf("errors:\n got %q\nwant %q", got, want)
+	}
+	var se *SyntaxError
+	if _, err := Compile("x.lua", "x = = 1"); !errors.As(err, &se) || se.Source != "x.lua" || se.Line != 1 {
+		t.Errorf("Compile: %v", err)
+	}
+
+	// what find returned is behind the error that leaves the entry
+	if _, err := rt1.Load(context.Background(), "m.lua", `require("missing")`); !errors.Is(err, errNoPlugin) {
+		t.Errorf("an error from find: %v", err)
+	}
+	if _, err := rt1.Load(context.Background(), "m.lua", `require("bad")`); !errors.As(err, &se) || se.Source != "plugins/bad.lua" {
+		t.Errorf("a module that does not compile: %v", err)
+	}
+	_, err := rt1.Load(context.Background(), "m.lua", `require("long")`)
+	_, want2 := rt1.Load(context.Background(), long, "error('boom')")
+	if err == nil || want2 == nil || err.Error() != want2.Error() {
+		t.Errorf("a long chunk name: %v, Load names it %v", err, want2)
+	}
+	// once a Script is frozen, require does not ask find
+	s, err := rt1.Load(context.WithValue(context.Background(), tenantKey{}, "a"), "main.lua", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked = nil
+	late, _ := s.Func0[Value]("late")
+	if _, err := late(context.Background()); err == nil || len(asked) != 0 {
+		t.Errorf("late require: %v, find asked for %q", err, asked)
+	}
+	// a SourceModule comes before the ChunkLoader
+	rt3 := MustNew(SourceModule("rates", "return {name = 'source'}"), ChunkLoader(find))
+	if got := call(vmOf(rt3, "a"), "name"); got != "source" {
+		t.Errorf("SourceModule and ChunkLoader: got %q", got)
 	}
 }
 

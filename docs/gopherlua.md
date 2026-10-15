@@ -171,7 +171,7 @@ becomes a Lua error. `lua.Reflect(f)` wraps any function by reflection.
 | Task | GopherLua | glua |
 | --- | --- | --- |
 | A module written in Go | `L.PreloadModule(name, loader)` with a loader that pushes a table; or `L.RegisterModule(name, funcs)` | `lua.Module(name, lua.Members{...})`; the table is also a global |
-| A module written in Lua | Files found on `package.path` | `lua.SourceModule(name, src)`, or a `lua.Loader(func(name) (src, error))` that supplies source |
+| A module written in Lua | Files found on `package.path` | `lua.SourceModule(name, src)`, a `lua.Loader(func(name) (src, error))` that supplies source, or a `lua.ChunkLoader(func(ctx, name) (*lua.Chunk, error))` that supplies what `lua.Compile` made |
 | When `require` can load | At any time | While a Script loads, or at any time in a private VM |
 
 ## Go types in Lua
