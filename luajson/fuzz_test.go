@@ -18,7 +18,7 @@ import (
 // same text. A script decoding the same input under tight limits must not panic either.
 func FuzzDecode(f *testing.F) {
 	for _, s := range []string{`{"a":[1,2.5,"x",true,null,{"b":false}],"n":-7}`, `[]`, `{}`, `"é😀"`,
-		`1e400`, `-0`, `9223372036854775808`, `[[[[[[[[1]]]]]]]]`, `{"a":1,"a":2}`, `[1,]`, `"\x00"`, `{"1":1,"2":2}`} {
+		`1e400`, `-0`, `-0.0`, `9223372036854775808`, `[[[[[[[[1]]]]]]]]`, `{"a":1,"a":2}`, `[1,]`, `"\x00"`, `{"1":1,"2":2}`} {
 		f.Add([]byte(s))
 	}
 	rt := lua.MustNew(luajson.Module("json"), lua.Limits{Steps: 100_000, AllocBytes: 1 << 20})

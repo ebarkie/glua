@@ -37,6 +37,9 @@ func TestEncode(t *testing.T) {
 		{`return json.encode(nil)`, `null`},
 		{`return json.encode(9007199254740993)`, `9007199254740993`},
 		{`return json.encode(1e300)`, `1e+300`},
+		{`return json.encode(-0.0)`, `0`},
+		{`return json.encode({-0.0, json.decode("-0")})`, `[0,0]`},
+		{`return json.encode(json.decode("-0.0"))`, `0`},
 		{`return json.encode({a = {1, 2}}, "  ")`, "{\n  \"a\": [\n    1,\n    2\n  ]\n}"},
 	} {
 		v, err := eval(t, tc.src)

@@ -4,8 +4,9 @@
 // A table that is a non-empty sequence, keys 1 to n and no others, becomes a JSON array.
 // Any other table becomes an object, with its keys in sorted order so that the output is
 // deterministic; integer keys become their decimal strings. Strings must be valid UTF-8.
-// Functions, userdata, coroutines, NaN and infinities cannot be encoded. Tables nested more
-// than 64 deep, and tables that contain themselves, are errors.
+// Functions, userdata, coroutines, NaN and infinities cannot be encoded, and a float -0 is
+// written as 0. Tables nested more than 64 deep, and tables that contain themselves, are
+// errors.
 //
 // Decoding gives tables, strings, booleans and numbers: an integer for a number written
 // without a fraction or exponent that fits in 64 bits, a float otherwise. A JSON null is nil,
@@ -75,6 +76,9 @@ func (e *encoder) value(v lua.Value, depth int, path string) error {
 		f, _ := v.Float()
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return pathError(path, "%v cannot be encoded as JSON", f)
+		}
+		if f == 0 {
+			f = 0 // -0 too: written -0, it would decode as the integer 0 and encode as 0
 		}
 		return e.enc.WriteToken(jsontext.Float(f))
 	case lua.KindString:
