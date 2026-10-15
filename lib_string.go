@@ -684,8 +684,6 @@ func quoteValue(c *Call, v Value, arg int) (string, error) {
 			case ch == '"' || ch == '\\' || ch == '\n':
 				b.WriteByte('\\')
 				b.WriteByte(ch)
-			case ch == '\r':
-				b.WriteString("\\r")
 			case ch == 0:
 				if i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9' {
 					b.WriteString("\\000")

@@ -79,3 +79,5 @@ for _, f in ipairs{"%100.3d", "%1"..aux..".3d", "%1.100d", "%"..aux.."d", "%010c
   r[#r + 1] = select(2, pcall(string.format, f, 10))
 end
 return table.unpack(r)
+--== %q writes control characters as decimal escapes
+return string.format("%q", "a\rb\r1\0\0012\t\127x\200\n\"\\"), string.format("%q", "\r"), string.format("%q", "\r9")
