@@ -676,6 +676,18 @@ func (fs *fstate) storeVar(v, ex *expdesc) {
 			fs.freeReg(t)
 		}
 	case eIndexed:
+		if kc := fs.kIndex(ex); kc >= 0 { // a constant value, as in t[k] = true
+			switch v.kk {
+			case keyReg:
+				fs.abc(opSetTableK, v.tbl, v.key, kc)
+			case keyStr:
+				fs.abc(opSetFieldK, v.tbl, v.key, kc)
+				fs.emit(fs.site())
+			case keyInt:
+				fs.abc(opSetIndexK, v.tbl, v.key, kc)
+			}
+			break
+		}
 		r := fs.exp2anyreg(ex)
 		switch v.kk {
 		case keyReg:

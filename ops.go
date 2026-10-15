@@ -133,6 +133,12 @@ func (ex *executor) slowOp() error {
 		return ex.newindex(op, *ex.reg(a), Int(int64(b)), *ex.reg(c))
 	case opSetField:
 		return ex.newindex(op, *ex.reg(a), p.k[b], *ex.reg(c))
+	case opSetTableK:
+		return ex.newindex(op, *ex.reg(a), *ex.reg(b), p.k[c])
+	case opSetIndexK:
+		return ex.newindex(op, *ex.reg(a), Int(int64(b)), p.k[c])
+	case opSetFieldK:
+		return ex.newindex(op, *ex.reg(a), p.k[b], p.k[c])
 	case opNewTable:
 		// the sizes are hints: clamp them, so that no instruction can ask for a huge allocation
 		nhash, narr := 0, min(int(ex.aux()), maxSizeHint)
@@ -440,7 +446,7 @@ func (ex *executor) objReg() int {
 	switch uint8(i) {
 	case opGetTable, opGetIndex, opGetField, opSelf:
 		return decB(i)
-	case opSetTable, opSetIndex, opSetField:
+	case opSetTable, opSetIndex, opSetField, opSetTableK, opSetIndexK, opSetFieldK:
 		return decA(i)
 	}
 	return -1
@@ -570,7 +576,7 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			if err := ex.tableSet(t, k, val); err != nil {
 				return err
 			}
-			if (op == opSetField || op == opSetGlobal) && hops == 0 && k.isString() {
+			if (op == opSetField || op == opSetFieldK || op == opSetGlobal) && hops == 0 && k.isString() {
 				// learn where the key lives, so the next write at this site is inline
 				if idx := t.findNode(&k, hashValue(k)); idx >= 0 {
 					learn(&ex.st.cl.p.hints[ex.aux()], idx)
@@ -655,7 +661,7 @@ func (ex *executor) finishOp(fn, n int) error {
 		opAdd, opSub, opMul, opDiv, opMod, opPow, opIDiv, opBAnd, opBOr, opBXor, opShl, opShr,
 		opAddK, opSubK, opMulK, opDivK, opModK, opPowK, opIDivK, opBAndK, opBOrK, opBXorK, opShlK, opShrK:
 		*ex.reg(decA(i)) = r
-	case opSetField, opSetTable, opSetIndex, opSetGlobal:
+	case opSetField, opSetTable, opSetIndex, opSetFieldK, opSetTableK, opSetIndexK, opSetGlobal:
 	case opEqJmp, opLtJmp, opLeJmp, opLtKJmp, opLeKJmp, opGtKJmp, opGeKJmp:
 		ex.jumpAux(r.truthy() == (decC(i) != 0))
 		return nil

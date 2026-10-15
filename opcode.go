@@ -36,15 +36,18 @@ const (
 	opGetEnv    // R[A] = G, for a free _ENV read
 
 	// tables
-	opGetTable // R[A] = R[B][R[C]]
-	opGetIndex // R[A] = R[B][C], integer key 0..255
-	opGetField // R[A] = R[B][K[C]]; aux: hint site
-	opSetTable // R[A][R[B]] = R[C]
-	opSetIndex // R[A][B] = R[C], integer key 0..255
-	opSetField // R[A][K[B]] = R[C]; aux: hint site
-	opSelf     // R[A+1] = R[B]; R[A] = R[B][K[C]]; aux: hint site
-	opNewTable // R[A] = {}; B: hash size, C unused; aux: array size
-	opSetList  // R[A][aux+i] = R[A+i] for 1 <= i <= B; B=0: up to top
+	opGetTable  // R[A] = R[B][R[C]]
+	opGetIndex  // R[A] = R[B][C], integer key 0..255
+	opGetField  // R[A] = R[B][K[C]]; aux: hint site
+	opSetTable  // R[A][R[B]] = R[C]
+	opSetIndex  // R[A][B] = R[C], integer key 0..255
+	opSetField  // R[A][K[B]] = R[C]; aux: hint site
+	opSetTableK // R[A][R[B]] = K[C]
+	opSetIndexK // R[A][B] = K[C], integer key 0..255
+	opSetFieldK // R[A][K[B]] = K[C]; aux: hint site
+	opSelf      // R[A+1] = R[B]; R[A] = R[B][K[C]]; aux: hint site
+	opNewTable  // R[A] = {}; B: hash size, C unused; aux: array size
+	opSetList   // R[A][aux+i] = R[A+i] for 1 <= i <= B; B=0: up to top
 
 	// arithmetic and bitwise operators: R[A] = R[B] op R[C]
 	opAdd
@@ -174,6 +177,9 @@ var opTable = [numOps]opInfo{
 	opSetTable:   {"SETTABLE", oReg, oReg, oReg, false, oNone},
 	opSetIndex:   {"SETINDEX", oReg, oInt, oReg, false, oNone},
 	opSetField:   {"SETFIELD", oReg, oKStr, oReg, false, oSite},
+	opSetTableK:  {"SETTABLEK", oReg, oReg, oK, false, oNone},
+	opSetIndexK:  {"SETINDEXK", oReg, oInt, oK, false, oNone},
+	opSetFieldK:  {"SETFIELDK", oReg, oKStr, oK, false, oSite},
 	opSelf:       {"SELF", oReg, oReg, oKStr, false, oSite},
 	opNewTable:   {"NEWTABLE", oReg, oInt, oNone, false, oSize},
 	opSetList:    {"SETLIST", oReg, oInt, oNone, false, oSize},
