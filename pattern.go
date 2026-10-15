@@ -289,7 +289,8 @@ func (ms *matchState) matchCapture(s int, l byte) int {
 		return -1
 	}
 	c := ms.capture[i]
-	if len(ms.src)-s >= c.len && ms.src[c.init:c.init+c.len] == ms.src[s:s+c.len] {
+	// a position capture has no text, and like C Lua a back-reference to one never matches
+	if c.len >= 0 && len(ms.src)-s >= c.len && ms.src[c.init:c.init+c.len] == ms.src[s:s+c.len] {
 		return s + c.len
 	}
 	return -1

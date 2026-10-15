@@ -13,6 +13,7 @@ func FuzzPatterns(f *testing.F) {
 		{"hello world", "(%a+) (%a+)"}, {"f(a(b)c)", "%b()"}, {"THE fox", "%f[%a]%a+"},
 		{"aaa", "a-$"}, {"x]y", "[]]"}, {"abc", "()b()"}, {"aaaaaaaaaaaaaaaaaaaa", "(a*)*b"},
 		{"", "[^%"}, {"abc", "%1"}, {"ab", "(()"}, {"a.b", "[%a-]"},
+		{"abc", "()%1"},
 	} {
 		f.Add(seed[0], seed[1])
 	}
@@ -35,4 +36,11 @@ func FuzzPatterns(f *testing.F) {
 			t.Fatalf("panic: %v\n%s", pe.Value, pe.Stack)
 		}
 	})
+}
+
+func TestBackReferenceToPosition(t *testing.T) {
+	v, err := Eval[bool](context.Background(), `return string.find("abc", "()%1") == nil and string.find("abc", "()a%1") == nil`)
+	if err != nil || !v {
+		t.Errorf("got %v, %v; want no match", v, err)
+	}
 }
