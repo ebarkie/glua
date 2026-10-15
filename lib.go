@@ -162,7 +162,9 @@ func (c *Call) call1(f Value, args ...Value) (Value, error) {
 	return c.ex.callSync1(f, args)
 }
 
-// index returns obj[key], with __index, from library code.
+// index returns obj[key], with __index, from library code. The errors it raises itself, a value
+// that cannot be indexed and a chain too long, have no position, as C Lua raises them inside
+// the library function.
 func (c *Call) index(obj, key Value) (Value, error) {
 	ex := c.ex
 	for hops := 0; hops < maxIndexHops; hops++ {
@@ -187,7 +189,7 @@ func (c *Call) index(obj, key Value) (Value, error) {
 			if obj.isObj(kindTable) {
 				return Value{}, nil
 			}
-			return Value{}, c.libErrorf("attempt to index a %s value", typeName(obj))
+			return Value{}, &Error{Value: String("attempt to index a " + typeName(obj) + " value")}
 		}
 		if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
 			res, err := c.call(h, obj, key)
@@ -198,7 +200,7 @@ func (c *Call) index(obj, key Value) (Value, error) {
 		}
 		obj = h
 	}
-	return Value{}, c.libErrorf("'__index' chain too long; possible loop")
+	return Value{}, &Error{Value: String("'__index' chain too long; possible loop")}
 }
 
 // tostring converts v as Lua's tostring does: __tostring, then __name, then the default.

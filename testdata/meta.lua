@@ -94,3 +94,13 @@ local ok2, e2 = pcall(function() o.nothing = 1 end)
 local ok3, e3 = pcall(table.unpack, setmetatable({}, {__index = L}), 1, 1)
 local ok4, e4 = pcall(table.insert, setmetatable({}, {__newindex = L}), 1)
 return ok1, e1, ok2, e2, ok3, e3, ok4, e4
+--== index errors raised by the library, called from Lua
+local L = {}
+L.__index = L
+L.__newindex = L
+setmetatable(L, L)
+local function err(f) return select(2, pcall(f)) end
+return err(function() return table.unpack(setmetatable({}, L), 1, 1) end),
+  err(function() table.insert(setmetatable({}, L), 1) end),
+  err(function() for _ in ipairs(5) do end end),
+  err(function() table.insert(setmetatable({}, {__newindex = 5}), 1) end)

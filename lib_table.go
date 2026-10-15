@@ -16,7 +16,9 @@ func openTable(g *Table) {
 	})))
 }
 
-// setIndex does obj[key] = val with __newindex, from library code.
+// setIndex does obj[key] = val with __newindex, from library code. The errors it raises
+// itself, a value that cannot be indexed and a chain too long, have no position, as C Lua
+// raises them inside the library function.
 func (c *Call) setIndex(obj, key, val Value) error {
 	for hops := 0; hops < maxIndexHops; hops++ {
 		var h Value
@@ -32,7 +34,7 @@ func (c *Call) setIndex(obj, key, val Value) error {
 		} else {
 			h = c.ex.metamethod(obj, "__newindex")
 			if h.IsNil() {
-				return c.libErrorf("attempt to index a %s value", typeName(obj))
+				return &Error{Value: String("attempt to index a " + typeName(obj) + " value")}
 			}
 		}
 		if h.isObj(kindLuaFn) || h.isObj(kindGoFn) {
@@ -41,7 +43,7 @@ func (c *Call) setIndex(obj, key, val Value) error {
 		}
 		obj = h
 	}
-	return c.libErrorf("'__newindex' chain too long; possible loop")
+	return &Error{Value: String("'__newindex' chain too long; possible loop")}
 }
 
 func (c *Call) rawSet(t *Table, key, val Value) error {
