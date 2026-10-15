@@ -47,3 +47,13 @@ local tt = {year = 2026, month = 2, day = 31, hour = 12}
 local t = os.time(tt)
 return e("%Q"), e("%"), e("%E"), e("%Ez"), tt.month, tt.day, tt.yday, os.difftime(t + 10, t), select(2, pcall(os.difftime, 5)),
   select(2, pcall(os.time, {year = 2026})), select(2, pcall(os.time, {year = 2026, month = "x", day = 1}))
+--== os.time reads fields as C Lua's lua_tointegerx: numeric strings and integral floats
+local function e(t) return select(2, pcall(os.time, t)) end
+local base = os.time({year = 2000, month = 1, day = 1, hour = 12})
+return os.time({year = "2000", month = "1", day = 1, hour = 12}) == base, os.time({year = "2000.0", month = 1.0, day = "1"}) == base,
+  e({year = "x", month = 1, day = 1}), e({year = 2000.5, month = 1, day = 1}), e({year = true, month = 1, day = 1}),
+  e({year = {}, month = 1, day = 1}), e({year = 2^40, month = 1, day = 1})
+--== os.date for years a C int cannot hold
+local function e(...) return select(2, pcall(os.date, ...)) end
+return e("!%Y", 2^60), os.date("!%Y", 67767976233532799), os.date("!%Y", -67768040609740800), e("!%Y", -67768040609740801),
+  e("!*t", 2^60)

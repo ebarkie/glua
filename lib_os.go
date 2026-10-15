@@ -67,18 +67,13 @@ func osTime(c *Call) error {
 			return def, nil
 		}
 		n, ok := v.Int()
+		if s, isStr := v.Str(); !ok && isStr { // as C Lua's lua_tointegerx: a numeric string converts
+			if nv, isNum := strToNumber(s); isNum {
+				n, ok = nv.Int()
+			}
+		}
 		if !ok {
-			if s, isStr := v.Str(); isStr {
-				if nv, ok := strToNumber(s); ok {
-					n, ok = nv.Int()
-				}
-			}
-			if !ok {
-				if v.isNumber() || v.isString() {
-					return 0, c.libErrorf("field '%s' is not an integer", key)
-				}
-				return 0, c.libErrorf("field '%s' missing in date table", key)
-			}
+			return 0, c.libErrorf("field '%s' is not an integer", key)
 		}
 		// as C Lua: the field, less delta, must fit a C int
 		if n-delta < math.MinInt32 || n-delta > math.MaxInt32 {
@@ -158,6 +153,9 @@ func osDate(c *Call) error {
 		tm = tm.UTC()
 	} else {
 		tm = tm.Local()
+	}
+	if y := int64(tm.Year()) - 1900; y < math.MinInt32 || y > math.MaxInt32 { // C's struct tm has an int year
+		return c.libErrorf("date result cannot be represented in this installation")
 	}
 	if strings.HasPrefix(format, "*t") {
 		t := NewTable(0, 9)
