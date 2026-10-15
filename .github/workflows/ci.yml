@@ -70,6 +70,8 @@ jobs:
           done
           go test -run '^$' -fuzz '^FuzzParser$' -fuzztime 1m ./internal/syntax
           go test -run '^$' -fuzz '^FuzzLexer$' -fuzztime 1m ./internal/syntax
+          go test -run '^$' -fuzz '^FuzzDecode$' -fuzztime 1m ./luajson
+          go test -run '^$' -fuzz '^FuzzEncode$' -fuzztime 1m ./luajson
 
   cross:
     name: Build ${{ matrix.target }}

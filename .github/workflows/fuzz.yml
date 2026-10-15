@@ -40,6 +40,8 @@ jobs:
           - { name: patterns, pkg: ., target: FuzzPatterns, tags: "" }
           - { name: parser, pkg: ./internal/syntax, target: FuzzParser, tags: "" }
           - { name: lexer, pkg: ./internal/syntax, target: FuzzLexer, tags: "" }
+          - { name: json-decode, pkg: ./luajson, target: FuzzDecode, tags: "" }
+          - { name: json-encode, pkg: ./luajson, target: FuzzEncode, tags: "" }
           - { name: differential, pkg: ., target: "", tags: "" }
     steps:
       - uses: actions/checkout@v5
@@ -89,4 +91,5 @@ jobs:
           path: |
             testdata/fuzz
             internal/syntax/testdata/fuzz
+            luajson/testdata/fuzz
           if-no-files-found: ignore
