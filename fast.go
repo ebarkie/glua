@@ -780,7 +780,7 @@ dispatch:
 				setBool(&regs[uint8(i>>8)], 0)
 			}
 
-		case opEqJmp: // test R[A] == R[B]: the same words, or numbers of one kind
+		case opEqJmp: // test R[A] == R[B]: the same words, numbers of one kind, or short strings
 			x, y := &regs[uint8(i>>8)], &regs[uint8(i>>16)]
 			var eq bool
 			if same(x, y) {
@@ -789,8 +789,16 @@ dispatch:
 				eq = math.Float64frombits(x.n) == math.Float64frombits(y.n)
 			} else if x.p == y.p && (x.p == tInt() || x.p == tBool()) || x.p == nil || y.p == nil {
 				eq = false // scalars of one kind with other bits, or nil against anything else
+			} else if x.n>>56 == kindString && y.n>>56 == kindString && !isScalar(x.p) && !isScalar(y.p) && (x.n != y.n || x.n&lenMask <= 16) {
+				eq = x.n == y.n // two strings behind other pointers: short ones of one length by their words
+				if eq {
+					n := x.n & lenMask
+					w1, w2 := strWords(x.p, n)
+					v1, v2 := strWords(y.p, n)
+					eq = w1 == v1 && w2 == v2
+				}
 			} else {
-				e = exSlowOp // mixed numbers, strings behind other pointers, __eq
+				e = exSlowOp // mixed numbers, long strings behind other pointers, __eq
 				break dispatch
 			}
 			if eq == (i>>24 != 0) {

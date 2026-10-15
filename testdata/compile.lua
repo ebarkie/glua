@@ -314,3 +314,16 @@ if not F then r[#r + 1] = "notF" end
 if T then r[#r + 1] = "T" end
 if not T then r[#r + 1] = "notT" end
 return table.concat(r, ","), (F and 1), (N or 2), (F or N), not N, (T and F)
+--== equality of strings made at run time
+local r = {}
+for n = 0, 18 do
+  local a, b = string.rep("x", n), string.rep("x", n)
+  local last = n > 0 and string.rep("x", n - 1) .. "y" or "y"
+  local first = n > 0 and "y" .. string.rep("x", n - 1) or "y"
+  local mid = n > 2 and string.rep("x", n // 2) .. "y" .. string.rep("x", n - n // 2 - 1) or last
+  local longer = a .. "x"
+  r[#r + 1] = (a == b and "e" or "-") .. (a == last and "e" or "-") .. (a ~= first and "n" or "-")
+    .. (a == mid and "e" or "-") .. (a == longer and "e" or "-") .. (longer ~= a and "n" or "-")
+end
+local n, s, i, z = 10, "10", 1 << 56 | 1, string.char(0) -- i has a string's kind in its top byte
+return table.concat(r, " "), n == s, s == n, ("a" .. "b") == ("a" .. "b"), z == i, i == z
