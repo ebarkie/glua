@@ -122,3 +122,14 @@ local function sum(...) local s = 0 for i = 1, select("#", ...) do s = s + (sele
 local t = 0
 for i = 1, 300 do t = t + sum(i, 2, 3, 4) + sum() + sum(i) end
 return t
+--== select with a selector that only starts with #
+local function f(...) return select("#n", ...), (select("#count", ...)) end
+return select("#n", 1, 2), select("#x"), f(1, 2, 3)
+--== select with no arguments, and an empty selector, are errors
+local function f()
+  do local a, b = 0, "#" end -- leaves "#" in a register above the call
+  local r = select()
+  return r
+end
+local function g(...) return pcall(function(...) return (select("", ...)) end, ...) end
+return select(2, pcall(f)), select(2, g(1, 2)), select(2, pcall(select))

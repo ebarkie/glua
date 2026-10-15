@@ -307,7 +307,7 @@ func baseRawSet(c *Call) error {
 
 func baseSelect(c *Call) error {
 	n := c.Len()
-	if s := c.Value(0); s.isString() && s.str() == "#" {
+	if s := c.Value(0); s.isString() && strings.HasPrefix(s.str(), "#") { // as C Lua: only the first byte counts
 		return c.ReturnValues(Int(int64(n - 1)))
 	}
 	i, err := c.checkInt(0, "select")

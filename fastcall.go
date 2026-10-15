@@ -187,7 +187,10 @@ func fastBuiltin(id uint8, nargs int, x, y, z Value) (r Value, ok bool) {
 		}
 		return subString(x, strStart(int64(y.n), n), strEnd(j, n)), true
 	case fastSelect:
-		if x.isString() && x.n&lenMask == 1 && *(*byte)(x.p) == '#' {
+		if nargs < 1 {
+			return // select(): the call reports the missing argument
+		}
+		if x.isString() && x.n&lenMask >= 1 && *(*byte)(x.p) == '#' {
 			return Int(int64(nargs - 1)), true
 		}
 		if x.p != tInt() || int64(x.n) < 1 || nargs > 3 && int64(x.n) > 2 {
@@ -224,7 +227,7 @@ func (ex *executor) fastSelect(i uint32) {
 	}
 	var r Value
 	switch x := *ex.reg(a + 1); {
-	case x.isString() && x.n&lenMask == 1 && *(*byte)(x.p) == '#':
+	case x.isString() && x.n&lenMask >= 1 && *(*byte)(x.p) == '#':
 		r = Int(int64(nextra))
 	case x.p == tInt():
 		n := int64(x.n)
