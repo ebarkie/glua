@@ -62,6 +62,9 @@ type state struct {
 	nf    int
 	hi    int // high-water mark: registers below it may hold pointers and are cleared on reset
 	nret  int // number of results of an inline RETURN0 or RETURN1
+	// nf+1 while Go code runs closers on top of nf frames: a run it makes at that height
+	// records no Lua frame below
+	goClose int
 
 	limitAddr uintptr // last legal address of a CALL's function slot, plus one
 	hiAddr    uintptr
@@ -220,11 +223,17 @@ func (ex *executor) call(ctx context.Context, cl *closure, fn, nargs int) (err e
 }
 
 // run pushes a goEntry frame and drives the loop until that frame returns. Host functions re-enter here.
+// A nested run's frame records the Lua frame below it, for whereLevel and tracebacks; returning
+// never uses it. Pc 0 records none: the outermost run, or a closer that Go code runs.
 func (ex *executor) run(cl *closure, fn, nargs int) error {
 	st := &ex.st
 	nf := st.nf
 	ex.stack[fn] = luaFnValue(cl)
-	if err := ex.pushFrame(cl, fn, nargs, 0, fn+1, frGoEntry); err != nil {
+	pc, callerBase := 0, fn+1
+	if nf > 0 && st.goClose != nf+1 {
+		pc, callerBase = st.pc, st.base
+	}
+	if err := ex.pushFrame(cl, fn, nargs, pc, callerBase, frGoEntry); err != nil {
 		return err
 	}
 	err := ex.drive(nf)
@@ -233,7 +242,7 @@ func (ex *executor) run(cl *closure, fn, nargs int) error {
 		// close what this run left open, with the error
 		if le.terminal {
 			ex.closeTerminal(fn, le)
-		} else if v, cerr := ex.closeOnError(fn, le.Value); cerr != nil {
+		} else if v, cerr := ex.closeOnError(fn, le.Value, true); cerr != nil {
 			err = cerr
 		} else if !same(&v, &le.Value) {
 			le.Value, le.cause = v, nil // a closer replaced the error
