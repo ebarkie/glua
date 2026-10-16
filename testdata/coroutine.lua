@@ -48,6 +48,27 @@ local co = coroutine.wrap(function()
   return v, s
 end)
 return co(), co("got"), co(), co()
+--== a Go __concat that yields
+local y = setmetatable({}, {__concat = coroutine.yield})
+local j = setmetatable({}, {__concat = function() return "J" end})
+local n = setmetatable({}, {__concat = rawlen})
+local co = coroutine.wrap(function()
+  local r = "a" .. y .. "b" .. j .. "c" .. y
+  return "done", r, "x" .. "ab" .. n .. y
+end)
+local rep = setmetatable({}, {__concat = string.rep})
+local _, e = pcall(function()
+  return "x" ..
+    rep
+end)
+return select(2, co()) == y, select(2, co("1")), e:match(":(%d+):"), co("2")
+--== a resumed concatenation that yields again or fails
+local y = setmetatable({}, {__concat = coroutine.yield})
+local co = coroutine.wrap(function()
+  local ok, e = pcall(function() return {} .. "b" .. y end)
+  return y .. "c" .. y, ok, e:match("concatenate a table value")
+end)
+return select(2, co()) == y, co("1"), co("2") == y, co("3")
 --== errors in coroutines
 local co = coroutine.create(function() error("inside", 0) end)
 local ok, e = coroutine.resume(co)

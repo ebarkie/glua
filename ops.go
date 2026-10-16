@@ -789,8 +789,8 @@ func (ex *executor) concat(a, n int) error { return ex.concatRange(a, n) }
 
 // concatRange concatenates R[a], ..., R[a+total-1] into R[a] as C Lua's luaV_concat does:
 // from the right, joining as long a run of strings and numbers as possible in one allocation,
-// and calling __concat for a pair that is not. A Lua __concat runs in a continuation frame
-// that records how many operands are left; finishOp then resumes here.
+// and calling __concat for a pair that is not. The frame's continuation slot records how many
+// operands are left, and finishOp resumes here when the metamethod returns.
 func (ex *executor) concatRange(a, total int) error {
 	for total > 1 {
 		regs := ex.stack[ex.st.base+a : ex.st.base+a+total]
@@ -805,35 +805,11 @@ func (ex *executor) concatRange(a, total int) error {
 				}
 				return ex.typeError("concatenate", regs[bad], a+bad)
 			}
-			h, args, err := ex.metaCallee("__concat", h, []Value{x, y})
-			if err != nil {
-				return err
+			for len(ex.cont) <= ex.st.nf {
+				ex.cont = append(ex.cont, 0)
 			}
-			if h.isObj(kindLuaFn) {
-				for len(ex.cont) <= ex.st.nf {
-					ex.cont = append(ex.cont, 0)
-				}
-				ex.cont[ex.st.nf] = int32(total)
-				return ex.callMeta("__concat", h, args...)
-			}
-			fn := max(ex.st.base+int(ex.st.cl.p.maxstack), ex.top)
-			if err := ex.ensure(fn + 1 + len(args) + stackSlack); err != nil {
-				return err
-			}
-			ex.stack[fn] = h
-			copy(ex.stack[fn+1:], args)
-			ex.st.hi = max(ex.st.hi, fn+1+len(args))
-			n, err := ex.callGoRawFrom((*goFunc)(h.p), fn, len(args), true) // for Lua code, as callMeta
-			if err != nil {
-				return err
-			}
-			var r Value
-			if n > 0 {
-				r = ex.stack[fn]
-			}
-			ex.stack[ex.st.base+a+total-2] = r
-			total--
-			continue
+			ex.cont[ex.st.nf] = int32(total)
+			return ex.callMeta("__concat", h, x, y)
 		}
 		// the longest run of strings and numbers that ends at the right
 		n := 2
