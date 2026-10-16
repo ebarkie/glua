@@ -31,12 +31,12 @@ func protectedSync(c *Call, handler bool) error {
 	fi, first := 0, 1
 	var h Value
 	if handler {
-		if c.Len() < 2 {
-			return fmt.Errorf("bad argument #2 to 'xpcall' (value expected)")
+		if h = c.Value(1); !h.isObj(kindLuaFn) && !h.isObj(kindGoFn) { // as luaL_checktype
+			return c.typeArgError(1, "xpcall", "function")
 		}
-		h, first = c.Value(1), 2
-	} else if c.Len() < 1 {
-		return fmt.Errorf("bad argument #1 to 'pcall' (value expected)")
+		first = 2
+	} else if err := c.checkAny(0, "pcall"); err != nil {
+		return err
 	}
 	f := c.Value(fi)
 	args := make([]Value, 0, max(c.Len()-first, 0))
@@ -155,21 +155,34 @@ const (
 	handlerSlots  = 200 * 64
 )
 
+// argErrorf is pcallValue's error for a bad argument: with the position of the Lua code
+// that called pcall or xpcall, and none when pcall called it through the trampoline, as C
+// Lua raises it in a function that C called.
+func (ex *executor) argErrorf(format string, args ...any) error {
+	if ex.st.cl != nil && ex.st.cl.p == trampoline.p {
+		return &Error{Value: String(fmt.Sprintf(format, args...))}
+	}
+	return ex.errorf(format, args...)
+}
+
 // pcallValue does pcall(f, ...) or xpcall(f, h, ...) for the call at stack[fn] with nargs
 // arguments. On success the results are true and f's results, at stack[fn].
 func (ex *executor) pcallValue(g *goFunc, fn, nargs int) error {
 	if g == builtinXpcall {
 		if nargs < 2 {
-			return ex.errorf("bad argument #2 to 'xpcall' (value expected)")
+			return ex.argErrorf("bad argument #2 to 'xpcall' (function expected, got no value)")
+		}
+		h := ex.stack[fn+2]
+		if !h.isObj(kindLuaFn) && !h.isObj(kindGoFn) { // as luaL_checktype
+			return ex.argErrorf("bad argument #2 to 'xpcall' (function expected, got %s)", typeName(h))
 		}
 		// keep the handler in xpcall's own slot, and move f down beside it
-		h := ex.stack[fn+2]
 		copy(ex.stack[fn+2:fn+1+nargs], ex.stack[fn+3:fn+2+nargs])
 		ex.stack[fn+1+nargs] = Value{}
 		ex.stack[fn] = h
 		nargs--
 	} else if nargs < 1 {
-		return ex.errorf("bad argument #1 to 'pcall' (value expected)")
+		return ex.argErrorf("bad argument #1 to 'pcall' (value expected)")
 	}
 	slot, nargs := fn+1, nargs-1 // f and its arguments
 	flags := uint64(frCatch)
