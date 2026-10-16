@@ -35,6 +35,19 @@ local _, a = coroutine.resume(co)
 local _, b = coroutine.resume(co, 5)
 local _, c, d, e, f = coroutine.resume(co)
 return a, b, c, d, e, f
+--== a message handler cannot yield
+local function fail() error("e") end
+local co = coroutine.wrap(function()
+  local r = {}
+  r[1], r[2] = xpcall(fail, function(m) return coroutine.yield("in handler") end)
+  r[3], r[4] = xpcall(fail, function(m) return coroutine.isyieldable() end)
+  r[5], r[6] = xpcall(fail, function(m) return coroutine.wrap(function() coroutine.yield("inner") end)() end)
+  r[7], r[8] = xpcall(fail, function(m) return select(2, pcall(coroutine.yield)) end)
+  r[9], r[10] = xpcall(fail, function(m) error("again") end)
+  r[11] = coroutine.yield("after")
+  return table.unpack(r, 1, 11)
+end)
+return co(), co("resumed")
 --== pcall of yield itself
 local co = coroutine.create(function() return pcall(coroutine.yield, "y") end)
 local _, a = coroutine.resume(co)

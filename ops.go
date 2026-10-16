@@ -1025,6 +1025,7 @@ func (ex *executor) frameReturned(fn, n int) (done bool, err error) {
 	st.pc = int(uint32(fr))
 	switch {
 	case handlerFor >= 0: // an xpcall handler returned: unwind to its xpcall with the result
+		ex.nny--
 		var r Value
 		if n > 0 {
 			r = ex.stack[fn]

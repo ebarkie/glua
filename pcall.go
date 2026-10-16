@@ -304,6 +304,7 @@ func (ex *executor) unwind(err error, nf0 int) error {
 		if fr&frErrHandler != 0 {
 			inHandler = true // an error inside a message handler
 			value = String(errorInErrorHandling)
+			ex.nny-- // the handler's frame goes as the unwinding passes it
 		}
 		if fr&frCatch != 0 {
 			fn := ex.frameFuncSlot(f, base, cl) - 1 // pcall's slot, below the protected function
@@ -415,7 +416,8 @@ func (ex *executor) dropTBC(level int) {
 
 // startHandler calls the message handler of the xpcall whose catch frame is f, on top of
 // the failing frame. A Lua handler runs as a frame flagged errHandler; when it returns,
-// handlerReturned unwinds to f with its result.
+// frameReturned unwinds to f with its result. A handler cannot yield, as in C Lua: a Lua one
+// counts as a nested run until its frame goes.
 func (ex *executor) startHandler(f, fn int, msg Value) error {
 	h := ex.stack[fn]
 	ex.errExtra = handlerFrames // room for the handler of a stack overflow; unwindTo takes it back
@@ -445,6 +447,7 @@ func (ex *executor) startHandler(f, fn int, msg Value) error {
 		}
 		return ex.unwindFrom(f, String(errorInErrorHandling))
 	}
+	ex.nny++
 	return nil
 }
 
