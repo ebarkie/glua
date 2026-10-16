@@ -18,7 +18,7 @@ const (
 	defaultDepth = 10000    // Limits.CallDepth default
 	defaultHost  = 100      // Limits.HostDepth default
 	defaultAlloc = 64 << 20 // Limits.AllocBytes default
-	maxIndexHops = 2000     // fixed cap: __index and __newindex chains
+	maxIndexHops = 2000     // fixed cap: __index, __newindex and __call chains
 )
 
 // Frame flags, in the top byte of a frame record. RETURN tests them all at once.
