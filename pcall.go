@@ -452,14 +452,11 @@ func (ex *executor) unwindFrom(f int, value Value) error {
 func luaError(c *Call) error {
 	ex := c.ex
 	msg := c.Value(0)
-	level := int64(1)
-	if c.Len() >= 2 {
-		l, ok := c.Value(1).Int()
-		if !ok {
-			return fmt.Errorf("bad argument #2 to 'error' (number expected, got %s)", typeName(c.Value(1)))
-		}
-		level = l
+	n, err := c.optInt(1, "error", 1) // as luaL_optinteger: nil is 1, "2" is 2
+	if err != nil {
+		return err
 	}
+	level := int64(int32(n)) // as C Lua's (int) cast
 	if msg.isString() && level > 0 {
 		if pos := ex.whereLevel(c, int(level)); pos != "" {
 			msg = String(pos + ": " + msg.str())
