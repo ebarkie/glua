@@ -7,6 +7,9 @@ return hex(string.pack("i4", 100)), hex(string.pack(">i4", 100)), hex(string.pac
 --== overflow
 local function e(...) return select(2, pcall(string.pack, ...)) end
 return e("i1", 128), e("i1", -129), e("I1", 256), e("I1", -1), e("i17", 1), e("i0", 1), e("c", "x"), e("q", 1)
+--== pack with too few values
+local function e(...) return select(2, pcall(string.pack, ...)) end
+return e("i"), e("ii", 1), e("d"), e("z"), e("s1"), e("c2"), e("i", "x"), e("xi"), e("Xii", 1)
 --== floats
 local function hex(s) return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end)) end
 return hex(string.pack("d", 1.5)), hex(string.pack(">f", -2)), hex(string.pack("n", 0.1)),
