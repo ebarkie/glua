@@ -162,7 +162,7 @@ becomes a Lua error. `lua.Reflect(f)` wraps any function by reflection.
 | Raw argument | `L.Get(n)` | `c.Value(i)` |
 | Number of arguments | `L.GetTop()` | `c.Len()` |
 | Return results | `L.Push(v)` …; `return n` | `c.Return(v)`, `c.Return2(a, b)`, `c.ReturnValues(vs...)` |
-| Raise an error | `L.RaiseError(format, ...)`, `L.ArgError(n, msg)` | return an `error`; `c.Errorf(format, ...)`; `lua.Terminate(err)` to end the call |
+| Raise an error | `L.RaiseError(format, ...)`, `L.ArgError(n, msg)` | return an `error`; `c.Errorf(format, ...)`, `c.ArgError(i, msg)`; `lua.Terminate(err)` to end the call |
 | Call back into Lua | `L.CallByParam(...)` | `c.Invoke(fn, args...)`, `c.InvokeN` |
 | Context | `L.Context()` | `c.Context()` |
 
