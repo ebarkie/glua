@@ -873,8 +873,7 @@ func (ex *executor) eqMeta(x, y Value) Value {
 }
 
 // callValue calls the value at stack[fn] with nargs arguments, for the CALL or TFORCALL at
-// pc-1. A value that is not a function is called through its __call metamethod, with the
-// value inserted as the first argument, as C Lua's tryfuncTM does.
+// pc-1. A value that is not a function is called through its __call metamethod.
 func (ex *executor) callValue(fn, nargs int) error {
 	for hops := 0; ; hops++ {
 		v := ex.stack[fn]
@@ -884,25 +883,36 @@ func (ex *executor) callValue(fn, nargs int) error {
 		case v.isObj(kindGoFn):
 			return ex.callGo((*goFunc)(v.p), fn, nargs)
 		}
-		h := ex.metamethod(v, "__call")
-		if h.IsNil() {
-			// the message names the register's variable, also after a __call hop, as C Lua does
-			if uint8(ex.instr(ex.st.pc-1)) == opTForCall {
-				return ex.errorf("attempt to call a %s value (for iterator 'for iterator')", typeName(v))
-			}
-			return ex.typeError("call", v, fn-ex.st.base)
-		}
-		if hops >= maxIndexHops {
-			return ex.errorf("stack overflow")
-		}
-		if err := ex.ensure(fn + nargs + 2); err != nil {
+		var err error
+		if nargs, err = ex.callTM(fn, nargs, hops); err != nil {
 			return err
 		}
-		copy(ex.stack[fn+2:fn+2+nargs], ex.stack[fn+1:fn+1+nargs])
-		ex.stack[fn+1], ex.stack[fn] = v, h
-		nargs++
-		ex.st.hi = max(ex.st.hi, fn+2+nargs)
 	}
+}
+
+// callTM puts the __call metamethod of the value at stack[fn] in its place, with the value
+// inserted as the first of the nargs arguments, as C Lua's tryfuncTM does, and returns the
+// new number of arguments. hops counts the metamethods already put in place for this call.
+func (ex *executor) callTM(fn, nargs, hops int) (int, error) {
+	v := ex.stack[fn]
+	h := ex.metamethod(v, "__call")
+	if h.IsNil() {
+		// the message names the register's variable, also after a __call hop, as C Lua does
+		if uint8(ex.instr(ex.st.pc-1)) == opTForCall {
+			return 0, ex.errorf("attempt to call a %s value (for iterator 'for iterator')", typeName(v))
+		}
+		return 0, ex.typeError("call", v, fn-ex.st.base)
+	}
+	if hops >= maxIndexHops {
+		return 0, ex.errorf("stack overflow")
+	}
+	if err := ex.ensure(fn + nargs + 2); err != nil {
+		return 0, err
+	}
+	copy(ex.stack[fn+2:fn+2+nargs], ex.stack[fn+1:fn+1+nargs])
+	ex.stack[fn+1], ex.stack[fn] = v, h
+	ex.st.hi = max(ex.st.hi, fn+3+nargs)
+	return nargs + 1, nil
 }
 
 // pushLua starts a call of cl at stack[fn] with nargs arguments as a new frame of the loop.
@@ -964,11 +974,16 @@ func (ex *executor) funcSlot() int {
 	return st.base - int(st.cl.p.nparams) - int(ex.nvar[st.nf-1]) - 2
 }
 
-// tailCall calls the value at stack[fn] in place of the current frame.
+// tailCall calls the value at stack[fn] in place of the current frame. A value that is not a
+// function is called through its __call metamethod, still in place of the frame, as C Lua's
+// luaD_pretailcall does.
 func (ex *executor) tailCall(fn, nargs int) error {
 	st := &ex.st
 	v := ex.stack[fn]
 	if !v.isObj(kindLuaFn) {
+		if !v.isObj(kindGoFn) {
+			return ex.tailCallTM(fn, nargs)
+		}
 		// a Go function: call it, and let the RETURN after the TAILCALL return its results
 		return ex.callValue(fn, nargs)
 	}
@@ -982,6 +997,20 @@ func (ex *executor) tailCall(fn, nargs int) error {
 		return err
 	}
 	return ex.tick()
+}
+
+// tailCallTM is tailCall for a value that is not a function: it puts the __call metamethod in
+// its place, and that one's in turn, until a function, then calls that in place of the frame.
+func (ex *executor) tailCallTM(fn, nargs int) error {
+	for hops := 0; ; hops++ {
+		var err error
+		if nargs, err = ex.callTM(fn, nargs, hops); err != nil {
+			return err
+		}
+		if v := ex.stack[fn]; v.isObj(kindLuaFn) || v.isObj(kindGoFn) {
+			return ex.tailCall(fn, nargs)
+		}
+	}
 }
 
 // doReturn returns n results starting at stack[first] from the current frame.

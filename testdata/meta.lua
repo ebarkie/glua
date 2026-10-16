@@ -62,6 +62,17 @@ return a, b, c, d
 local seen
 local t = setmetatable({}, {__index = function(tt, k) seen = k; return k * 2 end})
 return t[21], seen
+--== a tail call through __call stays a tail call
+local t
+t = setmetatable({}, {__call = function(self, n) if n == 0 then return "done" end return t(n - 1) end})
+local inner = setmetatable({}, {__call = function(self, a, b) return a, b end})
+local outer = setmetatable({}, {__call = inner})
+local function viaChain() return outer(1) end
+local function viaGo() return setmetatable({1, 2, 3}, {__call = rawlen})() end
+local function bad() local x = {} return x(1) end
+local function badChain() return setmetatable({}, {__call = 5})() end
+return t(200000), (viaChain()) == outer, select("#", viaChain()), viaGo(),
+  select(2, pcall(bad)), select(2, pcall(badChain))
 --== metamethods that are not functions
 local callable = setmetatable({}, {__call = function(self, a, b) return "called" end})
 local t = setmetatable({}, {__add = "x", __lt = callable, __len = true, __concat = 1, __unm = callable})
