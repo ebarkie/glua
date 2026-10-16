@@ -17,7 +17,7 @@ func openBase(g *Table) {
 		"select": baseSelect, "setmetatable": baseSetMetatable, "tonumber": baseToNumber,
 		"tostring": baseToString, "type": baseType, "warn": baseWarn,
 	} {
-		g.Set(String(name), goFnValue(&goFunc{name: name, f: f, fast: fastIDs[name]}))
+		g.Set(String(name), goFnValue(&goFunc{name: name, qualname: name, f: f, fast: fastIDs[name]}))
 	}
 	g.Set(String("pairs"), goFnValue(builtinPairs))
 	g.Set(String("pcall"), goFnValue(builtinPcall))
@@ -134,13 +134,13 @@ func baseNext(c *Call) error {
 }
 
 var (
-	nextG  = &goFunc{name: "next"}
+	nextG  = &goFunc{name: "next", qualname: "next"}
 	nextFn = goFnValue(nextG)
 )
 
 // builtinPairs is pairs. When Lua calls it for a value with __pairs, the VM calls
 // pairsMeta instead, so that __pairs can yield.
-var builtinPairs = &goFunc{name: "pairs"}
+var builtinPairs = &goFunc{name: "pairs", qualname: "pairs"}
 
 func init() {
 	builtinPairs.f = basePairs
@@ -381,19 +381,60 @@ func baseType(c *Call) error {
 // waitingIn names the Go function a thread that resumed another is waiting in: the callee of
 // its current CALL, as C Lua names a library function, or "?".
 func waitingIn(ts *threadState) string {
-	if ts.st.cl == nil || ts.st.pc < 1 {
+	return calleeName(ts.st.cl, ts.st.base, ts.st.pc, ts.stack)
+}
+
+// calleeName names the Go function that the CALL at pc-1 of the frame of cl at base called,
+// as C Lua names a library function, or "?".
+func calleeName(cl *closure, base, pc int, stack []Value) string {
+	if cl == nil || pc < 1 {
 		return "?"
 	}
-	i := ts.st.cl.p.code[ts.st.pc-1]
+	i := cl.p.code[pc-1]
 	if op := uint8(i); op != opCall && op != opTailCall {
 		return "?"
 	}
-	if f := ts.stack[ts.st.base+decA(i)]; f.isObj(kindGoFn) {
+	if f := stack[base+decA(i)]; f.isObj(kindGoFn) {
 		if g := (*goFunc)(f.p); g.qualname != "" && !g.stateful {
 			return "function '" + g.qualname + "'"
 		}
 	}
 	return "?"
+}
+
+// threadLines appends the traceback lines of a thread's frames, innermost first, through
+// every run on its stack. Go functions are [C] lines, as C functions are in C Lua: the pcall
+// or xpcall below a protected call, and the Go function below a nested run. The trampoline
+// is no line of its own: the Go function it calls is.
+func threadLines(lines []string, st *state, pframes []uint64, stack []Value) []string {
+	cl, base, pc := st.cl, st.base, st.pc
+	if cl == nil {
+		return lines // a coroutine with a Go body that has no Lua frame yet
+	}
+	for f := st.nf - 1; f >= 0; f-- {
+		if cl.p != trampoline.p {
+			t := traceFrame(traceEntry{p: cl.p, pc: pc})
+			lines = append(lines, fmt.Sprintf("%s:%d: in %s", t.Source, t.Line, t.Function))
+		}
+		fr := pframes[f]
+		if fr&frCatch != 0 {
+			if fr&frHandler != 0 {
+				lines = append(lines, "[C]: in function 'xpcall'")
+			} else {
+				lines = append(lines, "[C]: in function 'pcall'")
+			}
+		}
+		if f == 0 || uint32(fr) == 0 {
+			break // no Lua code below
+		}
+		base -= int(fr >> 32 & 0xffffff)
+		cl = (*closure)(stack[base-1].p)
+		pc = int(uint32(fr))
+		if fr&frGoEntry != 0 {
+			lines = append(lines, "[C]: in "+calleeName(cl, base, pc, stack))
+		}
+	}
+	return lines
 }
 
 // debugTraceback is debug.traceback([thread,] [message [, level]]): the message, then the
@@ -426,32 +467,22 @@ func debugTraceback(c *Call) error {
 
 	// the lines of the traceback from level 0; a Go function is [C], as in C Lua
 	var lines []string
-	var trace []traceEntry
 	goBelow := false // the thread's stack starts in the host, which C Lua shows as "[C]: in ?"
 	switch {
 	case co == nil:
 		lines = append(lines, "[C]: in function 'debug.traceback'")
-		nf0 := ex.runBase()
-		trace = appendFrames(nil, &ex.st, ex.pframes, ex.stack, nf0)
-		goBelow = ex.co == nil || nf0 > 0
+		lines = threadLines(lines, &ex.st, ex.pframes, ex.stack)
+		goBelow = ex.co == nil
 	case co.status == coSuspended && co.started:
 		lines = append(lines, "[C]: in function 'coroutine.yield'")
-		trace = appendFrames(nil, &co.st, co.pframes, co.stack, 0)
+		lines = threadLines(lines, &co.st, co.pframes, co.stack)
 	case co.status == coNormal:
 		ts := &co.waiting
 		lines = append(lines, "[C]: in "+waitingIn(ts)) // resume, or a coroutine.wrap function
-		nf0 := runBase(ts.pframes, ts.st.nf)
-		trace = appendFrames(nil, &ts.st, ts.pframes, ts.stack, nf0)
-		goBelow = co.main || nf0 > 0
+		lines = threadLines(lines, &ts.st, ts.pframes, ts.stack)
+		goBelow = co.main
 	case co.status == coDead && co.errVal != nil && co.stack != nil:
-		trace = appendFrames(nil, &co.st, co.pframes, co.stack, 0) // where it failed
-	}
-	for _, f := range (&Error{trace: trace}).Traceback() {
-		if f.Source == "" {
-			lines = append(lines, "[C]: in ?")
-		} else {
-			lines = append(lines, fmt.Sprintf("%s:%d: in %s", f.Source, f.Line, f.Function))
-		}
+		lines = threadLines(lines, &co.st, co.pframes, co.stack) // where it failed
 	}
 	if goBelow {
 		lines = append(lines, "[C]: in ?")

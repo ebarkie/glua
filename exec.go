@@ -136,20 +136,6 @@ func (ex *executor) write(s string) error {
 	return ex.output(ex.ctx, s)
 }
 
-// runBase returns the frame index of the goEntry frame of the current run.
-func (ex *executor) runBase() int { return runBase(ex.pframes, ex.st.nf) }
-
-// runBase returns the frame index of the goEntry frame of a thread's innermost run, among
-// its nf frames.
-func runBase(pframes []uint64, nf int) int {
-	for f := nf - 1; f > 0; f-- {
-		if pframes[f]&frGoEntry != 0 {
-			return f
-		}
-	}
-	return 0
-}
-
 // defaultChecked selects the loop new executors run. The checked loop is the default until
 // a week of continuous fuzzing of both loops has run clean.
 var defaultChecked = true

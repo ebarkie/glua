@@ -13,9 +13,9 @@ import (
 // before anything is unwound, so it sees the whole stack.
 
 var (
-	builtinPcall  = &goFunc{name: "pcall"}
-	builtinXpcall = &goFunc{name: "xpcall"}
-	builtinError  = &goFunc{name: "error"}
+	builtinPcall  = &goFunc{name: "pcall", qualname: "pcall"}
+	builtinXpcall = &goFunc{name: "xpcall", qualname: "xpcall"}
+	builtinError  = &goFunc{name: "error", qualname: "error"}
 )
 
 func init() {

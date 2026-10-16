@@ -100,22 +100,26 @@ type Frame struct {
 func (e *Error) Traceback() []Frame {
 	frames := make([]Frame, 0, len(e.trace))
 	for _, t := range e.trace {
-		if t.p == nil {
-			frames = append(frames, Frame{Function: "Go function"})
-			continue
-		}
-		f := Frame{Source: t.p.source, Line: t.p.lineAt(max(t.pc-1, 0))}
-		switch name := t.p.name; {
-		case name == "main chunk":
-			f.Function = name
-		case name == "" || name == "<anonymous>":
-			f.Function = fmt.Sprintf("function <%s:%d>", t.p.source, t.p.lineAt(0))
-		default:
-			f.Function = "function '" + name + "'"
-		}
-		frames = append(frames, f)
+		frames = append(frames, traceFrame(t))
 	}
 	return frames
+}
+
+// traceFrame is the Frame of a traceback entry.
+func traceFrame(t traceEntry) Frame {
+	if t.p == nil {
+		return Frame{Function: "Go function"}
+	}
+	f := Frame{Source: t.p.source, Line: t.p.lineAt(max(t.pc-1, 0))}
+	switch name := t.p.name; {
+	case name == "main chunk":
+		f.Function = name
+	case name == "" || name == "<anonymous>":
+		f.Function = fmt.Sprintf("function <%s:%d>", t.p.source, t.p.lineAt(0))
+	default:
+		f.Function = "function '" + name + "'"
+	}
+	return f
 }
 
 // captureTrace adds the frames of the current run, above nf0, to an error that leaves it
