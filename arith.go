@@ -135,6 +135,11 @@ func luaPow(x, y float64) float64 {
 	case y == 0 || x == 1:
 		return 1
 	case x != x:
+		// as glibc's pow, which squares a NaN base and negates it for an odd exponent: the
+		// sign shows in tostring, as "-nan"
+		if y == math.Trunc(y) && !math.IsInf(y, 0) && math.Mod(y, 2) != 0 {
+			return math.Abs(x)
+		}
 		return x
 	case y != y:
 		return y

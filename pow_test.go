@@ -67,3 +67,20 @@ func TestPow(t *testing.T) {
 		}
 	}
 }
+
+// A NaN base keeps its sign, except that an odd exponent clears it, as in glibc's pow.
+func TestPowNaNSign(t *testing.T) {
+	neg := math.Copysign(math.NaN(), -1)
+	for _, tc := range []struct {
+		x, y float64
+		neg  bool
+	}{
+		{neg, 1, false}, {neg, 3, false}, {neg, -1, false}, {neg, 2, true}, {neg, -2, true},
+		{neg, 0.5, true}, {neg, math.Inf(1), true}, {neg, 0x1p53, true}, {neg, math.NaN(), true},
+		{math.NaN(), 2, false}, {math.NaN(), neg, false},
+	} {
+		if got := luaPow(tc.x, tc.y); got == got || math.Signbit(got) != tc.neg {
+			t.Errorf("%v ^ %v = %v, sign bit %v, want NaN with sign bit %v", tc.x, tc.y, got, math.Signbit(got), tc.neg)
+		}
+	}
+}
