@@ -22,6 +22,7 @@ const (
 
 type packOpt uint8
 
+// The options that take a value come before kPadding.
 const (
 	kInt packOpt = iota
 	kUint
@@ -213,6 +214,13 @@ func strPack(c *Call) (err error) {
 			b = append(b, 0)
 		}
 		arg++
+		if arg == c.Len() && opt < kPadding { // C Lua marks the end of the arguments with a nil
+			want := "number"
+			if opt == kChar || opt == kString || opt == kZstr {
+				want = "string"
+			}
+			return c.argError(arg+1, "pack", want+" expected, got nil")
+		}
 		switch opt {
 		case kInt:
 			n, err := c.checkInt(arg, "pack")
