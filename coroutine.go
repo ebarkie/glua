@@ -198,8 +198,9 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		ex.st.hi = max(ex.st.hi, co.yieldFn+n)
 		switch co.yieldKind {
 		case yieldMeta:
-			if err := ex.finishOp(co.yieldFn, n); err != nil {
-				return ex.coFailed(co, err)
+			// completing a concatenation can call another metamethod, which may yield or fail
+			if err = ex.finishOp(co.yieldFn, n); err != nil && err != errYield {
+				err = ex.unwind(err, 0)
 			}
 		case yieldPcall:
 			ex.stack[co.yieldFn-1] = Bool(true)
@@ -208,7 +209,9 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 			ex.adjustResults(ex.instr(ex.st.pc-1), co.yieldFn, n)
 		}
 	}
-	err = ex.drive(0)
+	if err == nil {
+		err = ex.drive(0)
+	}
 	switch {
 	case err == nil:
 		co.status, returned = coDead, true
