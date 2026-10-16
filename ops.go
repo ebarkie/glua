@@ -973,6 +973,14 @@ func (ex *executor) tailCall(fn, nargs int) error {
 		return ex.callValue(fn, nargs)
 	}
 	dst := ex.funcSlot()
+	// the stack the callee needs, checked before this frame goes, as C Lua's luaD_pretailcall
+	// does: an overflow is raised by the caller, whose frame catch flags it still holds.
+	// pushFrame asks the same; ensure is called only when the stack must grow, as it is hot.
+	if n := dst + 1 + max(nargs, int((*closure)(v.p).p.nparams)) + 1 + stackSlack; n+stackSlack > len(ex.stack) {
+		if err := ex.ensure(n); err != nil {
+			return err
+		}
+	}
 	fr := ex.pframes[st.nf-1]
 	callerBase := st.base - int(fr>>32&0xffffff)
 	copy(ex.stack[dst:dst+1+nargs], ex.stack[fn:fn+1+nargs])

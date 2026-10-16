@@ -33,6 +33,7 @@ func hostile(t *testing.T, src string, opts ...Option) (Value, error) {
 
 func TestFixedCaps(t *testing.T) {
 	deepParens := strings.Repeat("(", 300) + "1" + strings.Repeat(")", 300)
+	bigParams := "a" + strings.Repeat(", a", 199) // a frame of 200 registers, for a tail call near the stack's end
 	deepTables := strings.Repeat("{", 300) + strings.Repeat("}", 300)
 	deepBlocks := strings.Repeat("do ", 300) + strings.Repeat("end ", 300)
 	for _, tc := range []struct {
@@ -57,6 +58,7 @@ func TestFixedCaps(t *testing.T) {
 		{"register stack", "local function r(n) return 1 + r(n) end function f() return r(1) end", "stack overflow"},
 		{"register stack, caught", "local function r(n) return 1 + r(n) end function f() return select(2, pcall(r, 1)) end", ""},
 		{"vararg stack", "local function r(...) return 1 + r(1, 2, 3, ...) end function f() return r() end", "stack overflow"},
+		{"tail call stack, caught", "local function big(" + bigParams + ") end local function r(n) if not pcall(function() return big(n) end) then return 'caught' end return r(n) .. '' end function f() return r(1) end", "caught"},
 		{"unpack", "function f() return table.unpack({}, 1, 1e8) end", "too many results"},
 		{"1 GiB string.rep", "function f() return string.rep('x', 1 << 31) end", "resulting string too large"},
 		{"1 GiB format", "function f() return string.format('%s%s', string.rep('x', 1 << 20), 1) .. string.rep('y', 1 << 30) end", "allocation limit exceeded"},
