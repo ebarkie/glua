@@ -56,6 +56,88 @@ func TestDebugTraceback(t *testing.T) {
 	}
 }
 
+// debug.traceback takes a thread and a level, as in C Lua: level 1, the caller, by default in
+// the running thread, and level 0, where it waits, in another one.
+func TestDebugTracebackThreadAndLevel(t *testing.T) {
+	out, _ := runWithOutput(t, `
+		local function show(s) print(s) print("--") end
+		local function inner() coroutine.yield() end
+		local function outer() inner() end
+		local co = coroutine.create(outer)
+		coroutine.resume(co)
+		show(debug.traceback(co, "suspended"))
+		show(debug.traceback(co, "level 1", 1))
+		show(debug.traceback(co, "past the end", 5))
+		print(type(debug.traceback(co, {})))
+		local dead = coroutine.create(function() return 1 end)
+		coroutine.resume(dead)
+		show(debug.traceback(dead, "returned"))
+		local err = coroutine.create(function() local x x() end)
+		coroutine.resume(err)
+		show(debug.traceback(err, "failed"))
+		show(debug.traceback(coroutine.create(print), "not started"))
+		show(debug.traceback("default"))
+		show(debug.traceback("zero", 0))
+		local self
+		self = coroutine.create(function() show(debug.traceback(self, "self")) end)
+		coroutine.resume(self)
+		local outerco
+		local innerco = coroutine.create(function() show(debug.traceback(outerco, "normal")) end)
+		outerco = coroutine.create(function() coroutine.resume(innerco) end)
+		coroutine.resume(outerco)
+		print(pcall(debug.traceback, co, "m", "x"))`)
+	want := `suspended
+stack traceback:
+	[C]: in function 'coroutine.yield'
+	t:3: in function 'inner'
+	t:4: in function 'outer'
+--
+level 1
+stack traceback:
+	t:3: in function 'inner'
+	t:4: in function 'outer'
+--
+past the end
+stack traceback:
+--
+table
+returned
+stack traceback:
+--
+failed
+stack traceback:
+	t:14: in function <t:14>
+--
+not started
+stack traceback:
+--
+default
+stack traceback:
+	t:18: in main chunk
+	[C]: in ?
+--
+zero
+stack traceback:
+	[C]: in function 'debug.traceback'
+	t:19: in main chunk
+	[C]: in ?
+--
+self
+stack traceback:
+	t:21: in function <t:21>
+--
+normal
+stack traceback:
+	[C]: in function 'coroutine.resume'
+	t:25: in function <t:25>
+--
+false	bad argument #3 to 'debug.traceback' (number expected, got string)
+`
+	if out != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}
+
 func TestWarn(t *testing.T) {
 	out, _ := runWithOutput(t, `warn("hidden") warn("@on") warn("shown ", "here") warn("@off") warn("hidden")`)
 	if out != "Lua warning: shown here\n" {

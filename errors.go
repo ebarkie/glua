@@ -124,22 +124,34 @@ func (ex *executor) captureTrace(le *Error, nf0 int) {
 	if len(le.trace) > 0 {
 		le.trace = append(le.trace, traceEntry{}) // Go code between the inner run and this one
 	}
-	st := &ex.st
+	le.trace = appendFrames(le.trace, &ex.st, ex.pframes, ex.stack, nf0)
+}
+
+// appendFrames adds the frames of a thread's run above frame nf0 to trace, innermost first.
+// The trampoline is Go code as far as Lua can tell, and is added as such.
+func appendFrames(trace []traceEntry, st *state, pframes []uint64, stack []Value, nf0 int) []traceEntry {
+	entry := func(cl *closure, pc int) traceEntry {
+		if cl.p == trampoline.p {
+			return traceEntry{}
+		}
+		return traceEntry{p: cl.p, pc: pc}
+	}
 	cl, base, pc := st.cl, st.base, st.pc
 	for f := st.nf - 1; f > nf0 && cl != nil; f-- {
-		le.trace = append(le.trace, traceEntry{p: cl.p, pc: pc})
-		fr := ex.pframes[f]
+		trace = append(trace, entry(cl, pc))
+		fr := pframes[f]
 		base -= int(fr >> 32 & 0xffffff)
 		pc = int(uint32(fr))
-		if v := ex.stack[base-1]; v.isObj(kindLuaFn) {
+		if v := stack[base-1]; v.isObj(kindLuaFn) {
 			cl = (*closure)(v.p)
 		} else {
 			cl = nil
 		}
 	}
 	if cl != nil && st.nf > nf0 {
-		le.trace = append(le.trace, traceEntry{p: cl.p, pc: pc})
+		trace = append(trace, entry(cl, pc))
 	}
+	return trace
 }
 
 // Unwrap returns the Go error behind e, if any.

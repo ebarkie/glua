@@ -40,7 +40,8 @@ type coroutine struct {
 	status  coStatus
 	main    bool // stands for the main thread in coroutine.running
 	started bool
-	errVal  *Error // set when the body died in error, for close
+	errVal  *Error      // set when the body died in error, for close
+	waiting threadState // while it is normal: its state, waiting in resume, for debug.traceback
 
 	nnyBase   int       // ex.nny when resumed: a yield must come from exactly one Go call above it
 	yieldFn   int       // stack index where a pending yield's results go
@@ -137,12 +138,13 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		return []Value{String("C stack overflow")}, false, nil
 	}
 	prev := ex.co
-	if prev != nil {
-		prev.status = coNormal
-	} else if ex.mainCo != nil {
-		ex.mainCo.status = coNormal
+	if prev == nil {
+		prev = ex.mainCo // nil when the main thread has no coroutine object
 	}
 	saved := ex.saveThread()
+	if prev != nil {
+		prev.status, prev.waiting = coNormal, saved
+	}
 	ex.loadThread(co.threadState)
 	ex.st.ticks = saved.st.ticks // the step budget belongs to the entry, not the coroutine
 	ex.co = co
@@ -153,11 +155,11 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		co.threadState = ex.saveThread()
 		saved.st.ticks = ex.st.ticks
 		ex.loadThread(saved)
-		ex.co = prev
 		if prev != nil {
-			prev.status = coRunning
-		} else if ex.mainCo != nil {
-			ex.mainCo.status = coRunning
+			prev.status, prev.waiting = coRunning, threadState{}
+		}
+		if ex.co = prev; prev == ex.mainCo {
+			ex.co = nil // the main thread runs as no coroutine
 		}
 		if le, ok := err.(*Error); ok && le.terminal && le.where == "" {
 			le.where = ex.where() // raised by a Go body, which has no position: the resume's
@@ -403,11 +405,12 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		ex.loadThread(co.threadState)
 		// the closers run as the coroutine, which cannot yield meanwhile
 		prev := ex.co
+		if prev == nil {
+			prev = ex.mainCo
+		}
 		ex.co, co.status = co, coRunning
 		if prev != nil {
-			prev.status = coNormal
-		} else if ex.mainCo != nil {
-			ex.mainCo.status = coNormal
+			prev.status, prev.waiting = coNormal, saved
 		}
 		nnyBase := co.nnyBase
 		co.nnyBase = ex.nny + 1
@@ -419,11 +422,11 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		v, cerr := ex.closeOnError(0, value)
 		ex.nny--
 		co.nnyBase = nnyBase
-		ex.co = prev
 		if prev != nil {
-			prev.status = coRunning
-		} else if ex.mainCo != nil {
-			ex.mainCo.status = coRunning
+			prev.status, prev.waiting = coRunning, threadState{}
+		}
+		if ex.co = prev; prev == ex.mainCo {
+			ex.co = nil
 		}
 		co.threadState = ex.saveThread()
 		ex.loadThread(saved)

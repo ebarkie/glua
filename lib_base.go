@@ -378,29 +378,96 @@ func baseType(c *Call) error {
 	return c.ReturnValues(String(name))
 }
 
-// debugTraceback is debug.traceback([message [, level]]): the message, then the frames of
-// the calling Lua code. A message that is not a string is returned as it is.
+// waitingIn names the Go function a thread that resumed another is waiting in: the callee of
+// its current CALL, as C Lua names a library function, or "?".
+func waitingIn(ts *threadState) string {
+	if ts.st.cl == nil || ts.st.pc < 1 {
+		return "?"
+	}
+	i := ts.st.cl.p.code[ts.st.pc-1]
+	if op := uint8(i); op != opCall && op != opTailCall {
+		return "?"
+	}
+	if f := ts.stack[ts.st.base+decA(i)]; f.isObj(kindGoFn) {
+		if g := (*goFunc)(f.p); g.qualname != "" && !g.stateful {
+			return "function '" + g.qualname + "'"
+		}
+	}
+	return "?"
+}
+
+// debugTraceback is debug.traceback([thread,] [message [, level]]): the message, then the
+// frames of the thread, by default the running one. A message that is not a string is
+// returned as it is. Level 0 is the function at the top of the thread's stack: traceback
+// itself in the running thread, where the default is 1, its caller; in another thread, the
+// default, the yield or resume it waits in.
 func debugTraceback(c *Call) error {
-	msg := c.Value(0)
+	ex := c.ex
+	arg := 0
+	var co *coroutine // the thread to trace, nil for the running one
+	if v := c.Value(0); v.isObj(kindThread) {
+		arg = 1
+		if co = (*coroutine)(v.p); co == ex.co || co.main && ex.co == nil {
+			co = nil
+		}
+	}
+	msg := c.Value(arg)
 	if !msg.IsNil() && !msg.isString() && !msg.isNumber() {
 		return c.ReturnValues(msg)
 	}
+	def := int64(1)
+	if co != nil {
+		def = 0
+	}
+	level, err := c.optInt(arg+1, "traceback", def)
+	if err != nil {
+		return err
+	}
+
+	// the lines of the traceback from level 0; a Go function is [C], as in C Lua
+	var lines []string
+	var trace []traceEntry
+	goBelow := false // the thread's stack starts in the host, which C Lua shows as "[C]: in ?"
+	switch {
+	case co == nil:
+		lines = append(lines, "[C]: in function 'debug.traceback'")
+		nf0 := ex.runBase()
+		trace = appendFrames(nil, &ex.st, ex.pframes, ex.stack, nf0)
+		goBelow = ex.co == nil || nf0 > 0
+	case co.status == coSuspended && co.started:
+		lines = append(lines, "[C]: in function 'coroutine.yield'")
+		trace = appendFrames(nil, &co.st, co.pframes, co.stack, 0)
+	case co.status == coNormal:
+		ts := &co.waiting
+		lines = append(lines, "[C]: in "+waitingIn(ts)) // resume, or a coroutine.wrap function
+		nf0 := runBase(ts.pframes, ts.st.nf)
+		trace = appendFrames(nil, &ts.st, ts.pframes, ts.stack, nf0)
+		goBelow = co.main || nf0 > 0
+	case co.status == coDead && co.errVal != nil && co.stack != nil:
+		trace = appendFrames(nil, &co.st, co.pframes, co.stack, 0) // where it failed
+	}
+	for _, f := range (&Error{trace: trace}).Traceback() {
+		if f.Source == "" {
+			lines = append(lines, "[C]: in ?")
+		} else {
+			lines = append(lines, fmt.Sprintf("%s:%d: in %s", f.Source, f.Line, f.Function))
+		}
+	}
+	if goBelow {
+		lines = append(lines, "[C]: in ?")
+	}
+
 	var sb strings.Builder
 	if !msg.IsNil() {
 		sb.WriteString(msg.String())
 		sb.WriteByte('\n')
 	}
-	sb.WriteString("stack traceback:\n\t[C]: in function 'debug.traceback'")
-	le := &Error{}
-	ex := c.ex
-	ex.captureTrace(le, ex.runBase())
-	for _, f := range le.Traceback() {
-		if f.Source == "" {
-			sb.WriteString("\n\t[C]: in ?")
-			continue
+	sb.WriteString("stack traceback:")
+	if level >= 0 && level < int64(len(lines)) {
+		for _, l := range lines[level:] {
+			sb.WriteString("\n\t")
+			sb.WriteString(l)
 		}
-		fmt.Fprintf(&sb, "\n\t%s:%d: in %s", f.Source, f.Line, f.Function)
 	}
-	sb.WriteString("\n\t[C]: in ?")
 	return c.ReturnValues(String(sb.String()))
 }

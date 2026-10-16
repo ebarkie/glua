@@ -134,9 +134,13 @@ func (ex *executor) write(s string) error {
 }
 
 // runBase returns the frame index of the goEntry frame of the current run.
-func (ex *executor) runBase() int {
-	for f := ex.st.nf - 1; f > 0; f-- {
-		if ex.pframes[f]&frGoEntry != 0 {
+func (ex *executor) runBase() int { return runBase(ex.pframes, ex.st.nf) }
+
+// runBase returns the frame index of the goEntry frame of a thread's innermost run, among
+// its nf frames.
+func runBase(pframes []uint64, nf int) int {
+	for f := nf - 1; f > 0; f-- {
+		if pframes[f]&frGoEntry != 0 {
 			return f
 		}
 	}
