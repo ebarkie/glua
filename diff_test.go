@@ -103,14 +103,15 @@ func TestDifferential(t *testing.T) {
 
 // hexAddrs hides addresses inside the hex-encoded strings of a rendered result, as addrs
 // does outside them: tostring of a table or function gives one. Padding around an address,
-// from string.format's widths, goes too, as its length depends on the address's.
+// from string.format's widths, goes too, as its length depends on the address's. So does
+// the sign of a NaN, which C libraries do not agree on, as nanSign does outside strings.
 func hexAddrs(s string) string {
 	return hexStr.ReplaceAllStringFunc(s, func(m string) string {
 		b, err := hex.DecodeString(m[4:])
 		if err != nil {
 			return m
 		}
-		return "str:" + hex.EncodeToString([]byte(paddedAddr.ReplaceAllString(string(b), "$1 0x")))
+		return "str:" + hex.EncodeToString([]byte(nanSign.Replace(paddedAddr.ReplaceAllString(string(b), "$1 0x"))))
 	})
 }
 
