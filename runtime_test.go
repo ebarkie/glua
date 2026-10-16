@@ -178,6 +178,40 @@ func TestLimitsResolve(t *testing.T) {
 	}
 }
 
+// A host module's function is named module.name in an argument error from a call that names
+// none, as C Lua names string.rep; a call that names it uses that name, and a global keeps its
+// own.
+func TestModuleFunctionNames(t *testing.T) {
+	need := GoFunc(func(c *Call) error { c.Arg[int64](0); return nil })
+	shared := ValueOf(need) // made before, so a function of no module, named by neither
+	rt := MustNew(Module("m", Members{"f": need, "sub": Members{"g": need}, "s": shared}), Global("h", need),
+		Global("t", Members{"g": need}), Global("s", shared))
+	s := mustLoad(t, rt, `
+		local function e(...) return select(2, pcall(...)) end
+		function f()
+			local alias = m.f
+			return e(m.f, "x"), e(function() m.f("x") end), e(function() alias("x") end), e(h, "x"),
+				e(string.rep), e(m.sub.g, "x"), e(t.g, "x"), e(s, "x")
+		end`)
+	res, err := s.CallN(context.Background(), nil, s.Globals().Get(String("f")))
+	want := []string{"bad argument #1 to 'm.f' (number expected, got string)",
+		"policy.lua:5: bad argument #1 to 'f' (number expected, got string)",
+		"policy.lua:5: bad argument #1 to 'alias' (number expected, got string)",
+		"bad argument #1 to 'h' (number expected, got string)",
+		"bad argument #1 to 'string.rep' (string expected, got no value)",
+		"bad argument #1 to 'g' (number expected, got string)", // C Lua says '?' for these two,
+		"bad argument #1 to 'g' (number expected, got string)", // finding no global name
+		"bad argument #1 to '?' (number expected, got string)"}
+	if err != nil || len(res) != len(want) {
+		t.Fatalf("got %v, %v", res, err)
+	}
+	for i, w := range want {
+		if res[i].String() != w {
+			t.Errorf("message %d = %q, want %q", i+1, res[i], w)
+		}
+	}
+}
+
 func TestGlobalsAndModules(t *testing.T) {
 	cfg := NewTable(0, 1)
 	cfg.Set(String("port"), Int(8080))

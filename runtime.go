@@ -439,7 +439,7 @@ func (rt *Runtime) buildLayer(o *options) error {
 		return nil
 	}
 	for _, nv := range o.globals {
-		v, err := hostValue(nv.name, nv.v)
+		v, err := hostValue(nv.name, nv.v, "")
 		if err != nil {
 			return err
 		}
@@ -449,7 +449,7 @@ func (rt *Runtime) buildLayer(o *options) error {
 	}
 	rt.modules = NewTable(0, len(o.modules))
 	for _, nv := range o.modules {
-		v, err := hostValue(nv.name, nv.v)
+		v, err := hostValue(nv.name, nv.v, nv.name+".")
 		if err != nil {
 			return err
 		}
@@ -597,13 +597,15 @@ func isName(s string) bool {
 }
 
 // hostValue converts a value given to Global or Module. Functions must be GoFuncs: a bare
-// Go function needs an explicit adapter.
-func hostValue(name string, v any) (Value, error) {
+// Go function needs an explicit adapter. qual is the name messages give a function from a
+// call that names none, and for Members the prefix of its functions' names: "m." for a
+// module's, so that they are named m.f as C Lua's pushglobalfuncname names them.
+func hostValue(name string, v any, qual string) (Value, error) {
 	switch x := v.(type) {
 	case GoFunc:
-		return goFnValue(&goFunc{name: name, f: x, host: true}), nil
+		return goFnValue(&goFunc{name: name, qualname: qual, f: x, host: true}), nil
 	case func(*Call) error:
-		return goFnValue(&goFunc{name: name, f: x, host: true}), nil
+		return goFnValue(&goFunc{name: name, qualname: qual, f: x, host: true}), nil
 	case Members:
 		t := NewTable(0, len(x))
 		keys := make([]string, 0, len(x))
@@ -612,7 +614,11 @@ func hostValue(name string, v any) (Value, error) {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			mv, err := hostValue(k, x[k])
+			memberQual := ""
+			if _, nested := x[k].(Members); qual != "" && !nested { // as C Lua, which names no deeper
+				memberQual = qual + k
+			}
+			mv, err := hostValue(k, x[k], memberQual)
 			if err != nil {
 				var be *BindError
 				if errors.As(err, &be) {
