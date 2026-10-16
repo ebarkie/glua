@@ -18,6 +18,16 @@ local _, e2 = pcall(wrap, 2)
 local _, e3 = pcall(error, "direct", 1)
 local _, e4 = pcall(error, "direct", 2)
 return e0, e1, e2, e3, e4
+--== error levels given as nil, strings and floats
+local function lvl(n) error("msg", n) end
+local _, e1 = pcall(function() lvl(nil) end)
+local _, e2 = pcall(function() lvl("2") end)
+local _, e3 = pcall(function() lvl(2.0) end)
+local _, e4 = pcall(function() lvl(2.5) end)
+local _, e5 = pcall(function() lvl({}) end)
+local _, e6 = pcall(error, "direct", nil)
+local _, e7 = pcall(function() lvl(2^32 + 2) end)
+return e1, e2, e3, e4, e5, e6, e7
 --== pcall of non-callable values
 local ok, e = pcall(nil)
 local ok2, e2 = pcall({})
