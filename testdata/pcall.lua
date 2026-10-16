@@ -37,6 +37,12 @@ local r2 = {xpcall(function(...) return ... end, h, 1, 2)}
 local r3 = {xpcall(function() error({}) end, function(m) return type_of(m) end)}
 function type_of(v) if v == nil then return "nil" end return "value" end
 return r1[1], r1[2], r2[1], r2[2], r2[3], r3[1], r3[2]
+--== xpcall with a handler that is no function
+local function e(...) return select(2, pcall(...)) end
+local f = function() return 1 end
+return e(function() return xpcall(f, nil) end), e(function() return xpcall(f, 1) end),
+  e(function() return xpcall(f) end), e(xpcall, f, {}), e(xpcall, f), e(xpcall),
+  e(function() return pcall() end), e(pcall), e(table.sort, {1, 2}, xpcall)
 --== error in the message handler
 local ok, e = xpcall(function() error("x") end, function(m) error("y") end)
 local ok2, e2 = xpcall(error, error)
