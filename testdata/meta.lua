@@ -50,6 +50,19 @@ return X < Y, Y < X, X <= Y, X > Y, X >= X, X < 5, 0 < X, 1 <= X
 local t = setmetatable({}, {__add = gofirst, __index = gofirst, __call = gofirst})
 local r = t + 1
 return r == t, t.anything == t, t() == t
+--== argument errors in Go metamethods name the event
+local rep = string.rep
+local mt = {__concat = rep, __index = rep, __newindex = rep, __add = rep, __unm = rep, __len = rep,
+  __eq = rep, __lt = rep, __le = rep, __band = rep, __shl = rep, __idiv = rep}
+local r, r2 = setmetatable({}, mt), setmetatable({}, mt)
+local function e(f) return (select(2, pcall(f)):gsub("^.-:%d+: ", "")) end
+return e(function() return "x" .. r end), e(function() return r.k end), e(function() return r[1] end),
+  e(function() r.k = 1 end), e(function() return 1 + r end), e(function() return r // 2 end),
+  e(function() return r & 1 end), e(function() return r << 1 end), e(function() return -r end),
+  e(function() return #r end), e(function() return r == r2 end), e(function() return r < r2 end),
+  e(function() return r <= r2 end), e(function() return r > r2 end), e(function() return r:m() end),
+  e(function() for _ in next, 5 do end end),
+  e(function() local x <close> = setmetatable({}, {__close = rep}) end)
 --== __name in error messages
 local t = setmetatable({}, {__name = "MyType"})
 return t + 1

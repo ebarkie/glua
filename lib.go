@@ -48,20 +48,37 @@ func (c *Call) argMessage(n int, fname, msg string) string {
 }
 
 // callSiteName returns the name the calling Lua code used for the function, and whether
-// it was a method call. It is empty when Go code, such as pcall, made the call, directly or
-// through the trampoline.
+// it was a method call. As in C Lua, a metamethod is named by its event, such as "index",
+// and an iterator is the "for iterator". It is empty when Go code, such as pcall, made the
+// call, directly or through the trampoline, except for a Go closer, which the trampoline runs
+// for the closing code below it.
 func (c *Call) callSiteName() (string, bool) {
 	ex := c.ex
-	if !c.fromLua || ex.st.cl == nil || ex.st.cl.p == trampoline.p || ex.st.pc < 1 {
+	cl, base, pc := ex.st.cl, ex.st.base, ex.st.pc
+	if !c.fromLua || cl == nil {
 		return "", false
 	}
-	i := ex.instr(ex.st.pc - 1)
-	switch uint8(i) {
+	if cl.p == trampoline.p {
+		fr := ex.pframes[ex.st.nf-1]
+		if fr&frCont == 0 {
+			return "", false
+		}
+		base -= int(fr >> 32 & 0xffffff)
+		cl = (*closure)(ex.stack[base-1].p)
+		pc = int(uint32(fr))
+	}
+	if pc < 1 {
+		return "", false
+	}
+	i := cl.p.code[pc-1]
+	switch op := uint8(i); op {
 	case opCall, opTailCall:
+	case opTForCall:
+		return "for iterator", false
 	default:
-		return "", false
+		return metaEvent(op), false
 	}
-	kind, name := ex.st.cl.p.objName(ex.st.pc-1, decA(i))
+	kind, name := cl.p.objName(pc-1, decA(i))
 	switch kind {
 	case "global", "field", "local", "upvalue":
 		return name, false
@@ -69,6 +86,40 @@ func (c *Call) callSiteName() (string, bool) {
 		return name, true
 	}
 	return "", false
+}
+
+// metaEvent names the event of the metamethod that the instruction op calls, as C Lua's
+// funcnamefromcode does, or is "".
+func metaEvent(op uint8) string {
+	switch op {
+	case opGetGlobal, opGetTable, opGetIndex, opGetField, opSelf:
+		return "index"
+	case opSetGlobal, opSetTable, opSetIndex, opSetField, opSetTableK, opSetIndexK, opSetFieldK:
+		return "newindex"
+	case opUnm:
+		return "unm"
+	case opBNot:
+		return "bnot"
+	case opLen:
+		return "len"
+	case opConcat:
+		return "concat"
+	case opEqJmp:
+		return "eq"
+	case opLtJmp, opLtKJmp, opGtKJmp:
+		return "lt"
+	case opLeJmp, opLeKJmp, opGeKJmp:
+		return "le"
+	case opClose: // the compiler closes before a RETURN, with a CLOSE of its own
+		return "close"
+	}
+	if op >= opAddK && op <= opShrK {
+		op -= opAddK - opAdd
+	}
+	if ev, ok := arithEvent[op]; ok {
+		return ev[2:]
+	}
+	return ""
 }
 
 // typeArgError raises "bad argument #n to 'fname' (T expected, got U)".
