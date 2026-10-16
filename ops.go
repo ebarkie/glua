@@ -588,8 +588,12 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 			ex.skipAux(op)
 			return nil
 		case obj.isObj(kindUser):
-			if err := ex.newindexUser(obj, key, val); err != nil {
+			h, err := ex.newindexUser(obj, key, val)
+			if err != nil {
 				return err
+			}
+			if !h.IsNil() {
+				return ex.callMeta("__newindex", h, obj, key, val)
 			}
 			ex.skipAux(op)
 			return nil
