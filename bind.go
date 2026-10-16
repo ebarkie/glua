@@ -445,11 +445,12 @@ func (ex *executor) loadElem(obj Value, p unsafe.Pointer, f *field) (Value, int,
 	return v, -1, err
 }
 
-// newindexUser does obj[key] = val for a userdata.
-func (ex *executor) newindexUser(obj, key, val Value) error {
+// newindexUser does obj[key] = val for a userdata, or returns the type's __newindex for the
+// caller to call when obj is a struct without the field.
+func (ex *executor) newindexUser(obj, key, val Value) (Value, error) {
 	ti := ex.plan(obj)
 	if ti == nil {
-		return ex.errorf("attempt to index a userdata value")
+		return Value{}, ex.errorf("attempt to index a userdata value")
 	}
 	readonly := obj.n&flagReadonly != 0
 	switch ti.kind {
@@ -459,66 +460,66 @@ func (ex *executor) newindexUser(obj, key, val Value) error {
 		if !ok || !found {
 			if ti.meta != nil {
 				if h := ti.meta.metaGet("__newindex"); !h.IsNil() {
-					return ex.callMeta("__newindex", h, obj, key, val)
+					return h, nil
 				}
 			}
 			if ok {
-				return ex.errorf("no field '%s' on %s", name, ti.rt.Name())
+				return Value{}, ex.errorf("no field '%s' on %s", name, ti.rt.Name())
 			}
-			return ex.errorf("no field %s on %s", key.String(), ti.rt.Name())
+			return Value{}, ex.errorf("no field %s on %s", key.String(), ti.rt.Name())
 		}
 		f := &ti.fields[j]
 		if !f.rw {
-			return ex.errorf("field '%s' of %s is read-only", name, ti.rt.Name())
+			return Value{}, ex.errorf("field '%s' of %s is read-only", name, ti.rt.Name())
 		}
 		if readonly {
-			return ex.errorf("attempt to modify a read-only %s", ti.rt.Name())
+			return Value{}, ex.errorf("attempt to modify a read-only %s", ti.rt.Name())
 		}
-		return ex.storeField(ti, obj.p, f, val)
+		return Value{}, ex.storeField(ti, obj.p, f, val)
 	case planSlice:
 		if readonly {
-			return ex.errorf("attempt to modify a read-only %s", ti.rt)
+			return Value{}, ex.errorf("attempt to modify a read-only %s", ti.rt)
 		}
 		hdr := (*sliceHeader)(obj.p)
 		i, ok := key.Int()
 		if !ok || i < 1 || uint64(i) > uint64(hdr.len)+1 {
-			return ex.errorf("index %s out of range for %s of length %d", key.String(), ti.rt, hdr.len)
+			return Value{}, ex.errorf("index %s out of range for %s of length %d", key.String(), ti.rt, hdr.len)
 		}
 		s := reflect.NewAt(ti.rt, obj.p).Elem()
 		if uint64(i) == uint64(hdr.len)+1 {
 			if err := ex.charge(int(ti.rt.Elem().Size())); err != nil {
-				return err
+				return Value{}, err
 			}
 			s.Set(reflect.Append(s, reflect.Zero(ti.rt.Elem())))
 		}
 		if err := decodeReflect(val, s.Index(int(i-1)), "", 0); err != nil {
-			return ex.errorf("bad value for %s (%s)", ti.rt, convMsg(err))
+			return Value{}, ex.errorf("bad value for %s (%s)", ti.rt, convMsg(err))
 		}
-		return nil
+		return Value{}, nil
 	case planMap:
 		if readonly {
-			return ex.errorf("attempt to modify a read-only %s", ti.rt)
+			return Value{}, ex.errorf("attempt to modify a read-only %s", ti.rt)
 		}
 		m := reflect.NewAt(ti.rt, obj.p).Elem()
 		k := reflect.New(ti.rt.Key()).Elem()
 		if err := decodeReflect(key, k, "", 0); err != nil {
-			return ex.errorf("bad key for %s (%s)", ti.rt, convMsg(err))
+			return Value{}, ex.errorf("bad key for %s (%s)", ti.rt, convMsg(err))
 		}
 		if val.IsNil() {
 			m.SetMapIndex(k, reflect.Value{})
-			return nil
+			return Value{}, nil
 		}
 		x := reflect.New(ti.rt.Elem()).Elem()
 		if err := decodeReflect(val, x, "", 0); err != nil {
-			return ex.errorf("bad value for %s (%s)", ti.rt, convMsg(err))
+			return Value{}, ex.errorf("bad value for %s (%s)", ti.rt, convMsg(err))
 		}
 		if err := ex.charge(int(ti.rt.Key().Size() + ti.rt.Elem().Size())); err != nil {
-			return err
+			return Value{}, err
 		}
 		m.SetMapIndex(k, x)
-		return nil
+		return Value{}, nil
 	}
-	return ex.errorf("attempt to modify a %s", ti.rt)
+	return Value{}, ex.errorf("attempt to modify a %s", ti.rt)
 }
 
 // sliceHeader is the layout of a Go slice.

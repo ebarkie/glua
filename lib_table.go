@@ -29,6 +29,11 @@ func (c *Call) setIndex(obj, key, val Value) error {
 			if h.IsNil() {
 				return c.rawSet(t, key, val)
 			}
+		} else if obj.isObj(kindUser) {
+			var err error
+			if h, err = c.ex.newindexUser(obj, key, val); err != nil || h.IsNil() {
+				return err
+			}
 		} else {
 			h = c.ex.metamethod(obj, "__newindex")
 			if h.IsNil() {

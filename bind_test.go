@@ -152,6 +152,35 @@ func TestStructByValueReadonly(t *testing.T) {
 	}
 }
 
+// The table library writes through a __newindex chain that ends at a Go value, as an
+// assignment does.
+func TestLibraryWrites(t *testing.T) {
+	rt := MustNew()
+	u := newBindUser()
+	for _, tc := range []struct{ src, want string }{
+		{"local t = setmetatable({}, {__newindex = u.tags}) table.insert(t, 'z') table.move({'c', 'd'}, 1, 2, 3, t) return #u.tags", "4"},
+		{"table.move({'x'}, 1, 1, 9, setmetatable({}, {__newindex = u.tags}))", "error: b.lua:1: index 9 out of range for []string of length 4"},
+		{"table.insert(setmetatable({}, {__newindex = u.frozen}), 5)", "error: b.lua:1: attempt to modify a read-only []int"},
+	} {
+		if got := evalUser(t, rt, u, tc.src); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.src, got, tc.want)
+		}
+	}
+	if strings.Join(u.Tags, "") != "zbcd" {
+		t.Errorf("writes did not reach Go: %v", u.Tags)
+	}
+	// a type's __newindex, through the table library and through an assignment, which then
+	// goes on with the next instruction
+	var set []string
+	rt = MustNew(Type[bindReq](Meta("__newindex", func(c *Call) error {
+		set = append(set, c.Value(1).String()+"="+c.Value(2).String())
+		return nil
+	})))
+	if got := evalUserReq(t, rt, &bindReq{}, "table.insert(setmetatable({}, {__newindex = r}), 'a') r.x = 'b' return 'ok'"); got != "ok" || strings.Join(set, " ") != "1=a x=b" {
+		t.Errorf("a type's __newindex through the table library: %q %v", got, set)
+	}
+}
+
 func TestHardenedCopies(t *testing.T) {
 	rt := MustNew(Hardened(), Type[bindUser](), Type[bindAddr](), Type[bindBase]())
 	u := newBindUser()
