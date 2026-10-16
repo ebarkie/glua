@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 type hostReq struct {
@@ -140,6 +141,64 @@ func TestArgFromLuaCall(t *testing.T) {
 	g, _ := s.Func0[int64]("g")
 	if n, err := g(context.Background()); err != nil || n != 42 {
 		t.Errorf("g: %v %v", n, err)
+	}
+}
+
+// An argument of no Lua type that a parameter takes is named as C Lua's luaL_checktype and
+// luaL_checkudata name it: the type wanted and the type given. A value of a type the parameter
+// takes that does not convert, and a type with a conversion of its own, keep their messages.
+func TestArgTypesAsLua(t *testing.T) {
+	type blob struct{ N int }
+	type other struct{ N int }
+	type point struct{ X int }
+	rt := MustNew(
+		Convert(func(p *point) Value { return Int(int64(p.X)) }, func(v Value) (*point, error) {
+			if n, ok := v.Int(); ok {
+				return &point{X: int(n)}, nil
+			}
+			return nil, errors.New("not a point")
+		}),
+		Global("tab", GoFunc(func(c *Call) error { c.Arg[*Table](0); return nil })),
+		Global("blob", GoFunc(func(c *Call) error { return c.Return(c.Arg[*blob](0) != nil) })),
+		Global("pt", GoFunc(func(c *Call) error { c.Arg[*point](0); return nil })),
+		Global("when", GoFunc(func(c *Call) error { c.Arg[*time.Time](0); return nil })),
+		Global("newblob", Fn0(func() *blob { return &blob{} })),
+		Global("newother", Fn0(func() *other { return &other{} })))
+	s := mustLoad(t, rt, `
+		local function e(...) return select(2, pcall(...)) end
+		function f()
+			return e(tab, 1), e(tab, newblob()), e(blob, 1), e(blob, newother()), e(blob, "x"),
+				e(blob, newblob()), e(blob, {n = 1}), e(blob, {n = "x"}), e(pt, "x"), e(when, "garbage")
+		end
+		function g(b) return e(blob, b) end`)
+	res, err := s.CallN(context.Background(), nil, s.Globals().Get(String("f")))
+	want := []string{
+		"bad argument #1 to 'tab' (table expected, got number)",
+		"bad argument #1 to 'tab' (table expected, got userdata)",
+		"bad argument #1 to 'blob' (blob expected, got number)",
+		"bad argument #1 to 'blob' (blob expected, got userdata)",
+		"bad argument #1 to 'blob' (blob expected, got string)",
+		"true",
+		"true",
+		"bad argument #1 to 'blob' (.n: cannot convert string to int)",
+		"bad argument #1 to 'pt' (cannot convert string to *glua.point: not a point)",
+		"bad argument #1 to 'when' (cannot convert string to time.Time: ", // and the parse error
+	}
+	if err != nil || len(res) != len(want) {
+		t.Fatalf("got %v, %v", res, err)
+	}
+	for i, w := range want {
+		if got := res[i].String(); got != w && !(strings.HasSuffix(w, ": ") && strings.HasPrefix(got, w)) {
+			t.Errorf("message %d = %q, want %q", i+1, got, w)
+		}
+	}
+	// a blob given by value lives only during its call, and says so
+	g, err := s.Func1[blob, string]("g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := g(context.Background(), blob{}); err != nil || !strings.HasSuffix(got, "(cannot convert userdata to *glua.blob: the value lives only during the call)") {
+		t.Errorf("a call-scoped blob: %q, %v", got, err)
 	}
 }
 
