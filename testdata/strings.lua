@@ -93,3 +93,7 @@ return string.format("%10f|%-10e|%+10E|%010.3f|%#x|%#o|%#X|%#X", 1/0, -1/0, 1/0,
 --== format conversions that are no conversion
 local function try(...) return select(2, pcall(string.format, ...)) end
 return try("%\200", 1), try("%-\255", 1), try("%5\0d", 1), try("%\0", 1), try("%y", 1)
+--== gmatch after its last match
+local w = ("ab"):gmatch("(.)")
+local a, b = w(), w()
+return a, b, select("#", w()), select("#", w()), select("#", ("ab"):gmatch("x", 10)())
