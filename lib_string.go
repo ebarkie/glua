@@ -584,7 +584,9 @@ func strFormat(c *Call) error {
 			}
 			b.WriteString(pad(spec, s))
 		default:
-			return c.libErrorf("invalid conversion '%%%s' to 'format'", spec+string(conv))
+			// the specification with its conversion, as C's form buffer: a C string, so up to a NUL
+			shown, _, _ := strings.Cut(f[start:i+1], "\x00")
+			return c.libErrorf("invalid conversion '%%%s' to 'format'", shown)
 		}
 		if b.Len() > maxAlloc {
 			return c.libErrorf("resulting string too large")

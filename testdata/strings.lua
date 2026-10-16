@@ -90,3 +90,6 @@ return string.format("%10f|%-10e|%+10E|%010.3f|%#x|%#o|%#X|%#X", 1/0, -1/0, 1/0,
   select(2, pcall(string.format, "%#+100A", true)), select(2, pcall(string.format, "%10.123d", "x")),
   select(2, pcall(string.format, "%10.123f", "x")), select(2, pcall(string.format, "%10.123c", "x")),
   select(2, pcall(string.format, "%.123a", {}))
+--== format conversions that are no conversion
+local function try(...) return select(2, pcall(string.format, ...)) end
+return try("%\200", 1), try("%-\255", 1), try("%5\0d", 1), try("%\0", 1), try("%y", 1)
