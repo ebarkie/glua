@@ -66,3 +66,8 @@ return results[1], results[2], results[3], results[4], results[5], results[6], r
 return _G._G == _G, type(_G.print), _VERSION
 --== collectgarbage
 return type(collectgarbage("count")), collectgarbage(), collectgarbage("isrunning"), collectgarbage("step")
+--== setmetatable without a metatable
+local ok, err = pcall(setmetatable, {})
+local ok2, err2 = pcall(setmetatable, setmetatable({}, {__metatable = 1}))
+local u = setmetatable({}, {})
+return ok, err, ok2, err2, setmetatable(u, nil) == u, getmetatable(u)
