@@ -104,11 +104,24 @@ func openLoad(g *Table) {
 // bytes are charged to the allocation budget, and tokens, roughly, to the step budget.
 func baseLoad(c *Call, globals *Table) error {
 	ex := c.ex
+	// as C Lua: the mode, then the name, then the chunk, and a reader only after all three
+	mode, err := c.optString(2, "load", "bt")
+	if err != nil {
+		return err
+	}
 	chunk := c.Value(0)
+	text := chunk.isString() || chunk.isNumber() // as lua_tolstring: a number is its string
+	name := "=(load)"
+	if text {
+		name = chunk.String()
+	}
+	if name, err = c.optString(1, "load", name); err != nil {
+		return err
+	}
 	var src string
 	switch {
-	case chunk.isString():
-		src = chunk.str()
+	case text:
+		src = chunk.String()
 	case chunk.isObj(kindLuaFn) || chunk.isObj(kindGoFn):
 		var b strings.Builder
 		for {
@@ -140,19 +153,7 @@ func baseLoad(c *Call, globals *Table) error {
 		}
 		src = b.String()
 	default:
-		return c.typeArgError(0, "load", "string")
-	}
-	name := "=(load)"
-	if chunk.isString() {
-		name = src
-	}
-	name, err := c.optString(1, "load", name)
-	if err != nil {
-		return err
-	}
-	mode, err := c.optString(2, "load", "bt")
-	if err != nil {
-		return err
+		return c.typeArgError(0, "load", "function") // as C Lua: what is not text must be a reader
 	}
 	if strings.HasPrefix(src, "\x1bLua") {
 		if !strings.Contains(mode, "b") {

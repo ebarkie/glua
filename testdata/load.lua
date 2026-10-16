@@ -22,6 +22,16 @@ local f4, e4 = load("return 1", "x", "b")
 local f5, e5 = load(function() return {} end)
 local f6, e6 = load("syntax error here\nmore")
 return f1, e1, e2, e3, e4, e5, e6
+--== load of a number, nil or no chunk
+local f, e = load(42)
+local ok1, e1 = pcall(load)
+local ok2, e2 = pcall(load, nil)
+local ok3, e3 = pcall(load, {})
+local calls = 0
+local function reader() calls = calls + 1 return nil end
+local function try(...) return select(2, pcall(load, ...)) end
+return f, e, ok1, e1, ok2, e2, ok3, e3, load(1.5), try({}, {}), try(42, {}, {}), try(nil, nil, {}), try(nil, {}),
+  try(reader, {}), try(reader, nil, {}), calls
 --== runtime errors in loaded chunks name the chunk
 local f = load("local t = nil\nreturn t.x", "=loaded")
 local ok, e = pcall(f)
