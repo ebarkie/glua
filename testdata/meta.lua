@@ -29,6 +29,9 @@ function getmetatable_t(x) return x == T1 or x == T2 end
 T1 = setmetatable({}, mt)
 T2 = setmetatable({}, mt)
 return "a" .. T1 .. "b" .. "c", T1 .. T2, 1 .. T1, T1 .. 2 .. 3
+--== a Go __concat raises at the line that concatenates
+local t = setmetatable({{}}, {__concat = table.concat})
+return select(2, pcall(function() return t .. "x" end))
 --== __eq
 local mt = {__eq = function(a, b) return a.id == b.id end}
 local a, b, c = setmetatable({id = 1}, mt), setmetatable({id = 1}, mt), setmetatable({id = 2}, mt)

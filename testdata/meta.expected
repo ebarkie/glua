@@ -2,6 +2,7 @@ arithmetic metamethods in both orders	str:6164643a762c31 | str:7375623a322c76 | 
 unary metamethods	str:756e6d | str:626e6f74 | 42
 __len overrides the border	99
 concat metamethods inside a chain	str:61542b6263 | str:542b54 | str:312b54 | str:542b3233
+a Go __concat raises at the line that concatenates	str:6120476f205f5f636f6e6361742072616973657320617420746865206c696e65207468617420636f6e636174656e617465733a323a20696e76616c69642076616c756520287461626c652920617420696e646578203120696e207461626c6520666f722027636f6e63617427
 __eq	true | false | true | true | true | false
 __lt and __le	true | false | true | false | true | true | true | true
 metamethods written in Go	true | true | true

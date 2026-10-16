@@ -823,7 +823,7 @@ func (ex *executor) concatRange(a, total int) error {
 			ex.stack[fn] = h
 			copy(ex.stack[fn+1:], args)
 			ex.st.hi = max(ex.st.hi, fn+1+len(args))
-			n, err := ex.callGoRaw((*goFunc)(h.p), fn, len(args))
+			n, err := ex.callGoRawFrom((*goFunc)(h.p), fn, len(args), true) // for Lua code, as callMeta
 			if err != nil {
 				return err
 			}
