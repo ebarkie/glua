@@ -242,7 +242,7 @@ func (ex *executor) yieldable() bool {
 func coArg(c *Call, fname string) (*coroutine, error) {
 	v := c.Value(0)
 	if !v.isObj(kindThread) {
-		return nil, fmt.Errorf("bad argument #1 to '%s' (coroutine expected)", fname)
+		return nil, c.typeArgError(0, fname, "thread")
 	}
 	return (*coroutine)(v.p), nil
 }
@@ -250,7 +250,7 @@ func coArg(c *Call, fname string) (*coroutine, error) {
 func coCreate(c *Call) error {
 	f := c.Value(0)
 	if !f.isObj(kindLuaFn) && !f.isObj(kindGoFn) {
-		return fmt.Errorf("bad argument #1 to 'create' (function expected)")
+		return c.typeArgError(0, "create", "function")
 	}
 	co, err := c.ex.newCoroutine(f)
 	if err != nil {
@@ -331,7 +331,7 @@ func coIsYieldable(c *Call) error {
 func coWrap(c *Call) error {
 	f := c.Value(0)
 	if !f.isObj(kindLuaFn) && !f.isObj(kindGoFn) {
-		return fmt.Errorf("bad argument #1 to 'wrap' (function expected)")
+		return c.typeArgError(0, "wrap", "function")
 	}
 	co, err := c.ex.newCoroutine(f)
 	if err != nil {

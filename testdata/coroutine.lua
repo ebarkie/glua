@@ -62,6 +62,15 @@ local co = coroutine.wrap(function()
   return pcall(function() return coroutine.status(coroutine.running()) end)
 end)
 return ok, e, co()
+--== argument errors of the coroutine library
+local function e(...) return select(2, pcall(...)) end
+return e(coroutine.status), e(coroutine.status, 1), e(coroutine.wrap, 1), e(coroutine.resume, {}),
+  e(coroutine.close), e(coroutine.create), e(coroutine.isyieldable, 1),
+  e(function() coroutine.status() end), e(function() coroutine.wrap() end),
+  e(function()
+    local lib = coroutine
+    lib.create(5)
+  end)
 --== close
 local log = ""
 local co = coroutine.create(function()
