@@ -208,12 +208,27 @@ func decodeArg(c *Call, i int, v Value, rv reflect.Value) error {
 		}
 	}
 	if err := decodeReflect(v, rv, "", 0); err != nil {
-		if v.IsNil() && i >= c.Len() {
+		if v.IsNil() && i >= c.Len() || wrongKind(v, t) {
 			return c.typeArgError(i, c.fnName(), luaTypeName(t))
 		}
 		return c.argError(i+1, c.fnName(), convMsg(err))
 	}
 	return nil
+}
+
+// wrongKind reports whether v is of no Lua type that t takes, so that the error names the
+// type wanted, as C Lua's luaL_checktype and luaL_checkudata do: a table for *Table, and for
+// a pointer to a named struct that is bound as a userdata, a userdata of that type or a table
+// to fill one. A type with a conversion of its own, such as time.Time, keeps its messages.
+func wrongKind(v Value, t reflect.Type) bool {
+	switch {
+	case t == tableType:
+		return !v.isObj(kindTable)
+	case t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct && t.Elem().Name() != "" &&
+		t.Elem() != timeType && converterFor(t) == nil && converterFor(t.Elem()) == nil:
+		return !v.isObj(kindTable) && !(v.isObj(kindUser) && v.n&typeIDMask == bindType(t.Elem()))
+	}
+	return false
 }
 
 // luaTypeName names what a Go type expects, for "X expected, got nil".
