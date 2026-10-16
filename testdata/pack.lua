@@ -53,6 +53,10 @@ local base = os.time({year = 2000, month = 1, day = 1, hour = 12})
 return os.time({year = "2000", month = "1", day = 1, hour = 12}) == base, os.time({year = "2000.0", month = 1.0, day = "1"}) == base,
   e({year = "x", month = 1, day = 1}), e({year = 2000.5, month = 1, day = 1}), e({year = true, month = 1, day = 1}),
   e({year = {}, month = 1, day = 1}), e({year = 2^40, month = 1, day = 1})
+--== os.date formats with a NUL, and *t followed by more
+local function e(...) return select(2, pcall(os.date, ...)) end
+return os.date("!*tX", 0), type(os.date("!*t\0x", 0)), e("!%\0", 0), e("!%Q\0abc", 0), e("!%E\0", 0),
+  os.date("!a\0b", 0)
 --== os.date for years a C int cannot hold
 local function e(...) return select(2, pcall(os.date, ...)) end
 return e("!%Y", 2^60), os.date("!%Y", 67767976233532799), os.date("!%Y", -67768040609740800), e("!%Y", -67768040609740801),

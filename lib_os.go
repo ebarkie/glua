@@ -157,7 +157,7 @@ func osDate(c *Call) error {
 	if y := int64(tm.Year()) - 1900; y < math.MinInt32 || y > math.MaxInt32 { // C's struct tm has an int year
 		return c.libErrorf("date result cannot be represented in this installation")
 	}
-	if strings.HasPrefix(format, "*t") {
+	if cstr, _, _ := strings.Cut(format, "\x00"); cstr == "*t" { // as C Lua's strcmp: "*t" alone, to a NUL
 		t := NewTable(0, 9)
 		setDateFields(t, tm)
 		return c.ReturnValues(tableValue(t))
@@ -179,8 +179,9 @@ func osDate(c *Call) error {
 			i++
 			conv = format[i] // the C locale has no alternative forms
 		case strings.IndexByte(dateSingle, conv) < 0 || conv == 'E' || conv == 'O':
-			// as C Lua: the message quotes the rest of the format from the bad conversion
-			return c.argError(1, "date", fmt.Sprintf("invalid conversion specifier '%%%s'", format[i:]))
+			// as C Lua: the message quotes the rest of the format from the bad conversion, to a NUL
+			rest, _, _ := strings.Cut(format[i:], "\x00")
+			return c.argError(1, "date", fmt.Sprintf("invalid conversion specifier '%%%s'", rest))
 		}
 		strftime(&b, conv, tm)
 	}
