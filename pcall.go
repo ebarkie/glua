@@ -13,9 +13,9 @@ import (
 // before anything is unwound, so it sees the whole stack.
 
 var (
-	builtinPcall  = &goFunc{name: "pcall"}
-	builtinXpcall = &goFunc{name: "xpcall"}
-	builtinError  = &goFunc{name: "error"}
+	builtinPcall  = &goFunc{name: "pcall", qualname: "pcall"}
+	builtinXpcall = &goFunc{name: "xpcall", qualname: "xpcall"}
+	builtinError  = &goFunc{name: "error", qualname: "error"}
 )
 
 func init() {
@@ -333,15 +333,16 @@ func (ex *executor) unwindTo(f, base, fn int, value Value) error {
 		ex.errExtra = 0
 		ex.pframes = ex.pframes[:min(len(ex.pframes), ex.maxCallDepth)] // take back the handler's room
 	}
+	// pop the frames, then close their variables, as C Lua does: pcall calls the closers
 	fr := ex.pframes[f]
-	value, err := ex.closeOnError(fn, value)
-	if err != nil {
-		return err // a terminal error while closing
-	}
 	st.nf = f
 	st.base = base - int(fr>>32&0xffffff)
 	st.cl = (*closure)(ex.stack[st.base-1].p)
 	st.pc = int(uint32(fr))
+	value, err := ex.closeOnError(fn, value, false)
+	if err != nil {
+		return err // a terminal error while closing
+	}
 	ex.stack[fn], ex.stack[fn+1] = Bool(false), value
 	ex.adjustResults(ex.instr(st.pc-1), fn, 2)
 	return nil
@@ -350,8 +351,18 @@ func (ex *executor) unwindTo(f, base, fn int, value Value) error {
 // closeOnError calls the __close metamethods of the to-be-closed variables at stack index
 // level and above, newest first, each with the error value. A closer that fails replaces
 // the error for the closers after it and for the result, as in C Lua. The closers run
-// synchronously, while the failing frames are still in place.
-func (ex *executor) closeOnError(level int, value Value) (Value, error) {
+// synchronously, called by the current frame, or by Go code when goClose is set, and their
+// calls go above the variables still to close.
+func (ex *executor) closeOnError(level int, value Value, goClose bool) (Value, error) {
+	if len(ex.tbc) == 0 || ex.tbc[len(ex.tbc)-1] < level {
+		return value, nil
+	}
+	top, mark := ex.top, ex.st.goClose
+	defer func() { ex.top, ex.st.goClose = top, mark }()
+	ex.top = max(top, ex.tbc[len(ex.tbc)-1]+1)
+	if ex.st.goClose = 0; goClose {
+		ex.st.goClose = ex.st.nf + 1
+	}
 	for len(ex.tbc) > 0 && ex.tbc[len(ex.tbc)-1] >= level {
 		r := ex.tbc[len(ex.tbc)-1]
 		ex.tbc = ex.tbc[:len(ex.tbc)-1]
@@ -389,7 +400,7 @@ func (ex *executor) closeTerminal(level int, le *Error) {
 	if ctx.Err() != nil {
 		ex.ctx = context.WithoutCancel(ctx) // let the closers run after a cancellation
 	}
-	ex.closeOnError(level, le.Value)
+	ex.closeOnError(level, le.Value, true)
 	ex.dropTBC(level)
 	ex.ctx = ctx
 	ex.steps, ex.st.ticks, ex.allocLeft, ex.fatal, ex.fixed = steps, ticks, alloc, fatal, fixed
@@ -470,7 +481,10 @@ func luaError(c *Call) error {
 }
 
 // whereLevel returns the position of the function at the given level above the one that
-// called error: 1 is the caller of error, 2 its caller. A Go function has no position.
+// called error: 1 is the caller of error, 2 its caller. As C functions are in C Lua, a Go
+// function is a level without a position: pcall or xpcall below a protected call, and the Go
+// function below a nested run. The trampoline is no level of its own: the Go function it
+// calls is.
 func (ex *executor) whereLevel(c *Call, level int) string {
 	st := &ex.st
 	if !c.fromLua {
@@ -480,21 +494,26 @@ func (ex *executor) whereLevel(c *Call, level int) string {
 		}
 	}
 	cl, base, pc, nf := st.cl, st.base, st.pc, st.nf
-	for ; level > 1; level-- {
+	if cl != nil && cl.p == trampoline.p {
+		level++ // the trampoline is no level: the Go function it runs is
+	}
+	for level > 1 {
 		if nf == 0 {
 			return ""
 		}
 		fr := ex.pframes[nf-1]
-		if fr&frGoEntry != 0 {
-			return "" // called from Go
+		if fr&(frCatch|frGoEntry) != 0 {
+			if level--; level == 1 || uint32(fr) == 0 {
+				return "" // the Go function that called this frame, or one no Lua code called
+			}
 		}
 		base -= int(fr >> 32 & 0xffffff)
 		cl = (*closure)(ex.stack[base-1].p)
 		pc = int(uint32(fr))
 		nf--
-	}
-	if cl.p == trampoline.p {
-		return "" // a coroutine's Go body, called from Go as far as Lua can tell
+		if cl.p != trampoline.p {
+			level--
+		}
 	}
 	return fmt.Sprintf("%s:%d", cl.p.source, cl.p.lineAt(pc-1))
 }

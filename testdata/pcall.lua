@@ -18,6 +18,38 @@ local _, e2 = pcall(wrap, 2)
 local _, e3 = pcall(error, "direct", 1)
 local _, e4 = pcall(error, "direct", 2)
 return e0, e1, e2, e3, e4
+--== error levels that reach pcall or a library function
+local function f(lvl) error("m", lvl) end
+local function g(lvl) f(lvl) end
+local function e(...) return select(2, pcall(...)) end
+local up = setmetatable({}, {__index = function() error("ix", 3) end})
+local lib = setmetatable({}, {__index = function() error("ix", 2) end})
+return e(f, 2), e(f, 3), e(g, 3), e(g, 4), e(function() f(3) end),
+  e(function() return select(2, pcall(f, 2)) end),
+  e(function() return table.unpack(up, 1, 1) end), e(function() return table.unpack(lib, 1, 1) end),
+  e(function() return ("a"):gsub("a", function() error("gs", 3) end) end),
+  e(coroutine.wrap(function() f(3) end))
+--== error levels through pcall of pcall and in closers
+local function f(lvl) error("m", lvl) end
+local function cl(lvl) return setmetatable({}, {__close = function() error("c", lvl) end}) end
+local function body(lvl)
+  local x <close> = cl(lvl)
+  error("e")
+end
+local co = coroutine.create(function() local x <close> = cl(2) coroutine.yield() end)
+coroutine.resume(co)
+return select(3, pcall(pcall, error, "x", 3)), select(3, pcall(pcall, f, 4)),
+  select(2, pcall(body, 2)), select(2, pcall(body, 3)), select(2, pcall(body, 4)),
+  select(2, coroutine.close(co))
+--== Go closers that Go code runs, calling back into Lua
+local function closing(h) return setmetatable({}, {__close = h}) end
+local ok1, e1 = pcall(function()
+  return ("a"):gsub("a", function() local x <close> = closing(xpcall) error(print) end)
+end)
+local co = coroutine.create(function() local x <close> = closing(xpcall) error(print) end)
+coroutine.resume(co)
+local ok2, e2 = coroutine.close(co)
+return ok1, e1 == print, ok2, e2 == print
 --== error levels given as nil, strings and floats
 local function lvl(n) error("msg", n) end
 local _, e1 = pcall(function() lvl(nil) end)

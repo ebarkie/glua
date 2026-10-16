@@ -422,7 +422,7 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		if errv != nil {
 			value = *errv
 		}
-		v, cerr := ex.closeOnError(0, value)
+		v, cerr := ex.closeOnError(0, value, true)
 		ex.nny--
 		co.nnyBase = nnyBase
 		if prev != nil {

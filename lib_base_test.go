@@ -56,6 +56,63 @@ func TestDebugTraceback(t *testing.T) {
 	}
 }
 
+// debug.traceback goes on past a library function that called back into Lua, and shows it
+// and pcall as [C] lines, as in C Lua.
+func TestDebugTracebackGoLevels(t *testing.T) {
+	out, _ := runWithOutput(t, `
+		local function f() return debug.traceback("tb") .. "" end
+		local function g() local _, r = pcall(f) return r .. "" end
+		local function h() local s = ("x"):gsub("x", g) return s end
+		print(h())
+		print(select(3, pcall(pcall, f)))
+		print(select(2, xpcall(f, print)))
+		print(tostring(setmetatable({}, {__tostring = function() local s = f() return s end})))
+		pcall(function()
+			local x <close> = setmetatable({}, {__close = function() print(f()) end})
+			error("e")
+		end)`)
+	want := `tb
+stack traceback:
+	t:2: in function 'f'
+	[C]: in function 'pcall'
+	t:3: in function 'g'
+	[C]: in function 'string.gsub'
+	t:4: in function 'h'
+	t:5: in main chunk
+	[C]: in ?
+tb
+stack traceback:
+	t:2: in function 'f'
+	[C]: in function 'pcall'
+	[C]: in function 'pcall'
+	t:6: in main chunk
+	[C]: in ?
+tb
+stack traceback:
+	t:2: in function 'f'
+	[C]: in function 'xpcall'
+	t:7: in main chunk
+	[C]: in ?
+tb
+stack traceback:
+	t:2: in function 'f'
+	t:8: in function <t:8>
+	[C]: in function 'tostring'
+	t:8: in main chunk
+	[C]: in ?
+tb
+stack traceback:
+	t:2: in function 'f'
+	t:10: in function <t:10>
+	[C]: in function 'pcall'
+	t:9: in main chunk
+	[C]: in ?
+`
+	if out != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}
+
 // debug.traceback takes a thread and a level, as in C Lua: level 1, the caller, by default in
 // the running thread, and level 0, where it waits, in another one.
 func TestDebugTracebackThreadAndLevel(t *testing.T) {
