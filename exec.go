@@ -136,9 +136,9 @@ func (ex *executor) write(s string) error {
 	return ex.output(ex.ctx, s)
 }
 
-// defaultChecked selects the loop new executors run. The checked loop is the default until
-// a week of continuous fuzzing of both loops has run clean.
-var defaultChecked = true
+// defaultChecked selects the loop new executors run: the fast loop, except under Hardened,
+// which always runs the checked one.
+var defaultChecked = false
 
 func newExecutor() *executor {
 	return &executor{

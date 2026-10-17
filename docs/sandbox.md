@@ -101,8 +101,8 @@ These hold even with `NoLimit`, because what they prevent would end the process.
 
 ## Panics
 
-A panic inside the VM itself, which the bounds-checked interpreter loop turns any VM bug into,
-is recovered at the entry and returned as a `*lua.PanicError`. A panic in a host function is
+A panic inside the VM itself is recovered at the entry and returned as a `*lua.PanicError`;
+the bounds-checked interpreter loop of `Hardened` turns any VM bug into one. A panic in a host function is
 the host's: it passes through to the caller, unless the `RecoverPanics` option turns it into a
 `*lua.PanicError` too. Either way the executor involved is discarded. `runtime.Goexit` passes
 through.
@@ -111,9 +111,9 @@ through.
 
 glua has two interpreter loops generated from one source. The checked loop indexes everything
 through bounds-checked slices, so even a VM bug is a recoverable panic. The fast loop reads
-through raw pointers that the bytecode verifier vouches for. The checked loop is the default
-until a week of continuous fuzzing of both loops has run clean; after that the fast loop
-becomes the default, and `Hardened` keeps the checked one.
+through raw pointers that the bytecode verifier vouches for, so a VM bug there could corrupt
+memory instead. The fast loop is the default, after differential and coverage-guided fuzzing
+of both loops; `Hardened` runs the checked one.
 
 ## What remains the host's job
 

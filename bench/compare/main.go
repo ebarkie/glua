@@ -261,7 +261,7 @@ func compareSuite(lua, testBin string, rounds, runs int, out, only string) {
 }
 
 // compareSource times the workloads compiled from source against C Lua, on the checked
-// loop, the default, and on the fast loop.
+// loop and on the fast loop, the default.
 func compareSource(lua, testBin string, rounds, runs int, out string) {
 	var raw bytes.Buffer
 	cTimes := make([][]float64, len(workloads))

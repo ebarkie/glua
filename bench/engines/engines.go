@@ -16,7 +16,7 @@ import (
 )
 
 func gluaEngine() engine {
-	return engine{name: "glua", version: "(checked loop)", load: func(name, src string) (func() (string, error), error) {
+	return engine{name: "glua", version: "(fast loop)", load: func(name, src string) (func() (string, error), error) {
 		rt := lua.MustNew(lua.LibSafe|lua.LibCoroutine, lua.Limits{Steps: lua.NoLimit, AllocBytes: lua.NoLimit,
 			InitSteps: lua.NoLimit, InitAllocBytes: lua.NoLimit})
 		s, err := rt.Load(context.Background(), name, src)

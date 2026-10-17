@@ -1,12 +1,10 @@
 name: Fuzz
 
-# Long-running fuzzing: every six hours, each target fuzzes for five and a half, so that the
-# runs follow one another. Each target keeps its corpus in the Actions cache from run to run.
-# A failure fails the run and uploads the failing inputs as an artifact.
+# Long-running fuzzing, started by hand: each target fuzzes for five and a half hours by
+# default. Each target keeps its corpus in the Actions cache from run to run. A failure fails
+# the run and uploads the failing inputs as an artifact.
 
 on:
-  schedule:
-    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       minutes:

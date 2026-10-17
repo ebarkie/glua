@@ -106,8 +106,8 @@ ok, err := rule.Eval(ctx, &order)
 Requirements: Go 1.27 or later, a 64-bit platform. No cgo.
 
 Status: feature-complete and tested against the Lua 5.4.9 test suite and against C Lua by
-differential fuzzing. The faster, unchecked interpreter loop becomes the default after a week
-of continuous fuzzing; until then every Runtime runs the bounds-checked loop.
+differential fuzzing. Runtimes run the fast interpreter loop, which trusts bytecode the
+verifier has checked; `Hardened` runs the bounds-checked loop instead.
 
 ## Performance
 
@@ -117,10 +117,10 @@ faster). Details, per-script numbers and method are in [the benchmarks](docs/ben
 | Engine | Relative to C Lua |
 | --- | --- |
 | C Lua 5.4.9 | 1.00x |
-| glua | 1.43x |
-| wangshu | 4.34x |
-| GopherLua | 5.35x |
-| golua | 6.05x |
+| glua | 1.23x |
+| wangshu | 4.28x |
+| GopherLua | 5.21x |
+| golua | 5.96x |
 
 ## Documentation
 

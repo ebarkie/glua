@@ -95,7 +95,7 @@ func TestSuiteManifest(t *testing.T) {
 	}
 }
 
-// TestSuite runs the suite under both loops: the checked one, the default, and the fast one.
+// TestSuite runs the suite under both loops: the fast one, the default, and the checked one.
 func TestSuite(t *testing.T) {
 	entries := readManifest(t)
 	for _, checked := range []bool{true, false} {

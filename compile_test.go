@@ -173,7 +173,7 @@ func outcome(name, src string) string {
 	return "compile error: " + err.Error()
 }
 
-// runCorpus runs a corpus under both loops: the checked one, the default, and the fast one.
+// runCorpus runs a corpus under both loops: the fast one, the default, and the checked one.
 func runCorpus(t *testing.T, cases, expected string) {
 	want := expectations(t, cases, expected)
 	for _, checked := range []bool{true, false} {

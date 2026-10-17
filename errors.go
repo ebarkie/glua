@@ -79,7 +79,7 @@ func (e *Error) Error() string {
 }
 
 // PanicError is a panic recovered at the entry: one inside the VM itself, which the
-// checked loop turns bugs into, or, with RecoverPanics, one in a host function.
+// checked loop of [Hardened] turns bugs into, or, with RecoverPanics, one in a host function.
 type PanicError struct {
 	Value any
 	Stack []byte

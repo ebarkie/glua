@@ -17,10 +17,10 @@ lower is faster.
 | Engine | Relative to C Lua |
 | --- | --- |
 | C Lua 5.4.9 | 1.00x |
-| glua (checked loop) | 1.43x |
-| wangshu | 4.34x |
-| GopherLua | 5.35x |
-| golua | 6.05x |
+| glua (fast loop) | 1.23x |
+| wangshu | 4.28x |
+| GopherLua | 5.21x |
+| golua | 5.96x |
 
 The Lua 5.1 engines, GopherLua and wangshu, cannot run every script; their means cover the
 scripts they ran.
@@ -37,37 +37,37 @@ The engines implement different versions of Lua, which decides what they can run
 | Engine | Version tested | Language | Notes |
 | --- | --- | --- | --- |
 | C Lua | 5.4.9 | Lua 5.4 | Built from source with gcc at `-O2`; the reference |
-| glua | v0.3.0 | Lua 5.4 | The bounds-checked interpreter loop, the current default |
+| glua | main after v0.3.0 | Lua 5.4 | The fast interpreter loop, the default |
 | GopherLua | v1.1.2 | Lua 5.1 | Default options, except that the data stack may grow (`RegistryMaxSize`), which two scripts need |
 | golua | v0.4.0 | Lua 5.5 | Default runtime with the standard library |
 | wangshu | v0.2.0 | Lua 5.1 | Default options |
 
 Times in ms, medians of three rounds of three runs each, with the ratio to C Lua:
 
-| Script | C Lua 5.4.9 | glua (checked loop) | GopherLua v1.1.2 | golua v0.4.0 | wangshu v0.2.0 |
+| Script | C Lua 5.4.9 | glua (fast loop) | GopherLua v1.1.2 | golua v0.4.0 | wangshu v0.2.0 |
 | --- | --- | --- | --- | --- | --- |
-| binarytrees | 34.8 | 35.3 (1.02x) | – | 123.1 (3.54x) | – |
-| closures | 37.2 | 61.4 (1.65x) | 219.3 (5.89x) | 324.1 (8.71x) | 269.8 (7.25x) |
-| concat | 57.2 | 36.5 (0.64x) | 105.6 (1.85x) | 164.5 (2.88x) | 158.0 (2.76x) |
-| coroutine | 14.9 | 25.7 (1.72x) | 44.9 (3.01x) | 227.1 (15.23x) | 66.3 (4.45x) |
-| fannkuch | 37.1 | 62.0 (1.67x) | 215.5 (5.81x) | 249.3 (6.72x) | 270.1 (7.28x) |
-| fib | 17.2 | 22.9 (1.33x) | 77.0 (4.48x) | 162.1 (9.43x) | 88.1 (5.13x) |
-| fieldread | 11.3 | 18.2 (1.62x) | 77.3 (6.86x) | 110.8 (9.83x) | 47.6 (4.22x) |
-| floatloop | 10.8 | 18.6 (1.73x) | 77.9 (7.24x) | 86.1 (8.00x) | 32.9 (3.06x) |
-| format | 68.6 | 81.5 (1.19x) | 270.6 (3.95x) | 124.8 (1.82x) | 103.1 (1.50x) |
-| gsub | 17.2 | 29.5 (1.71x) | 294.6 (17.12x) | 72.6 (4.22x) | 55.9 (3.25x) |
-| json | 31.5 | 35.8 (1.14x) | – | 148.5 (4.72x) | – |
-| mathcalls | 64.8 | 90.7 (1.40x) | – | 468.2 (7.23x) | – |
-| nbody | 45.2 | 62.0 (1.37x) | 307.5 (6.80x) | 286.9 (6.35x) | 287.7 (6.36x) |
-| oop | 52.3 | 91.0 (1.74x) | 252.5 (4.83x) | 244.8 (4.68x) | 262.7 (5.02x) |
-| pairs | 21.6 | 27.1 (1.25x) | 102.2 (4.73x) | 138.0 (6.39x) | 74.3 (3.44x) |
-| parse | 37.2 | 63.8 (1.71x) | 229.8 (6.18x) | 149.4 (4.02x) | 110.0 (2.96x) |
-| policy | 41.8 | 51.3 (1.23x) | 171.5 (4.10x) | 246.2 (5.88x) | 200.9 (4.80x) |
-| sieve | 52.1 | 99.9 (1.92x) | 423.5 (8.13x) | 482.9 (9.27x) | 612.0 (11.74x) |
-| sort | 37.2 | 57.8 (1.55x) | – | 192.6 (5.17x) | – |
-| spectralnorm | 27.1 | 41.9 (1.54x) | 133.1 (4.90x) | 200.6 (7.39x) | 136.2 (5.02x) |
-| vararg | 27.2 | 44.7 (1.64x) | – | 251.8 (9.25x) | 95.1 (3.49x) |
-| Geometric mean of the ratios, over the scripts the engine ran | | 1.43x (21 scripts) | 5.35x (16 scripts) | 6.05x (21 scripts) | 4.34x (17 scripts) |
+| binarytrees | 29.1 | 28.4 (0.98x) | – | 113.9 (3.91x) | – |
+| closures | 37.6 | 48.8 (1.30x) | 198.6 (5.28x) | 317.6 (8.44x) | 248.4 (6.60x) |
+| concat | 53.4 | 34.0 (0.64x) | 97.5 (1.82x) | 153.3 (2.87x) | 157.4 (2.95x) |
+| coroutine | 14.3 | 24.7 (1.72x) | 42.9 (2.99x) | 191.7 (13.38x) | 61.5 (4.29x) |
+| fannkuch | 34.3 | 47.7 (1.39x) | 199.9 (5.84x) | 225.5 (6.58x) | 254.3 (7.42x) |
+| fib | 17.9 | 16.5 (0.92x) | 74.1 (4.15x) | 162.2 (9.08x) | 84.3 (4.72x) |
+| fieldread | 10.5 | 12.8 (1.22x) | 73.0 (6.95x) | 106.9 (10.18x) | 46.8 (4.46x) |
+| floatloop | 13.2 | 13.7 (1.04x) | 70.7 (5.38x) | 82.3 (6.26x) | 32.5 (2.47x) |
+| format | 68.8 | 75.8 (1.10x) | 253.5 (3.69x) | 116.2 (1.69x) | 97.1 (1.41x) |
+| gsub | 16.3 | 26.4 (1.62x) | 268.5 (16.44x) | 71.5 (4.38x) | 53.4 (3.27x) |
+| json | 27.8 | 33.8 (1.21x) | – | 140.8 (5.06x) | – |
+| mathcalls | 69.2 | 76.7 (1.11x) | – | 453.6 (6.56x) | – |
+| nbody | 43.4 | 45.8 (1.06x) | 293.3 (6.76x) | 280.8 (6.47x) | 268.7 (6.19x) |
+| oop | 49.3 | 81.4 (1.65x) | 224.6 (4.56x) | 227.2 (4.61x) | 242.0 (4.91x) |
+| pairs | 16.0 | 23.6 (1.48x) | 85.6 (5.36x) | 119.7 (7.49x) | 66.0 (4.13x) |
+| parse | 32.8 | 51.4 (1.57x) | 261.3 (7.96x) | 128.7 (3.92x) | 105.4 (3.21x) |
+| policy | 46.1 | 46.2 (1.00x) | 158.1 (3.43x) | 238.5 (5.17x) | 197.2 (4.27x) |
+| sieve | 46.1 | 67.5 (1.46x) | 372.2 (8.07x) | 491.1 (10.64x) | 567.0 (12.29x) |
+| sort | 35.0 | 52.8 (1.51x) | – | 186.0 (5.32x) | – |
+| spectralnorm | 23.7 | 27.5 (1.16x) | 122.8 (5.18x) | 175.3 (7.39x) | 102.9 (4.34x) |
+| vararg | 27.3 | 37.9 (1.39x) | – | 227.5 (8.34x) | 106.1 (3.89x) |
+| Geometric mean of the ratios, over the scripts the engine ran | | 1.23x (21 scripts) | 5.21x (16 scripts) | 5.96x (21 scripts) | 4.28x (17 scripts) |
 
 - GopherLua, binarytrees: does not load: <string> line:14(column:22) near '<':   syntax error
 - GopherLua, json: returns 311640, C Lua 313140
@@ -86,17 +86,17 @@ them come from differences between Lua versions: `<<` and `//` are not Lua 5.1 s
 whole floats come out differently.
 
 Some engines offer modes these runs do not use: wangshu has optional compilation tiers, golua
-a resource-limited mode, and glua the faster loop below. Each engine runs as its documentation
+a resource-limited mode, and glua the bounds-checked loop below. Each engine runs as its documentation
 shows for embedding, with default settings.
 
 ## glua's two interpreter loops
 
-glua has two interpreter loops generated from one source. The checked loop indexes everything
-through bounds-checked slices, so even a VM bug is a recoverable panic; it is the default. The
-fast loop reads through raw pointers that the bytecode verifier vouches for, and becomes the
-default once a week of continuous fuzzing has run clean. The third column runs the checked
-loop while a background goroutine keeps the Go garbage collector marking a 3-million-node heap,
-which puts every pointer write in the VM behind a write barrier.
+glua has two interpreter loops generated from one source. The fast loop, the default, reads
+through raw pointers that the bytecode verifier vouches for. The checked loop, which `Hardened`
+runs, indexes everything through bounds-checked slices, so even a VM bug is a recoverable
+panic. The third column runs the checked loop while a background goroutine keeps the Go
+garbage collector marking a 3-million-node heap, which puts every pointer write in the VM
+behind a write barrier.
 
 Times in ms, medians of three rounds of three runs each, with the range of the round means:
 

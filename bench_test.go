@@ -42,7 +42,7 @@ func BenchmarkFib27(b *testing.B)            { benchProgram(b, progFib(27)) }
 func BenchmarkFieldRead(b *testing.B)        { benchProgram(b, progFieldRead(1_000_000)) }
 
 // The same programs compiled from source, as bench/lua runs them in C Lua: on the checked
-// loop, the default, and on the fast loop.
+// loop and on the fast loop, the default.
 
 const (
 	srcFloatLoop = "local s = 0.0; for i = 1, 1000000 do s = s + i * 1.5 end; return s"
