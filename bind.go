@@ -2,6 +2,7 @@ package glua
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -85,47 +86,59 @@ type typeInfo struct {
 }
 
 var (
-	typeMu  sync.Mutex
-	typeIDs = map[reflect.Type]uint64{} // process-wide: an ID means the same type in every Runtime
-	types   atomic.Pointer[[]*typeInfo] // copy on write, so the loop reads it without a lock
-	bound   sync.Map                    // reflect.Type -> uint64, the types fully planned: read without the lock
+	typeMu sync.Mutex // serialises planning
+	// Both copy on write, so bindType and the loop read them without a lock. An ID means the
+	// same type in every Runtime. typeIDs is stored after types, so a reader that finds an
+	// ID finds its plan.
+	typeIDs atomic.Pointer[map[reflect.Type]uint64]
+	types   atomic.Pointer[[]*typeInfo]
 )
 
 func init() {
+	typeIDs.Store(&map[reflect.Type]uint64{})
 	types.Store(&[]*typeInfo{})
+}
+
+// planning is one bindType's work under typeMu: a copy of typeIDs with the new types, and
+// their plans.
+type planning struct {
+	ids   map[reflect.Type]uint64
+	added []*typeInfo
 }
 
 // bindType builds the plan of struct, slice or map type rt once, with those of the types its
 // fields reach, and returns its type ID.
 func bindType(rt reflect.Type) uint64 {
-	if id, ok := bound.Load(rt); ok {
-		return id.(uint64)
+	if id, ok := (*typeIDs.Load())[rt]; ok {
+		return id
 	}
 	typeMu.Lock()
 	defer typeMu.Unlock()
-	var added []*typeInfo
-	id := bindTypeLocked(rt, &added)
-	if len(added) > 0 {
-		cur := *types.Load()
-		next := make([]*typeInfo, len(cur), len(cur)+len(added))
-		copy(next, cur)
-		for _, ti := range added {
-			for uint64(len(next)) <= ti.id {
-				next = append(next, nil)
-			}
-			next[ti.id] = ti
-		}
-		types.Store(&next)
+	cur := *typeIDs.Load()
+	if id, ok := cur[rt]; ok {
+		return id // planned while this one waited for the lock
 	}
-	bound.Store(rt, id)
+	pl := &planning{ids: maps.Clone(cur)}
+	id := pl.bind(rt)
+	old := *types.Load()
+	next := make([]*typeInfo, len(old), len(old)+len(pl.added))
+	copy(next, old)
+	for _, ti := range pl.added {
+		for uint64(len(next)) <= ti.id {
+			next = append(next, nil)
+		}
+		next[ti.id] = ti
+	}
+	types.Store(&next)
+	typeIDs.Store(&pl.ids)
 	return id
 }
 
 // nextTypeID is the next ID to hand out.
 var nextTypeID uint64
 
-func bindTypeLocked(rt reflect.Type, added *[]*typeInfo) uint64 {
-	if id, ok := typeIDs[rt]; ok {
+func (pl *planning) bind(rt reflect.Type) uint64 {
+	if id, ok := pl.ids[rt]; ok {
 		return id
 	}
 	id := nextTypeID
@@ -133,20 +146,20 @@ func bindTypeLocked(rt reflect.Type, added *[]*typeInfo) uint64 {
 	if id >= 1<<32 {
 		panic("glua: too many bound types") // the loop reads the ID as 32 bits
 	}
-	typeIDs[rt] = id // before the fields, so a type can refer to itself
+	pl.ids[rt] = id // before the fields, so a type can refer to itself
 	ti := &typeInfo{rt: rt, id: id, byName: map[string]int{}}
-	*added = append(*added, ti)
+	pl.added = append(pl.added, ti)
 	switch rt.Kind() {
 	case reflect.Slice:
 		ti.kind = planSlice
-		ti.elem = elemField(rt.Elem(), added)
+		ti.elem = pl.elemField(rt.Elem())
 		ti.meta = proxyMeta
 	case reflect.Map:
 		ti.kind = planMap
-		ti.elem = elemField(rt.Elem(), added)
+		ti.elem = pl.elemField(rt.Elem())
 		ti.meta = proxyMeta
 	case reflect.Struct:
-		planStructFields(ti, added)
+		pl.planStructFields(ti)
 	default:
 		ti.kind = planOpaque
 	}
@@ -156,7 +169,7 @@ func bindTypeLocked(rt reflect.Type, added *[]*typeInfo) uint64 {
 // planStructFields fills in the visible fields of a struct plan, embedded structs' promoted
 // fields included. Two fields that map to one name, or a name that is a Lua keyword, make
 // the type unbindable.
-func planStructFields(ti *typeInfo, added *[]*typeInfo) {
+func (pl *planning) planStructFields(ti *typeInfo) {
 	rt := ti.rt
 	for _, sf := range reflect.VisibleFields(rt) {
 		if !sf.IsExported() || sf.Anonymous && sf.Type.Kind() == reflect.Struct {
@@ -170,7 +183,7 @@ func planStructFields(ti *typeInfo, added *[]*typeInfo) {
 		if skip {
 			continue
 		}
-		f := elemField(sf.Type, added)
+		f := pl.elemField(sf.Type)
 		f.goName, f.off, f.rw = sf.Name, off, rw
 		ti.addField(f, name)
 	}
@@ -210,7 +223,7 @@ func fieldOffset(rt reflect.Type, index []int) (uintptr, bool) {
 }
 
 // elemField returns how a value of type t, stored in a field or an element, loads.
-func elemField(t reflect.Type, added *[]*typeInfo) field {
+func (pl *planning) elemField(t reflect.Type) field {
 	f := field{typ: t, kind: fOther}
 	if converterFor(t) != nil || t == timeType || t == durationType {
 		return f
@@ -245,17 +258,17 @@ func elemField(t reflect.Type, added *[]*typeInfo) field {
 	case reflect.Bool:
 		f.kind = fBool
 	case reflect.Struct:
-		f.kind, f.sub = fStruct, bindTypeLocked(t, added)
+		f.kind, f.sub = fStruct, pl.bind(t)
 	case reflect.Pointer:
 		if t.Elem().Kind() == reflect.Struct && converterFor(t.Elem()) == nil {
-			f.kind, f.sub = fPtr, bindTypeLocked(t.Elem(), added)
+			f.kind, f.sub = fPtr, pl.bind(t.Elem())
 		}
 	case reflect.Slice:
 		if t != bytesType {
-			f.kind, f.sub = fSlice, bindTypeLocked(t, added)
+			f.kind, f.sub = fSlice, pl.bind(t)
 		}
 	case reflect.Map:
-		f.kind, f.sub = fMap, bindTypeLocked(t, added)
+		f.kind, f.sub = fMap, pl.bind(t)
 	}
 	return f
 }

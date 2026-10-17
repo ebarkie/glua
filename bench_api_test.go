@@ -169,7 +169,8 @@ func BenchmarkAPIHostPointerParallel(b *testing.B) {
 		r := &request{Method: method}
 		for pb.Next() {
 			if _, err := f(ctx, r); err != nil {
-				b.Fatal(err)
+				b.Error(err) // Fatal only on the benchmark's own goroutine
+				return
 			}
 		}
 	})
