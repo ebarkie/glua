@@ -513,8 +513,9 @@ func TestLongEntryKeepsNothing(t *testing.T) {
 	}
 }
 
-// A time limit per round between waits, as docs/sandbox.md shows it: a timer the host resets
-// as it renews cancels the entry's context when a round runs long.
+// A time limit per round between waits, as docs/sandbox.md shows it: a timer the host stops
+// while it waits and resets as it renews cancels the entry's context when a round runs long,
+// and waits longer than the limit do not count.
 func TestRenewWithTimer(t *testing.T) {
 	errRound := errors.New("round too long")
 	ctx, cancel := context.WithCancelCause(context.Background())
@@ -524,7 +525,8 @@ func TestRenewWithTimer(t *testing.T) {
 	rounds := 0
 	rt := MustNew(Limits{Steps: NoLimit},
 		Global("wait", GoFunc(func(c *Call) error {
-			time.Sleep(30 * time.Millisecond)
+			round.Stop()
+			time.Sleep(80 * time.Millisecond) // longer than a round may run
 			round.Reset(50 * time.Millisecond)
 			c.Renew()
 			rounds++

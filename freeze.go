@@ -288,7 +288,7 @@ const (
 // chooses, may fill the registry; those that compiled scripts and Table.Freeze bring, which
 // may never end, fill at most maxDynamic of it, so that they cannot crowd out the others.
 func internKey(k Value, limit int64) Value {
-	if !k.isString() {
+	if !k.isString() || k.n&lenMask > maxInternedSz {
 		return k
 	}
 	s := k.str()
