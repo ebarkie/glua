@@ -33,6 +33,7 @@ jobs:
         include:
           - { name: run, pkg: ., target: FuzzRun, tags: "" }
           - { name: run-stress, pkg: ., target: FuzzRun, tags: lua_stackstress }
+          - { name: long-entry, pkg: ., target: FuzzLongEntry, tags: "" }
           - { name: compile, pkg: ., target: FuzzCompile, tags: "" }
           - { name: verified, pkg: ., target: FuzzVerifiedCode, tags: "" }
           - { name: patterns, pkg: ., target: FuzzPatterns, tags: "" }
@@ -42,6 +43,7 @@ jobs:
           - { name: json-decode, pkg: ./luajson, target: FuzzDecode, tags: "" }
           - { name: json-encode, pkg: ./luajson, target: FuzzEncode, tags: "" }
           - { name: differential, pkg: ., target: "", tags: "" }
+          - { name: soak, pkg: ., target: "", tags: "" }
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -77,6 +79,10 @@ jobs:
               go test -count=1 -timeout 30m -run '^TestDifferential$' .
           done
           echo "$n batches of 200000 programs"
+
+      - name: Soak long entries
+        if: matrix.name == 'soak'
+        run: GLUA_SOAK_ROUNDS=2000000 go test -count=1 -timeout 3h -run '^TestLongEntrySoak$' .
 
       - uses: actions/cache/save@v6
         if: always() && matrix.target != ''

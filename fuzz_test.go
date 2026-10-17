@@ -16,7 +16,7 @@ import (
 //	go test -tags lua_stackstress -run '^$' -fuzz '^FuzzRun$' -fuzztime 10m
 //
 // The lexer and parser have their own in internal/syntax, the pattern matcher FuzzPatterns,
-// and mutated bytecode FuzzVerifiedCode.
+// mutated bytecode FuzzVerifiedCode, and long entries that renew their budgets FuzzLongEntry.
 
 // fuzzSeeds adds the chunks of the corpus files and the benchmark scripts as seeds.
 func fuzzSeeds(f *testing.F) {
