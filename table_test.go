@@ -247,3 +247,25 @@ func TestStringKeyLookup(t *testing.T) {
 		}
 	}
 }
+
+// A table used as a queue, pushed at the tail and cleared at the head, stays the size of
+// what it holds: its array part shrinks once mostly empty, as C Lua's rehash does.
+func TestQueueTableBounded(t *testing.T) {
+	q := NewTable(0, 0)
+	head := int64(1)
+	for tail := int64(1); tail <= 200_000; tail++ {
+		q.Set(Int(tail), Int(tail))
+		if tail-head >= 100 {
+			q.Set(Int(head), Value{})
+			head++
+		}
+	}
+	if n := len(q.arr) + len(q.nodes); n > 1024 {
+		t.Errorf("a queue of 100 has %d array and %d hash slots", len(q.arr), len(q.nodes))
+	}
+	for i := head; i <= 200_000; i++ {
+		if got, _ := q.Get(Int(i)).Int(); got != i {
+			t.Fatalf("q[%d] = %v", i, got)
+		}
+	}
+}

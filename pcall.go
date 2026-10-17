@@ -254,9 +254,11 @@ func (ex *executor) caughtNow(fn int, flags uint64, err error) error {
 }
 
 // callHandler calls an xpcall message handler synchronously and returns its first result.
+// It leaves ex.top as it found it: the handler's results are gone once the first is read.
 func (ex *executor) callHandler(h, msg Value) (Value, error) {
 	st := &ex.st
-	cl, base, pc := st.cl, st.base, st.pc
+	cl, base, pc, top := st.cl, st.base, st.pc, ex.top
+	defer func() { ex.top = top }()
 	slot := max(base+int(cl.p.maxstack), ex.top)
 	if err := ex.ensure(slot + 2 + stackSlack); err != nil {
 		return Value{}, err

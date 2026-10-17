@@ -234,11 +234,19 @@ func (ex *executor) hostError(c *Call, err error) error {
 	if ex.goErrs == nil {
 		ex.goErrs = map[unsafe.Pointer]error{}
 	}
+	if len(ex.goErrs) >= maxGoErrs {
+		// an entry that runs long and catches errors without end: forget the old ones, which
+		// a script raising one again would carry without its Go error
+		clear(ex.goErrs)
+	}
 	if msg != "" {
 		ex.goErrs[unsafe.Pointer(unsafe.StringData(msg))] = err // for error(e) raising it again
 	}
 	return &Error{Value: String(msg), where: where, cause: err}
 }
+
+// maxGoErrs is how many Go errors an entry keeps for raising again.
+const maxGoErrs = 1024
 
 func ctxError(ctx context.Context) error {
 	return context.Cause(ctx)

@@ -452,3 +452,62 @@ func TestLimitPositionThroughTrampoline(t *testing.T) {
 		}
 	}
 }
+
+// A long entry that renews its budgets keeps nothing from one round to the next: a message
+// handler's results, the host errors it caught, or what calls that have returned left on
+// the stack.
+func TestLongEntryKeepsNothing(t *testing.T) {
+	var top, stack, goErrs, stale int
+	rt := MustNew(LibSafe, Limits{Steps: 100_000, AllocBytes: 1 << 20},
+		Global("renew", GoFunc(func(c *Call) error {
+			ex := c.ex
+			hi := ex.st.hi
+			c.Renew()
+			stale = 0
+			for _, v := range ex.stack[c.base+c.nargs : hi] {
+				if !v.IsNil() {
+					stale++
+				}
+			}
+			top, stack, goErrs = ex.top, len(ex.stack), len(ex.goErrs)
+			return nil
+		})),
+		Global("fail", GoFunc(func(c *Call) error { return fmt.Errorf("no %d", c.Arg[int64](0)) })))
+	s := mustLoad(t, rt, `
+		local function deep(n)
+			local s = string.rep("z", 1000) .. n
+			if n > 0 then return deep(n - 1) + #s end
+			return #s
+		end
+		function handlers(n)
+			for i = 1, n do
+				xpcall(error, debug.traceback, "e")
+				xpcall(fail, function(m) return m end, i)
+				xpcall(function() error("e") end, tostring)
+				renew()
+			end
+		end
+		function hostErrors(n)
+			for i = 1, n do pcall(fail, i) if i % 100 == 0 then renew() end end
+		end
+		function afterDeep() deep(100) renew() end`)
+	ctx := context.Background()
+	call := func(name string, args ...Value) {
+		t.Helper()
+		if _, err := s.Call(ctx, s.Globals().Get(String(name)), args...); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	call("handlers", Int(20_000))
+	if top != 0 || stack > 1024 {
+		t.Errorf("after 60,000 message handlers: top %d, stack %d slots", top, stack)
+	}
+	call("hostErrors", Int(5_000))
+	if goErrs > maxGoErrs {
+		t.Errorf("after 5,000 distinct host errors: %d kept", goErrs)
+	}
+	call("afterDeep")
+	if stale != 0 {
+		t.Errorf("after a deep call and a renewal: %d stale slots above the call", stale)
+	}
+}
