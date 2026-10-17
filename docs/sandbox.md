@@ -80,6 +80,23 @@ whole. Renew only after a real wait: a script that loops on a function that rene
 bounded by its context alone. A nested call made with `c.Context()` cannot renew the budgets it
 shares, and closers running on the grace budget cannot renew it.
 
+A time limit for each round between waits needs no option: run the entry with a context the
+host can cancel, and reset a timer after each wait as it renews.
+
+```go
+ctx, cancel := context.WithCancelCause(parent)
+defer cancel(nil)
+round := time.AfterFunc(time.Second, func() { cancel(errRoundTooLong) })
+defer round.Stop()
+
+// in the host function, after each wait:
+round.Reset(time.Second)
+c.Renew()
+```
+
+A round that runs past the second ends the entry with `errRoundTooLong`, terminal like any
+cancelled context.
+
 ### Memory an entry keeps
 
 The allocation budget counts what is allocated, so it bounds what an entry keeps only until it
