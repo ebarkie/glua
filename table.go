@@ -190,6 +190,13 @@ func (t *Table) set(key, val Value) {
 			return
 		}
 		if i == int64(len(t.arr)) && !val.IsNil() {
+			if len(t.arr) == cap(t.arr) && t.sparse() {
+				// a full array part, mostly empty, as a queue's that drops its head leaves
+				// it: resize it as C Lua would, rather than double it
+				t.resize(key)
+				t.set(key, val)
+				return
+			}
 			if len(t.nodes) > 0 { // the key may be in the hash part, past the end of the array
 				if idx := t.findNode(&key, hashValue(key)); idx >= 0 {
 					t.nodes[idx].v = Value{} // a deleted key; the next rehash drops it
@@ -216,9 +223,9 @@ func (t *Table) set(key, val Value) {
 	t.insert(key, val, h)
 }
 
-// resize makes room for the new key k when the hash part is full, as C Lua's rehash does: it
-// counts the integer keys, k included, and gives the array part the largest size n that
-// keys 1..n fill more than half, then sizes the hash part for the rest. It reports whether
+// resize makes room for the new key k, as C Lua's rehash does: it counts the integer keys,
+// k included, and gives the array part the largest size n that keys 1..n fill more than
+// half, growing or shrinking it, then sizes the hash part for the rest. It reports whether
 // the array part grew.
 func (t *Table) resize(k Value) bool {
 	var nums [64]int // nums[i]: integer keys in (2^(i-1), 2^i]
@@ -246,12 +253,23 @@ func (t *Table) resize(k Value) bool {
 	}
 	count(k)
 	na := computeSizes(&nums, nint)
-	if na <= len(t.arr) {
+	if na == len(t.arr) {
 		t.rehash(1)
 		return false
 	}
-	old := t.nodes
-	t.arr = append(t.arr, make([]Value, na-len(t.arr))...)
+	old, oldArr := t.nodes, t.arr
+	if na > len(t.arr) {
+		t.arr = append(t.arr, make([]Value, na-len(t.arr))...)
+		oldArr = nil
+	} else {
+		t.arr = append(make([]Value, 0, na), oldArr[:na]...) // a new array, so the old one is freed
+		oldArr = oldArr[na:]
+		for i := range oldArr {
+			if !oldArr[i].IsNil() {
+				live++ // moves to the hash part
+			}
+		}
+	}
 	t.nodes = nil
 	t.used = 0
 	movedToArray := 0
@@ -279,7 +297,25 @@ func (t *Table) resize(k Value) bool {
 		}
 		t.insert(nd.k, nd.v, hashValue(nd.k))
 	}
-	return true
+	for i := range oldArr {
+		if v := oldArr[i]; !v.IsNil() {
+			k := Int(int64(na + i + 1))
+			t.insert(k, v, hashValue(k))
+		}
+	}
+	return len(oldArr) == 0
+}
+
+// sparse reports whether less than half of the array part, with one more slot, would hold
+// values: too empty to double.
+func (t *Table) sparse() bool {
+	live := 0
+	for i := range t.arr {
+		if !t.arr[i].IsNil() {
+			live++
+		}
+	}
+	return 2*(live+1) <= len(t.arr)+1
 }
 
 // bitsLen is the number of bits needed for x: ceil(log2(x+1)).
