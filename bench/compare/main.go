@@ -168,6 +168,9 @@ var apiBoundary = []struct{ name, bench, target string }{
 	{"Same rule through `Func1`, pointer to a struct built per call", "BenchmarkAPIFuncPointerPerCall", ""},
 	{"Function that calls one Go host function made with `Fn1`", "BenchmarkAPIHostCall", ""},
 	{"Same, host function written as a `GoFunc`", "BenchmarkAPIHostCallRaw", ""},
+	{"Function that passes a `*request` through a host function made with `Fn1`", "BenchmarkAPIFnPointer", ""},
+	{"Same, host function a `GoFunc` using `Arg` and `Return`", "BenchmarkAPIHostPointer", ""},
+	{"Same, called from every core at once, wall time per call", "BenchmarkAPIHostPointerParallel", ""},
 }
 
 // compareBoundary times the API boundary rows on both loops, in interleaved rounds.
