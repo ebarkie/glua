@@ -140,7 +140,8 @@ func (c *Call) Charge(n int) error {
 // after a real wait: a script that loops on a function that renews at once is bounded by its
 // context alone. A limit already exceeded stays exceeded. Renew does nothing in an entry
 // made with another entry's Context, which shares that entry's budgets, nor in closers
-// running after a terminal error.
+// running after a terminal error. Renew also lets go of values that calls which have
+// returned left on the stack, which the entry would otherwise keep until it ends.
 func (c *Call) Renew() {
 	ex := c.ex
 	if ex.fatal != nil || ex.fixed { // a terminal error, a borrowed entry, the grace budget
@@ -161,6 +162,13 @@ func (c *Call) Renew() {
 	if e := ex.ectx; e != nil { // a context the function took before carries the budgets afresh
 		e.steps.Store(ex.maxSteps)
 		e.alloc.Store(ex.maxAlloc)
+	}
+	// Above this call's arguments the stack is dead: what deeper calls left there would stay
+	// reachable until the entry ends. Clear it, as C Lua's collector clears a stack above
+	// its top.
+	if end := c.base + c.nargs; end < ex.st.hi {
+		clear(ex.stack[end:ex.st.hi])
+		ex.st.hi = end
 	}
 }
 
