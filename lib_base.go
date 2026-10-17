@@ -46,15 +46,27 @@ func baseCollectGarbage(c *Call) error {
 	if err != nil {
 		return err
 	}
-	// a script can never trigger a collection for the whole process: every option is a no-op
-	// that returns its neutral value, except count
+	// a script can never trigger a collection for the whole process: collect and step measure
+	// what the entry keeps and let go of its dead stack, count reports that measure plus what
+	// was allocated since, and the other options are no-ops that return their neutral value
 	switch opt {
 	case "count":
-		used := float64(c.ex.renewedAlloc+c.ex.maxAlloc-c.ex.allocLeft) / 1024
-		return c.ReturnValues(Float(used))
+		ex := c.ex
+		if est := ex.liveBase + ex.allocated() - ex.liveAt; !ex.liveKnown || est > 2*ex.liveBase+64<<10 {
+			// measured again once allocation could have doubled it, as a collector's cycle
+			// would come round: the walks cost a bounded share of what is allocated
+			if err := c.measureLive(); err != nil {
+				return err
+			}
+		}
+		return c.ReturnValues(Float(float64(ex.liveBase+ex.allocated()-ex.liveAt) / 1024))
 	case "collect", "step":
+		c.clearDead()
+		if err := c.measureLive(); err != nil {
+			return err
+		}
 		if opt == "step" {
-			return c.ReturnValues(Bool(false))
+			return c.ReturnValues(Bool(false)) // as C Lua answers a step on a small heap
 		}
 		return c.ReturnValues(Int(0))
 	case "isrunning":

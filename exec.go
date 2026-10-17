@@ -124,6 +124,10 @@ type executor struct {
 
 	// what the entry used before its last Renew, which CallStats adds to what it used since
 	renewedSteps, renewedAlloc int64
+	// liveKnown says that collectgarbage measured liveBase bytes live when the entry had
+	// allocated liveAt: its count is that plus what was allocated since
+	liveKnown        bool
+	liveBase, liveAt int64
 
 	coStacks []coStack // stacks of coroutines that returned in this entry, for the next ones
 }
@@ -261,6 +265,7 @@ func (ex *executor) reset() {
 	}
 	ex.co, ex.nny, ex.fatal = nil, 0, nil
 	ex.renewedSteps, ex.renewedAlloc = 0, 0
+	ex.liveKnown = false
 	ex.randSeeded = false
 	if len(ex.coStacks) > 0 { // kept for the entry, not between entries
 		clear(ex.coStacks)
