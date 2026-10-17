@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 type hostReq struct {
@@ -289,12 +291,21 @@ type (
 	planTemp  int64 // has a conversion, registered after the adapter is made
 )
 
-// planPair is a typed adapter for f and a GoFunc that decodes its argument with Arg, by the
-// general rules: the adapter's planned decoding must give the same results and errors.
+// planPair is a typed adapter for f, a GoFunc that decodes its argument with Arg, and one
+// that decodes it by reflection, the general rules: the planned decoding of the first two
+// must give the same results and errors as the third.
 func planPair[T any](name string, f func(T) string) []Option {
 	return []Option{
 		Global(name, Fn1(f)),
-		Global(name+"_arg", GoFunc(func(c *Call) error { return c.Return(f(c.Arg[T](0))) })),
+		Global(name+"_get", GoFunc(func(c *Call) error { return c.Return(f(c.Arg[T](0))) })),
+		Global(name+"_arg", GoFunc(func(c *Call) error {
+			r, err := argReflect[T](c, 0, c.Value(0))
+			if err != nil {
+				c.argErr, c.unwinding = err, true // as Arg raises it
+				panic(argPanic{})
+			}
+			return c.Return(f(r))
+		})),
 	}
 }
 
@@ -326,10 +337,12 @@ func TestTypedAdapterPlans(t *testing.T) {
 			local bad = {}
 			for _, f in ipairs{"ptr", "val", "lvl", "ratio", "name", "flag"} do
 				for i = 1, #all + 1 do -- the last one is missing
-					local a = show(pcall(_ENV[f], all[i]))
-					local b = show(pcall(_ENV[f .. "_arg"], all[i]))
-					if a ~= b:gsub(f .. "_arg", f) then
-						bad[#bad + 1] = f .. "(" .. tostring(all[i]) .. "): " .. a .. " | " .. b
+					local want = show(pcall(_ENV[f .. "_arg"], all[i])):gsub(f .. "_arg", f)
+					for _, g in ipairs{f, f .. "_get"} do
+						local got = show(pcall(_ENV[g], all[i])):gsub(g, f)
+						if got ~= want then
+							bad[#bad + 1] = g .. "(" .. tostring(all[i]) .. "): " .. got .. " | " .. want
+						end
 					end
 				end
 			end
@@ -376,5 +389,50 @@ func TestTypedResultPlans(t *testing.T) {
 		if got := fmt.Sprint(f(ctx)); got != want {
 			t.Errorf("%s as blob: %s, want %s", name, got, want)
 		}
+	}
+}
+
+// Return and ValueOf encode by the plan of their type: the same Value as by reflection, and a
+// conversion registered after the plan was chosen applies.
+func TestEncodePlans(t *testing.T) {
+	b := &planBlob{N: 1}
+	same := func(name string, got Value, v any) {
+		t.Helper()
+		want, err := toValue(v)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.n != want.n {
+			t.Errorf("%s: %#x, want %#x", name, got.n, want.n)
+			return
+		}
+		switch {
+		case reflect.TypeOf(v).Kind() == reflect.Struct: // each a copy of its own
+			if got.p == want.p || *(*planBlob)(got.p) != *(*planBlob)(want.p) {
+				t.Errorf("%s: not an equal copy", name)
+			}
+		case !rawEqual(got, want):
+			t.Errorf("%s: %v, want %v", name, got, want)
+		}
+	}
+	same("*T", ValueOf(b), b)
+	same("nil *T", ValueOf((*planBlob)(nil)), (*planBlob)(nil))
+	same("T", ValueOf(*b), *b)
+	same("level", ValueOf(planLevel(3)), planLevel(3))
+	same("ratio", ValueOf(planRatio(1.5)), planRatio(1.5))
+	same("name", ValueOf(planName("x")), planName("x"))
+	same("flag", ValueOf(planFlag(true)), planFlag(true))
+	if x, err := resultValue(b); err != nil || x.p != unsafe.Pointer(b) {
+		t.Errorf("Return(*T): %v, %v", x, err)
+	}
+
+	type later int64
+	if v := ValueOf(later(3)); v.String() != "3" {
+		t.Fatalf("before the conversion: %v", v)
+	}
+	MustNew(Convert(func(l later) Value { return String(fmt.Sprintf("%d!", l)) },
+		func(v Value) (later, error) { return 0, errors.New("no") }))
+	if v := ValueOf(later(3)); v.String() != "3!" {
+		t.Errorf("after the conversion: %v", v)
 	}
 }

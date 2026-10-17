@@ -112,6 +112,9 @@ func ValueOf[T any](v T) Value {
 	case Value:
 		return x
 	}
+	if x, ok := encodePlanned(v, planFor[T]()); ok {
+		return x
+	}
 	val, err := toValue(v)
 	if err != nil {
 		panic("glua: ValueOf: " + err.Error())
