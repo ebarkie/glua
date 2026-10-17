@@ -1,8 +1,8 @@
 package glua
 
 // Lua patterns, ported from C Lua 5.4's lstrlib.c: a direct interpreter over the pattern
-// text, with no compile step. Backtracking charges steps, and recursion is capped at 200
-// levels ("pattern too complex").
+// text, with no compile step. Backtracking, scanning sets and comparing back-references
+// charge steps, and recursion is capped at 200 levels ("pattern too complex").
 
 const (
 	maxMatchDepth = 200
@@ -37,13 +37,31 @@ func (ms *matchState) fail(format string, args ...any) int {
 	return -1
 }
 
-// step charges the budget for backtracking work: one step per 64 iterations.
+// step charges the budget for one backtracking iteration.
 func (ms *matchState) step() bool {
-	if ms.ticks++; ms.ticks&63 == 0 {
+	if ms.ticks++; ms.ticks >= 64 {
+		return ms.spend()
+	}
+	return ms.err == nil
+}
+
+// work charges the budget for n bytes of a class tested, a set scanned or a back-reference
+// compared, which cost the same as n iterations.
+func (ms *matchState) work(n int) bool {
+	if ms.ticks += n; ms.ticks >= 64 {
+		return ms.spend()
+	}
+	return ms.err == nil
+}
+
+// spend takes a step per 64 iterations counted.
+func (ms *matchState) spend() bool {
+	for ; ms.ticks >= 64; ms.ticks -= 64 {
 		if err := ms.c.ex.tick(); err != nil {
 			if ms.err == nil {
 				ms.err = err
 			}
+			ms.ticks = 0
 			return false
 		}
 	}
@@ -80,6 +98,7 @@ func (ms *matchState) classEnd(p int) int {
 		return p + 1
 	}
 	if c == '[' {
+		start := p
 		if p < len(pat) && pat[p] == '^' {
 			p++
 		}
@@ -93,6 +112,9 @@ func (ms *matchState) classEnd(p int) int {
 				p++ // skip escapes, such as '%]'
 			}
 			if p < len(pat) && pat[p] == ']' {
+				if !ms.work(p - start) {
+					return -1
+				}
 				return p + 1
 			}
 			if p >= len(pat) {
@@ -151,7 +173,7 @@ func singleClass(c, cl byte) bool {
 }
 
 // matchClass reports whether c matches the set [ ... ] whose '[' is at p and whose ']' is
-// at ec-1.
+// at ec-1. Its callers charge for the scan.
 func (ms *matchState) matchClass(c byte, p, ec int) bool {
 	pat := ms.pat
 	sig := true
@@ -226,7 +248,7 @@ func (ms *matchState) maxExpand(s, p, ep int) int {
 	i := 0
 	for ms.singleMatch(s+i, p, ep) {
 		i++
-		if !ms.step() {
+		if !ms.work(ep - p) { // a set costs its length
 			return -1
 		}
 	}
@@ -246,7 +268,7 @@ func (ms *matchState) minExpand(s, p, ep int) int {
 		if r := ms.match(s, ep+1); r != -1 {
 			return r
 		}
-		if ms.err != nil || !ms.step() {
+		if ms.err != nil || !ms.work(ep-p) { // a set costs its length
 			return -1
 		}
 		if ms.singleMatch(s, p, ep) {
@@ -289,6 +311,9 @@ func (ms *matchState) matchCapture(s int, l byte) int {
 		return -1
 	}
 	c := ms.capture[i]
+	if c.len > 0 && !ms.work(min(c.len, len(ms.src)-s)) {
+		return -1
+	}
 	// a position capture has no text, and like C Lua a back-reference to one never matches
 	if c.len >= 0 && len(ms.src)-s >= c.len && ms.src[c.init:c.init+c.len] == ms.src[s:s+c.len] {
 		return s + c.len

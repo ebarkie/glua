@@ -42,7 +42,7 @@ switches a limit off.
 
 | Limit | Default | What it counts | When it runs out |
 | --- | --- | --- | --- |
-| `Steps` | 10 million | Backward jumps, calls, and library work in proportion to its size: a step per 64 bytes a library function produces, per comparison in `table.sort`, per 8 values copied for varargs | `ErrSteps`, terminal |
+| `Steps` | 10 million | Backward jumps, calls, and library work in proportion to its size: a step per 64 bytes a library function produces or a pattern match works through, per comparison in `table.sort`, per 8 values copied for varargs | `ErrSteps`, terminal |
 | `AllocBytes` | 64 MiB | Bytes allocated for the script: tables and their growth, closures, strings, coroutines, stack growth, host functions' results, `load`'s source. It counts what is allocated, not what is live | `ErrAlloc`, terminal |
 | `CallDepth` | 10,000 | Lua frames | `stack overflow`, which `pcall` can catch |
 | `HostDepth` | 100 | Nesting of Go and Lua: host functions that call back into Lua, library callbacks such as sort's comparator, scripts called from host functions | `ErrHostDepth`, terminal |
