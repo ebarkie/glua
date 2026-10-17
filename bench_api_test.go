@@ -16,18 +16,19 @@ function rule(r) return r.method == "GET" and r.size < 100 and r.admin end
 function host(x) local y = inc(x) return y end
 function hostraw(x) local y = incraw(x) return y end
 function hostptr(r) return same(r) end
+function fnptr(r) return fsame(r) end
+function fnstruct(r) return fsize(r) end
+function fnnamed(n) return fnext(n) end
 `
 
 const apiRule = `method == "GET" and size < 100 and admin`
 
-// apiFast selects the fast loop for the benchmarks, with GLUA_BENCH_FAST=1.
-var apiFast = os.Getenv("GLUA_BENCH_FAST") == "1"
+// apiChecked selects the checked loop for the benchmarks, with GLUA_BENCH_CHECKED=1; they
+// run the default, fast loop otherwise.
+var apiChecked = os.Getenv("GLUA_BENCH_CHECKED") == "1"
 
 func apiRuntime(opts ...Option) *Runtime {
-	if apiFast {
-		opts = append(opts, withLoop(false))
-	}
-	return MustNew(opts...)
+	return MustNew(append(opts, withLoop(apiChecked))...)
 }
 
 func apiScript(b *testing.B) *Script {
@@ -40,6 +41,9 @@ func apiScript(b *testing.B) *Script {
 		Global("same", GoFunc(func(c *Call) error {
 			return c.Return(c.Arg[*request](0))
 		})),
+		Global("fsame", Fn1(func(r *request) *request { return r })),
+		Global("fsize", Fn1(func(r request) int64 { return r.Size })),
+		Global("fnext", Fn1(func(n level) level { return n + 1 })),
 	)
 	s, err := rt.Load(context.Background(), "api.lua", apiSrc)
 	if err != nil {
@@ -174,4 +178,41 @@ func BenchmarkAPIHostPointerParallel(b *testing.B) {
 			}
 		}
 	})
+}
+
+// level is a named integer type, which the built-in fast paths for int64 miss.
+type level int64
+
+// Typed adapters with a parameter of each kind that needs more than a scalar fast path: a
+// pointer to a bound struct, a struct by value and a named integer.
+func BenchmarkAPIFnPointer(b *testing.B) {
+	f := must(apiScript(b).Func1[*request, *request]("fnptr"))
+	ctx := context.Background()
+	r := &request{Method: method}
+	for b.Loop() {
+		if _, err := f(ctx, r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAPIFnStruct(b *testing.B) {
+	f := must(apiScript(b).Func1[*request, int64]("fnstruct"))
+	ctx := context.Background()
+	r := &request{Method: method, Size: 7}
+	for b.Loop() {
+		if _, err := f(ctx, r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAPIFnNamed(b *testing.B) {
+	f := must(apiScript(b).Func1[int64, int64]("fnnamed"))
+	ctx := context.Background()
+	for i := int64(0); b.Loop(); i++ {
+		if _, err := f(ctx, i); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

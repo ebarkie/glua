@@ -114,10 +114,37 @@ func decoderFor[R any]() (func(Value) (R, error), error) {
 	if err := checkDecodable(rt, 0, map[reflect.Type]bool{}); err != nil {
 		return nil, &BindError{Type: rt, Reason: err.Error()}
 	}
-	return func(v Value) (r R, err error) {
+	slow := func(v Value) (r R, err error) {
 		err = decodeReflect(v, reflect.ValueOf(&r).Elem(), "", 0)
 		return r, err
-	}, nil
+	}
+	if rt == valueType || rt == tableType || rt == timeType || converterFor(rt) != nil {
+		return slow, nil
+	}
+	// A userdata of the type, without reflection; anything else, and its errors, by reflection.
+	switch e := rt; rt.Kind() {
+	case reflect.Pointer:
+		if e = rt.Elem(); e.Kind() != reflect.Struct || e == timeType || converterFor(e) != nil {
+			break
+		}
+		id := bindType(e)
+		return func(v Value) (r R, err error) {
+			if v.isObj(kindUser) && v.n&(typeIDMask|flagCallscoped) == id {
+				*(*unsafe.Pointer)(unsafe.Pointer(&r)) = v.p
+				return r, nil
+			}
+			return slow(v)
+		}, nil
+	case reflect.Struct:
+		id := bindType(e)
+		return func(v Value) (R, error) {
+			if v.isObj(kindUser) && v.n&typeIDMask == id {
+				return *(*R)(v.p), nil
+			}
+			return slow(v)
+		}, nil
+	}
+	return slow, nil
 }
 
 // resultDecoder decodes the results of a call into R: struct{} discards them, Pair takes the
