@@ -139,12 +139,10 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 	}
 	prev := ex.co
 	if prev == nil {
-		prev = ex.mainCo // nil when the main thread has no coroutine object
+		prev = ex.mainThread()
 	}
 	saved := ex.saveThread()
-	if prev != nil {
-		prev.status, prev.waiting = coNormal, saved
-	}
+	prev.status, prev.waiting = coNormal, saved
 	ex.loadThread(co.threadState)
 	ex.st.ticks = saved.st.ticks // the step budget belongs to the entry, not the coroutine
 	ex.co = co
@@ -155,9 +153,7 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 		co.threadState = ex.saveThread()
 		saved.st.ticks = ex.st.ticks
 		ex.loadThread(saved)
-		if prev != nil {
-			prev.status, prev.waiting = coRunning, threadState{}
-		}
+		prev.status, prev.waiting = coRunning, threadState{}
 		if ex.co = prev; prev == ex.mainCo {
 			ex.co = nil // the main thread runs as no coroutine
 		}
@@ -311,12 +307,18 @@ func coStatusOf(c *Call) error {
 func coRunningFn(c *Call) error {
 	ex := c.ex
 	if ex.co == nil {
-		if ex.mainCo == nil {
-			ex.mainCo = &coroutine{main: true, status: coRunning}
-		}
-		return c.ReturnValues(threadValue(ex.mainCo), Bool(true))
+		return c.ReturnValues(threadValue(ex.mainThread()), Bool(true))
 	}
 	return c.ReturnValues(threadValue(ex.co), Bool(ex.co.main))
+}
+
+// mainThread returns the coroutine that stands for the main thread, made on first use. While
+// a coroutine runs, it keeps the main thread's state, waiting in resume.
+func (ex *executor) mainThread() *coroutine {
+	if ex.mainCo == nil {
+		ex.mainCo = &coroutine{main: true, status: coRunning}
+	}
+	return ex.mainCo
 }
 
 func coIsYieldable(c *Call) error {
@@ -342,7 +344,7 @@ func coWrap(c *Call) error {
 	if err != nil {
 		return err
 	}
-	g := &goFunc{name: "wrap", qualname: "coroutine.wrap", stateful: true}
+	g := &goFunc{name: "wrap", qualname: "coroutine.wrap", stateful: true, co: co}
 	g.f = func(c *Call) error {
 		vals, ok, err := c.ex.resume(co, argView(c, 0))
 		if err != nil {
@@ -409,12 +411,10 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		// the closers run as the coroutine, which cannot yield meanwhile
 		prev := ex.co
 		if prev == nil {
-			prev = ex.mainCo
+			prev = ex.mainThread()
 		}
 		ex.co, co.status = co, coRunning
-		if prev != nil {
-			prev.status, prev.waiting = coNormal, saved
-		}
+		prev.status, prev.waiting = coNormal, saved
 		nnyBase := co.nnyBase
 		co.nnyBase = ex.nny + 1
 		ex.nny++
@@ -425,9 +425,7 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		v, cerr := ex.closeOnError(0, value, true)
 		ex.nny--
 		co.nnyBase = nnyBase
-		if prev != nil {
-			prev.status, prev.waiting = coRunning, threadState{}
-		}
+		prev.status, prev.waiting = coRunning, threadState{}
 		if ex.co = prev; prev == ex.mainCo {
 			ex.co = nil
 		}

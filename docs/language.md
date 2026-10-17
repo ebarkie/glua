@@ -65,7 +65,7 @@ The host chooses the libraries. The default set is the base library, `string`, `
 
 | Library | In glua |
 | --- | --- |
-| base | All of it except `dofile` and `loadfile`. `print` and `warn` write to the host's output, which discards by default. `collectgarbage` does nothing: `"count"` reports the kilobytes the current call has allocated, across renewals, and every other option returns its neutral value |
+| base | All of it except `dofile` and `loadfile`. `print` and `warn` write to the host's output, which discards by default. `collectgarbage` cannot start a collection for the process: `"collect"` and `"step"` measure what the call keeps and let go of what returned calls left on its stack, `"count"` reports that measure in kilobytes plus what was allocated since, measuring again once that could have doubled it, and every other option returns its neutral value |
 | `require`, `package` | Only modules the host defines, in Lua or in Go, and those its loader function provides. No search path, no C modules, no `package.path`, `cpath`, `searchers` or `preload`. A shared script can require a module for the first time only while it loads |
 | `load` | Off by default. Text chunks only: binary chunks are refused. The environment argument must be a table or nil |
 | `string` | All of it, `pack`, `unpack` and `packsize` included, except `string.dump` |

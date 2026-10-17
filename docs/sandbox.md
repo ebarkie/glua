@@ -75,11 +75,21 @@ nested call made with an unrelated context gets budgets of its own.
 An entry that runs long and waits on its host, such as a session that reads input or a worker
 that waits for events, would run out of any budget in the end. A host function that calls
 `c.Renew()` after each wait gives the entry its step and allocation budgets afresh, so they
-bound the work between waits rather than over the whole entry; `Observe` and
-`collectgarbage("count")` still count the whole. Renew only after a real wait: a script that
-loops on a function that renews at once is bounded by its context alone. A nested call made
-with `c.Context()` cannot renew the budgets it shares, and closers running on the grace budget
-cannot renew it.
+bound the work between waits rather than over the whole entry; `Observe` still counts the
+whole. Renew only after a real wait: a script that loops on a function that renews at once is
+bounded by its context alone. A nested call made with `c.Context()` cannot renew the budgets it
+shares, and closers running on the grace budget cannot renew it.
+
+### Memory an entry keeps
+
+The allocation budget counts what is allocated, so it bounds what an entry keeps only until it
+starts again: at a renewal, and at each call of a `VM`, whose state persists between calls. A
+script that keeps a little more each round, or each call, grows without limit.
+`c.LiveBytes()` and `vm.LiveBytes()` measure what an entry or a VM keeps reachable, at the
+sizes the allocation budget charges; frozen state, which every entry shares, and Go values are
+not counted. A host that runs such scripts without trusting them can check from time to time
+and end the entry with `Terminate`. A measurement takes time in proportion to what it
+measures. A script sees the same measure in `collectgarbage("count")`.
 
 ## Fixed caps
 
@@ -102,8 +112,8 @@ These hold even with `NoLimit`, because what they prevent would end the process.
 ## Panics
 
 A panic inside the VM itself is recovered at the entry and returned as a `*lua.PanicError`;
-the bounds-checked interpreter loop of `Hardened` turns any VM bug into one. A panic in a host function is
-the host's: it passes through to the caller, unless the `RecoverPanics` option turns it into a
+the bounds-checked interpreter loop of `Hardened` turns any VM bug into one. A panic in a host
+function is the host's: it passes through to the caller, unless the `RecoverPanics` option turns it into a
 `*lua.PanicError` too. Either way the executor involved is discarded. `runtime.Goexit` passes
 through.
 

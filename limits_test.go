@@ -263,7 +263,8 @@ func TestRenew(t *testing.T) {
 	if _, err := inCoroutine(context.Background()); err != nil {
 		t.Errorf("renewed in a coroutine: %v", err)
 	}
-	if kb, err := count(context.Background()); err != nil || kb < 10<<15/1024 {
+	// count is what the entry keeps, not what its rounds allocated: none of their strings
+	if kb, err := count(context.Background()); err != nil || kb > 64 {
 		t.Errorf("collectgarbage('count') after renewing: %v KB, %v", kb, err)
 	}
 

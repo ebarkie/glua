@@ -163,13 +163,7 @@ func (c *Call) Renew() {
 		e.steps.Store(ex.maxSteps)
 		e.alloc.Store(ex.maxAlloc)
 	}
-	// Above this call's arguments the stack is dead: what deeper calls left there would stay
-	// reachable until the entry ends. Clear it, as C Lua's collector clears a stack above
-	// its top.
-	if end := c.base + c.nargs; end < ex.st.hi {
-		clear(ex.stack[end:ex.st.hi])
-		ex.st.hi = end
-	}
+	c.clearDead()
 }
 
 // Errorf returns an error with a formatted message, for a host function to return. As C
