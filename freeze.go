@@ -16,7 +16,7 @@ import (
 // freezer collects the objects reachable from the values given to add.
 type freezer struct {
 	plans  *[]*typeInfo // the Runtime's view of bound types; nil for the process-wide one
-	intern bool         // give string keys the canonical pointers constants have
+	intern int64        // give string keys the canonical pointers constants have, registering up to this many names; 0: not
 	seen   map[unsafe.Pointer]bool
 	types  map[uint64]uint8 // the bound types checked: 1 through a live view, 2 a read-only one
 	work   []freezeItem
@@ -170,8 +170,8 @@ func (f *freezer) checkField(fl *field, readonly bool, path string) error {
 // freeze makes what walk collected read-only.
 func (f *freezer) freeze() {
 	for _, t := range f.tables {
-		if f.intern {
-			t.internKeys()
+		if f.intern > 0 {
+			t.internKeys(f.intern)
 		}
 		t.freeze()
 	}
@@ -180,9 +180,12 @@ func (f *freezer) freeze() {
 	}
 }
 
-// freezeValue freezes v and everything reachable from it. path names v in messages.
+// freezeValue freezes v and everything reachable from it. path names v in messages. Its
+// string keys get the canonical pointers of the registry: a table frozen in Go outlives the
+// scripts loaded after it, whose constants must find its keys inline.
 func freezeValue(v Value, path string) error {
 	f := newFreezer()
+	f.intern = maxDynamic
 	f.add(v, path)
 	if err := f.walk(); err != nil {
 		return err
@@ -263,11 +266,12 @@ func (ti *typeInfo) writable() bool {
 	return false
 }
 
-// interned keeps canonical strings alive for keys that Go code puts in tables: library,
-// global, module and member names, and names given to Table.Set. The hot loop compares key
-// pointers, and the compiler gives constants these canonical pointers, so a key built in Go
-// is found inline only if it is interned. The registry is capped, so a host that builds
-// tables with endless distinct keys cannot make it grow without bound.
+// interned keeps canonical strings alive for the names scripts use and the keys of tables
+// that outlive the scripts loaded after them: the names among compiled constants, and
+// library, global, module and member names, frozen with the Runtime or with Table.Freeze.
+// The hot loop compares key pointers, so a key is found inline only if its pointer is the
+// canonical one. The registry is capped. Keys that Go code puts in tables call by call use
+// canonKey, which takes a canonical pointer from it but never adds one.
 var (
 	interned      sync.Map // string -> unique.Handle[string]
 	internedCount atomic.Int64
@@ -275,32 +279,66 @@ var (
 
 const (
 	maxInterned   = 1 << 16 // names in the registry
+	maxDynamic    = 1 << 15 // of them, names that scripts and Table.Freeze bring, which may never end
 	maxInternedSz = 64      // longest name interned, in bytes
 )
 
 // internKey returns k with the canonical pointer, if k is a short name and the registry
-// has room; otherwise k itself.
-func internKey(k Value) Value {
-	if !k.isString() || k.n&lenMask > maxInternedSz {
+// has room for limit names; otherwise k itself. Names frozen with a Runtime, which the host
+// chooses, may fill the registry; those that compiled scripts and Table.Freeze bring, which
+// may never end, fill at most maxDynamic of it, so that they cannot crowd out the others.
+func internKey(k Value, limit int64) Value {
+	if !k.isString() {
 		return k
 	}
 	s := k.str()
 	if h, ok := interned.Load(s); ok {
 		return String(h.(unique.Handle[string]).Value())
 	}
-	if !isName(s) || internedCount.Load() >= maxInterned {
+	if !registrable(s, limit) {
 		return k
 	}
 	h := unique.Make(s)
-	if _, loaded := interned.LoadOrStore(s, h); !loaded {
-		internedCount.Add(1)
-	}
+	keepName(s, h)
 	return String(h.Value())
 }
 
-// internKeys gives t's string keys their canonical pointers.
-func (t *Table) internKeys() {
+// register keeps h, the canonical s, in the registry if registrable allows it.
+func register(s string, h unique.Handle[string], limit int64) {
+	if registrable(s, limit) {
+		keepName(s, h)
+	}
+}
+
+// registrable reports whether s may enter the registry: a short name, while the registry
+// holds fewer than limit names.
+func registrable(s string, limit int64) bool {
+	return len(s) <= maxInternedSz && isName(s) && internedCount.Load() < limit
+}
+
+func keepName(s string, h unique.Handle[string]) {
+	if _, loaded := interned.LoadOrStore(s, h); !loaded {
+		internedCount.Add(1)
+	}
+}
+
+// canonKey returns k with its canonical pointer, for a key Go code puts in a table: Table.Set,
+// or a Go map converted. A name that some script uses is in the registry; one that no script
+// uses needs no canonical pointer, and is not added, so that a host making tables with endless
+// distinct keys, such as IDs, leaves no names behind.
+func canonKey(k Value) Value {
+	if !k.isString() || k.n&lenMask > maxInternedSz {
+		return k
+	}
+	if h, ok := interned.Load(k.str()); ok {
+		return String(h.(unique.Handle[string]).Value())
+	}
+	return k
+}
+
+// internKeys gives t's string keys their canonical pointers, as internKey does.
+func (t *Table) internKeys(limit int64) {
 	for i := range t.nodes {
-		t.nodes[i].k = internKey(t.nodes[i].k)
+		t.nodes[i].k = internKey(t.nodes[i].k, limit)
 	}
 }
