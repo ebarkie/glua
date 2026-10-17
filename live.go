@@ -144,12 +144,46 @@ func (vm *VM) LiveBytes() int64 {
 
 // clearDead clears the stack above c's arguments, which calls that have returned left
 // there and which would otherwise stay reachable until the entry ends, as C Lua's collector
-// clears a stack above its top.
+// clears a stack above its top, and shrinks a stack that the entry has stopped using.
 func (c *Call) clearDead() {
 	ex := c.ex
-	if end := c.base + c.nargs; end < ex.st.hi {
+	end, peak := c.base+c.nargs, ex.st.hi // the most the stack held since the last clearing
+	if end < ex.st.hi {
 		clear(ex.stack[end:ex.st.hi])
 		ex.st.hi = end
+	}
+	ex.shrink(max(peak, end, ex.top))
+}
+
+// shrink gives back a stack and frames that a deep call grew, as C Lua's luaD_shrinkstack
+// does, once they are past what the pool keeps and four times what was used, at shrinkAfter
+// checks in a row: used is the most stack slots held since the last check. An entry or a VM
+// that goes deep now and then keeps what it grew, rather than paying to grow it again; one
+// deep call long past is given back. The frames follow the stack: every frame takes a slot.
+func (ex *executor) shrink(used int) {
+	need := used + stackSlack
+	n := max(64, 2*need, 2*(ex.st.nf+1))
+	stack := len(ex.stack) > maxPoolStack && len(ex.stack) > 4*need
+	frames := len(ex.pframes) > maxPoolFrames && len(ex.pframes) > 2*n
+	if !stack && !frames {
+		ex.quietChecks = 0
+		return
+	}
+	if ex.quietChecks++; ex.quietChecks < shrinkAfter {
+		return
+	}
+	ex.quietChecks = 0
+	if stack {
+		ex.moveStack(max(initStack, 2*need))
+	}
+	if frames {
+		ex.pframes = append(make([]uint64, 0, n), ex.pframes[:n]...)
+		if len(ex.nvar) > n {
+			ex.nvar = append([]int32(nil), ex.nvar[:n]...)
+		}
+		if len(ex.cont) > n {
+			ex.cont = append([]int32(nil), ex.cont[:n]...)
+		}
 	}
 }
 

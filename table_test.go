@@ -1,9 +1,15 @@
 package glua
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"math/rand/v2"
+	"runtime"
+	"strings"
 	"testing"
+	"unique"
+	"unsafe"
 )
 
 // A table must behave like a map from normalised keys, whatever mix of operations it sees.
@@ -267,5 +273,61 @@ func TestQueueTableBounded(t *testing.T) {
 		if got, _ := q.Get(Int(i)).Int(); got != i {
 			t.Fatalf("q[%d] = %v", i, got)
 		}
+	}
+}
+
+// Keys that Go code puts in tables call by call never enter the process-wide registry, yet
+// share the pointers of the constants of loaded scripts, so that the hot loop finds them.
+func TestGoKeysKeepNothing(t *testing.T) {
+	s := mustLoad(t, MustNew(), `function f(t) return t.method end`)
+	before := internedCount.Load()
+	m := map[string]int{}
+	for i := range 10_000 {
+		NewTable(0, 1).Set(String(fmt.Sprintf("id%d", i)), Int(1))
+		m[fmt.Sprintf("key%d", i)] = i
+	}
+	ValueOf(m)
+	if n := internedCount.Load() - before; n != 0 {
+		t.Errorf("%d names entered the registry", n)
+	}
+	tab := NewTable(0, 1)
+	tab.Set(String(strings.Clone("method")), String("GET"))
+	var k unsafe.Pointer
+	for i := range tab.nodes {
+		if tab.nodes[i].k.isString() {
+			k = tab.nodes[i].k.p
+		}
+	}
+	if k != unsafe.Pointer(unsafe.StringData(unique.Make("method").Value())) {
+		t.Error("the key does not have the constant's pointer")
+	}
+	if got, err := s.Call(context.Background(), s.Globals().Get(String("f")), tableValue(tab)); err != nil || got.String() != "GET" {
+		t.Errorf("t.method: %v, %v", got, err)
+	}
+}
+
+// A table frozen in Go keeps the canonical pointers of its keys for scripts loaded after it,
+// even when nothing else holds the name meanwhile.
+func TestFrozenGoTableKeysStayCanonical(t *testing.T) {
+	tab := NewTable(0, 1)
+	tab.Set(String(strings.Clone("frozenGoTableKey")), String("v"))
+	if err := tab.Freeze(); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		runtime.GC()
+	}
+	s := mustLoad(t, MustNew(), `function f(t) return t.frozenGoTableKey end`)
+	var k unsafe.Pointer
+	for i := range tab.nodes {
+		if tab.nodes[i].k.isString() {
+			k = tab.nodes[i].k.p
+		}
+	}
+	if k != unsafe.Pointer(unsafe.StringData(unique.Make("frozenGoTableKey").Value())) {
+		t.Error("the frozen key lost the pointer the script's constant has")
+	}
+	if got, err := s.Call(context.Background(), s.Globals().Get(String("f")), tableValue(tab)); err != nil || got.String() != "v" {
+		t.Errorf("t.frozenGoTableKey: %v, %v", got, err)
 	}
 }

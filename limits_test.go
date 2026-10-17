@@ -512,3 +512,28 @@ func TestLongEntryKeepsNothing(t *testing.T) {
 		t.Errorf("after a deep call and a renewal: %d stale slots above the call", stale)
 	}
 }
+
+// A time limit per round between waits, as docs/sandbox.md shows it: a timer the host stops
+// while it waits and resets as it renews cancels the entry's context when a round runs long,
+// and waits longer than the limit do not count.
+func TestRenewWithTimer(t *testing.T) {
+	errRound := errors.New("round too long")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	round := time.AfterFunc(50*time.Millisecond, func() { cancel(errRound) })
+	defer round.Stop()
+	rounds := 0
+	rt := MustNew(Limits{Steps: NoLimit},
+		Global("wait", GoFunc(func(c *Call) error {
+			round.Stop()
+			time.Sleep(80 * time.Millisecond) // longer than a round may run
+			round.Reset(50 * time.Millisecond)
+			c.Renew()
+			rounds++
+			return nil
+		})))
+	s := mustLoad(t, rt, `function f() for i = 1, 5 do wait() end while true do end end`)
+	if _, err := s.Call(ctx, s.Globals().Get(String("f"))); !errors.Is(err, errRound) || rounds != 5 {
+		t.Errorf("after %d rounds: %v, want the round's cause after 5", rounds, err)
+	}
+}

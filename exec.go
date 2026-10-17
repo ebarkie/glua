@@ -9,16 +9,18 @@ import (
 )
 
 const (
-	stackSlack   = 256      // free slots above any frame base, so a frame can be viewed as *[256]Value
-	initStack    = 512      // 8 KB of registers
-	maxPoolStack = 4096     // an executor whose stack grew beyond 64 KB is not pooled
-	maxStack     = 1 << 20  // fixed cap: register stack slots
-	tickQuantum  = 1024     // steps handed to the loop between refills
-	defaultSteps = 10000000 // Limits.Steps default
-	defaultDepth = 10000    // Limits.CallDepth default
-	defaultHost  = 100      // Limits.HostDepth default
-	defaultAlloc = 64 << 20 // Limits.AllocBytes default
-	maxIndexHops = 2000     // fixed cap: __index, __newindex and __call chains
+	stackSlack    = 256      // free slots above any frame base, so a frame can be viewed as *[256]Value
+	initStack     = 512      // 8 KB of registers
+	maxPoolStack  = 4096     // an executor whose stack grew beyond 64 KB is not pooled
+	maxPoolFrames = 1024     // nor one whose frames grew beyond 8 KB
+	shrinkAfter   = 4        // checks in a row that a grown stack went unused before it shrinks
+	maxStack      = 1 << 20  // fixed cap: register stack slots
+	tickQuantum   = 1024     // steps handed to the loop between refills
+	defaultSteps  = 10000000 // Limits.Steps default
+	defaultDepth  = 10000    // Limits.CallDepth default
+	defaultHost   = 100      // Limits.HostDepth default
+	defaultAlloc  = 64 << 20 // Limits.AllocBytes default
+	maxIndexHops  = 2000     // fixed cap: __index, __newindex and __call chains
 )
 
 // Frame flags, in the top byte of a frame record. RETURN tests them all at once.
@@ -124,6 +126,7 @@ type executor struct {
 
 	// what the entry used before its last Renew, which CallStats adds to what it used since
 	renewedSteps, renewedAlloc int64
+	quietChecks                int // shrink's checks in a row that found the stack too large
 	// liveKnown says that collectgarbage measured liveBase bytes live when the entry had
 	// allocated liveAt: its count is that plus what was allocated since
 	liveKnown        bool
@@ -275,7 +278,7 @@ func (ex *executor) reset() {
 
 // release returns an executor to the pool, unless it ended abnormally or has grown large.
 func release(pool *sync.Pool, ex *executor) {
-	if !ex.poisoned && len(ex.stack) <= maxPoolStack {
+	if !ex.poisoned && len(ex.stack) <= maxPoolStack && len(ex.pframes) <= maxPoolFrames {
 		pool.Put(ex)
 	}
 }

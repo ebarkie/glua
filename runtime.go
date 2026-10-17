@@ -470,7 +470,7 @@ func (rt *Runtime) buildLayer(o *options) error {
 		rt.sources[name] = m
 	}
 	fr := newFreezer()
-	fr.plans, fr.intern = rt.plans(), true
+	fr.plans, fr.intern = rt.plans(), maxInterned
 	fr.add(tableValue(g), "globals")
 	if rt.strMeta != nil {
 		fr.add(tableValue(rt.strMeta), "the string metatable") // its library, even when Without left out the global
