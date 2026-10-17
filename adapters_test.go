@@ -278,3 +278,103 @@ func TestHostCallNoAlloc(t *testing.T) {
 		t.Errorf("a host call allocates %v times", a)
 	}
 }
+
+type (
+	planBlob  struct{ N int }
+	planOther struct{ N int }
+	planLevel int64
+	planRatio float64
+	planName  string
+	planFlag  bool
+	planTemp  int64 // has a conversion, registered after the adapter is made
+)
+
+// planPair is a typed adapter for f and a GoFunc that decodes its argument with Arg, by the
+// general rules: the adapter's planned decoding must give the same results and errors.
+func planPair[T any](name string, f func(T) string) []Option {
+	return []Option{
+		Global(name, Fn1(f)),
+		Global(name+"_arg", GoFunc(func(c *Call) error { return c.Return(f(c.Arg[T](0))) })),
+	}
+}
+
+func TestTypedAdapterPlans(t *testing.T) {
+	str := func(v any) string { return fmt.Sprint(v) }
+	var opts []Option
+	opts = append(opts, planPair("ptr", func(b *planBlob) string { return str(b) })...)
+	opts = append(opts, planPair("val", func(b planBlob) string { return str(b) })...)
+	opts = append(opts, planPair("lvl", func(l planLevel) string { return str(l) })...)
+	opts = append(opts, planPair("ratio", func(r planRatio) string { return str(r) })...)
+	opts = append(opts, planPair("name", func(n planName) string { return str(n) })...)
+	opts = append(opts, planPair("flag", func(f planFlag) string { return str(f) })...)
+	opts = append(opts,
+		Global("temp", Fn1(func(c planTemp) planTemp { return c + 1 })), // planned before Convert
+		Convert(func(c planTemp) Value { return String(fmt.Sprintf("%dC", c)) }, func(v Value) (planTemp, error) {
+			var c planTemp
+			_, err := fmt.Sscanf(v.String(), "%dC", &c)
+			return c, err
+		}),
+		Global("newblob", Fn0(func() *planBlob { return &planBlob{N: 7} })),
+		Global("blobval", Fn0(func() planBlob { return planBlob{N: 8} })),
+		Global("newother", Fn0(func() *planOther { return &planOther{} })))
+	s := mustLoad(t, MustNew(opts...), `
+		local function show(ok, v) return tostring(ok) .. " " .. tostring(v) end
+		local inputs = {1, 2.5, 2^63, "3", "x", true, {n = 1}, {n = "x"}}
+		function compare(extra)
+			local all = {newblob(), blobval(), newother(), extra}
+			for _, v in ipairs(inputs) do all[#all + 1] = v end
+			local bad = {}
+			for _, f in ipairs{"ptr", "val", "lvl", "ratio", "name", "flag"} do
+				for i = 1, #all + 1 do -- the last one is missing
+					local a = show(pcall(_ENV[f], all[i]))
+					local b = show(pcall(_ENV[f .. "_arg"], all[i]))
+					if a ~= b:gsub(f .. "_arg", f) then
+						bad[#bad + 1] = f .. "(" .. tostring(all[i]) .. "): " .. a .. " | " .. b
+					end
+				end
+			end
+			return table.concat(bad, "\n")
+		end
+		function temp20() return temp("20C") end`)
+	ctx := context.Background()
+	compare, err := s.Func1[planBlob, string]("compare") // a struct by value: a call-scoped userdata
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad, err := compare(ctx, planBlob{N: 9}); err != nil || bad != "" {
+		t.Errorf("adapters and Arg differ:\n%s\n%v", bad, err)
+	}
+	if got, err := s.Call(ctx, s.Globals().Get(String("temp20"))); err != nil || got.String() != "21C" {
+		t.Errorf("a conversion registered after the adapter: %v, %v", got, err)
+	}
+}
+
+// A typed function's result decodes from a userdata of its type without reflection, and from
+// anything else as before.
+func TestTypedResultPlans(t *testing.T) {
+	type blob struct{ N int }
+	type other struct{ N int }
+	rt := MustNew(
+		Global("newblob", Fn0(func() *blob { return &blob{N: 7} })),
+		Global("newother", Fn0(func() *other { return &other{} })))
+	s := mustLoad(t, rt, `
+		function ptr() return newblob() end
+		function tab() return {n = 3} end
+		function none() end
+		function wrong() return newother() end`)
+	ctx := context.Background()
+	for name, want := range map[string]string{"ptr": "&{7} <nil>", "tab": "&{3} <nil>", "none": "<nil> <nil>",
+		"wrong": "<nil> glua: cannot convert userdata to *glua.blob: a userdata of another type"} {
+		f := must(s.Func0[*blob](name))
+		if got := fmt.Sprint(f(ctx)); got != want {
+			t.Errorf("%s as *blob: %s, want %s", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{"ptr": "{7} <nil>", "tab": "{3} <nil>",
+		"wrong": "{0} glua: cannot convert userdata to glua.blob: a userdata of another type"} {
+		f := must(s.Func0[blob](name))
+		if got := fmt.Sprint(f(ctx)); got != want {
+			t.Errorf("%s as blob: %s, want %s", name, got, want)
+		}
+	}
+}

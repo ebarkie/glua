@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -260,7 +261,57 @@ func (c *Call) InvokeN(dst []Value, fn Value, args ...Value) ([]Value, error) {
 
 // argDec decodes one parameter of a typed adapter. A context.Context parameter receives
 // the call's context and takes no Lua argument.
-type argDec[T any] struct{ ctx bool }
+type argDec[T any] struct {
+	ctx  bool
+	plan *atomic.Pointer[argPlan]
+}
+
+// argPlan is how an argDec decodes without reflection: a pointer to a bound struct, a struct,
+// or a named number, string or bool, which argValue's fast paths miss. It is chosen when the
+// adapter is made, and again after a conversion is registered, which changes how a type
+// converts. Anything it does not take goes to argValue.
+type argPlan struct {
+	gen  uint64 // convGen when chosen
+	kind argKind
+	id   uint64 // the type ID, for akPtr and akStruct
+}
+
+type argKind uint8
+
+const (
+	akOther  argKind = iota // argValue
+	akPtr                   // a userdata of the struct's type, not callscoped
+	akStruct                // a userdata of the type, copied
+	akInt64                 // int too: glua needs a 64-bit platform
+	akFloat64
+	akString
+	akBool
+)
+
+// planArg chooses and stores the plan for a parameter of type T.
+func planArg[T any](slot *atomic.Pointer[argPlan]) *argPlan {
+	pl := &argPlan{gen: convGen.Load()}
+	t := reflect.TypeFor[T]()
+	switch {
+	case t == valueType || t == tableType || t == durationType || t == timeType || converterFor(t) != nil:
+	case t.Kind() == reflect.Pointer:
+		if e := t.Elem(); e.Kind() == reflect.Struct && e != timeType && converterFor(e) == nil {
+			pl.kind, pl.id = akPtr, bindType(e)
+		}
+	case t.Kind() == reflect.Struct:
+		pl.kind, pl.id = akStruct, bindType(t)
+	case t.Kind() == reflect.Int64 || t.Kind() == reflect.Int:
+		pl.kind = akInt64
+	case t.Kind() == reflect.Float64:
+		pl.kind = akFloat64
+	case t.Kind() == reflect.String:
+		pl.kind = akString
+	case t.Kind() == reflect.Bool:
+		pl.kind = akBool
+	}
+	slot.Store(pl)
+	return pl
+}
 
 var contextType = reflect.TypeFor[context.Context]()
 
@@ -275,7 +326,9 @@ func newArgDec[T any]() argDec[T] {
 	if err := checkDecodable(t, 0, map[reflect.Type]bool{}); err != nil {
 		panic("glua: parameter of type " + t.String() + ": " + err.Error())
 	}
-	return argDec[T]{}
+	d := argDec[T]{plan: new(atomic.Pointer[argPlan])}
+	planArg[T](d.plan)
+	return d
 }
 
 // get decodes the next parameter, from argument *i.
@@ -283,29 +336,90 @@ func (d argDec[T]) get(c *Call, i *int) (T, error) {
 	if d.ctx {
 		return any(c.Context()).(T), nil
 	}
-	v, err := argValue[T](c, *i)
+	n := *i
 	*i++
-	return v, err
+	pl := d.plan.Load()
+	if pl.gen != convGen.Load() {
+		pl = planArg[T](d.plan)
+	}
+	v := c.Value(n)
+	var r T
+	p := unsafe.Pointer(&r)
+	switch pl.kind {
+	case akPtr:
+		if v.isObj(kindUser) && v.n&(typeIDMask|flagCallscoped) == pl.id {
+			*(*unsafe.Pointer)(p) = v.p
+			return r, nil
+		}
+	case akStruct:
+		if v.isObj(kindUser) && v.n&typeIDMask == pl.id {
+			return *(*T)(v.p), nil
+		}
+	case akInt64:
+		x, err := argInt(c, n, v, math.MinInt64, math.MaxInt64)
+		*(*int64)(p) = x
+		return r, err
+	case akFloat64:
+		f, err := argFloat(c, n, v)
+		*(*float64)(p) = f
+		return r, err
+	case akString:
+		s, err := argString(c, n, v)
+		*(*string)(p) = s
+		return r, err
+	case akBool:
+		*(*bool)(p) = v.truthy()
+		return r, nil
+	}
+	return argValue[T](c, n) // what the plan does not take, with its errors
 }
 
-// resEnc encodes the result of a typed adapter.
+// resEnc encodes the result of a typed adapter, by an encoder chosen when the adapter is
+// made, and again after a conversion is registered.
 type resEnc[R any] struct {
+	plan *atomic.Pointer[resPlan[R]]
+}
+
+type resPlan[R any] struct {
+	gen uint64 // convGen when chosen
 	enc func(R) (Value, error)
 }
 
 func newResEnc[R any]() resEnc[R] {
-	enc, byValue, err := encoderFor[R]()
-	if err != nil {
+	if _, _, err := encoderFor[R](); err != nil {
 		panic("glua: result of type " + reflect.TypeFor[R]().String() + ": " + err.Error())
 	}
-	if byValue {
-		enc = encodeAny[R] // a struct result is copied to the heap: the script may keep it
+	e := resEnc[R]{plan: new(atomic.Pointer[resPlan[R]])}
+	planRes[R](e.plan)
+	return e
+}
+
+// planRes chooses and stores the encoder for a result of type R.
+func planRes[R any](slot *atomic.Pointer[resPlan[R]]) *resPlan[R] {
+	pl := &resPlan[R]{gen: convGen.Load()}
+	enc, byValue, err := encoderFor[R]()
+	switch {
+	case err != nil:
+		enc = encodeAny[R] // reports the error at each call
+	case byValue:
+		bits := uint64(kindUser)<<56 | bindType(reflect.TypeFor[R]())
+		enc = func(v R) (Value, error) {
+			p := new(R) // a struct result is copied to the heap: the script may keep it
+			*p = v
+			return Value{p: unsafe.Pointer(p), n: bits}, nil
+		}
 	}
-	return resEnc[R]{enc}
+	pl.enc = enc
+	slot.Store(pl)
+	return pl
 }
 
 func (e resEnc[R]) ret(c *Call, r R) error {
-	v, err := e.enc(r)
+	pl := e.plan.Load()
+	if pl.gen != convGen.Load() {
+		pl = planRes[R](e.plan)
+	}
+	v, err := pl.enc(r)
 	if err != nil {
 		return err
 	}

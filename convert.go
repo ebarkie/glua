@@ -49,6 +49,7 @@ type converter struct {
 var (
 	convMu     sync.Mutex                                  // serialises registration
 	converters atomic.Pointer[map[reflect.Type]*converter] // copy on write, so lookups take no lock
+	convGen    atomic.Uint64                               // counts registrations, for plans that depend on them
 )
 
 func init() {
@@ -86,6 +87,7 @@ func (r convertReg) register() error {
 	next := maps.Clone(cur)
 	next[r.t] = r.c
 	converters.Store(&next)
+	convGen.Add(1)
 	return nil
 }
 
