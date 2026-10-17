@@ -37,7 +37,7 @@ The engines implement different versions of Lua, which decides what they can run
 | Engine | Version tested | Language | Notes |
 | --- | --- | --- | --- |
 | C Lua | 5.4.9 | Lua 5.4 | Built from source with gcc at `-O2`; the reference |
-| glua | main after v0.3.0 | Lua 5.4 | The fast interpreter loop, the default |
+| glua | v0.4.0 | Lua 5.4 | The fast interpreter loop, the default |
 | GopherLua | v1.1.2 | Lua 5.1 | Default options, except that the data stack may grow (`RegistryMaxSize`), which two scripts need |
 | golua | v0.4.0 | Lua 5.5 | Default runtime with the standard library |
 | wangshu | v0.2.0 | Lua 5.1 | Default options |
