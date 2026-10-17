@@ -44,7 +44,10 @@ the state on the Go side.
 
 Loading fails when the frozen state would reach something that cannot be shared: a coroutine,
 a library function with hidden state (a `gmatch` iterator, a `coroutine.wrap` function, a
-`lines` iterator), an open file, or a Go value whose type has writable fields.
+`lines` iterator), an open file, or a Go value a script can change, itself or through its fields:
+one of a type with writable fields or a `__newindex` metamethod, or that the host marked
+`Mutable`. A host function or method that changes a value its type does not show as writable,
+such as a `__call` metamethod that counts, needs `Mutable` on that type.
 
 ## Reserved names
 
