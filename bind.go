@@ -82,6 +82,7 @@ type typeInfo struct {
 	err      string           // why the type cannot be bound, reported at bind time
 	builtin  bool             // the library's own, such as io's files: never opaque
 	stateful bool             // values carry hidden state: freezing refuses them
+	mutable  bool             // values change through __newindex or Mutable methods: freezing refuses them
 	handles  []unique.Handle[string]
 }
 
@@ -478,6 +479,9 @@ func (ex *executor) newindexUser(obj, key, val Value) (Value, error) {
 		if !ok || !found {
 			if ti.meta != nil {
 				if h := ti.meta.metaGet("__newindex"); !h.IsNil() {
+					if readonly {
+						return Value{}, ex.errorf("attempt to modify a read-only %s", ti.rt.Name())
+					}
 					return h, nil
 				}
 			}
@@ -682,6 +686,7 @@ type typeOptions struct {
 	methods  []namedFunc
 	meta     []namedFunc
 	writable []string
+	mutable  bool
 	hide     []string
 	rename   [][2]string
 }
@@ -716,6 +721,12 @@ func Meta(event string, f GoFunc) TypeOption {
 // Writable makes the named Go fields writable from Lua.
 func Writable(fields ...string) TypeOption {
 	return typeOptionFunc(func(o *typeOptions) { o.writable = append(o.writable, fields...) })
+}
+
+// Mutable marks a type whose methods change its values, so that a shared script cannot hold
+// one. A type with a __newindex metamethod is mutable without it.
+func Mutable() TypeOption {
+	return typeOptionFunc(func(o *typeOptions) { o.mutable = true })
 }
 
 // Hide makes the named Go fields invisible to Lua.
@@ -796,10 +807,14 @@ func customize(gp *typeInfo, o *typeOptions) (*typeInfo, error) {
 				return nil, bad("metamethod name '%s' does not start with __", m.name)
 			}
 			mt.Set(String(m.name), goFnValue(&goFunc{name: m.name, f: m.f, host: true}))
+			if m.name == "__newindex" {
+				ti.mutable = true
+			}
 		}
 		mt.freeze()
 		ti.meta = mt
 	}
+	ti.mutable = ti.mutable || o.mutable
 	return ti, nil
 }
 

@@ -43,7 +43,7 @@ func (f *freezer) add(v Value, path string) {
 }
 
 // walk visits the queued values. It fails on what cannot be shared: a coroutine, a library
-// function with hidden state, or a Go value with writable fields.
+// function with hidden state, or a Go value a script can change.
 func (f *freezer) walk() error {
 	for len(f.work) > 0 {
 		it := f.work[len(f.work)-1]
@@ -102,6 +102,9 @@ func (f *freezer) walk() error {
 			if ti != nil && ti.writable() {
 				return fmt.Errorf("%s is a %s, whose writable fields cannot be shared", it.path, ti.rt)
 			}
+			if ti != nil && ti.mutable {
+				return fmt.Errorf("%s is a %s, which can be changed and cannot be shared", it.path, ti.rt)
+			}
 		}
 	}
 	return nil
@@ -148,7 +151,7 @@ func (t *Table) freeze() {
 
 // Freeze makes t and everything reachable from it read-only, so that any goroutine may read
 // it. It fails, freezing nothing, if t reaches a coroutine, a library function with hidden
-// state, such as a gmatch iterator, or a Go value with writable fields.
+// state, such as a gmatch iterator, or a Go value a script can change.
 func (t *Table) Freeze() error {
 	if err := freezeValue(tableValue(t), "table"); err != nil {
 		return fmt.Errorf("glua: cannot freeze: %w", err)

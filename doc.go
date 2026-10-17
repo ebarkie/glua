@@ -40,8 +40,8 @@
 // write. Writing one later raises an ordinary Lua error, "attempt to modify a frozen table".
 // A call can still build and change tables of its own, which die with the call. Load fails if
 // the state reaches something that cannot be shared: a coroutine, a library function with
-// hidden state such as a gmatch iterator, a file, or a Go value whose type has writable
-// fields. State that must outlive a call belongs in a host function or in a [VM].
+// hidden state such as a gmatch iterator, a file, or a Go value a script can change: one
+// whose type has writable fields, a __newindex metamethod, or is marked [Mutable]. State that must outlive a call belongs in a host function or in a [VM].
 //
 // Names that the host or the libraries define are reserved: a script cannot assign them,
 // although it can shadow them with a local.

@@ -152,6 +152,77 @@ func TestStructByValueReadonly(t *testing.T) {
 	}
 }
 
+// bindBox keeps its value behind metamethods and methods instead of fields.
+type bindBox struct{ n int }
+
+func bindBoxRuntime(t *testing.T, opts ...TypeOption) *Runtime {
+	t.Helper()
+	opts = append(opts,
+		Meta("__index", func(c *Call) error { return c.Return(c.Arg[*bindBox](0).n) }),
+		Method("get", func(c *Call) error { return c.Return(c.Arg[*bindBox](0).n) }),
+	)
+	rt, err := New(
+		Type[bindBox](opts...),
+		Global("box", GoFunc(func(c *Call) error { return c.Return(&bindBox{n: 1}) })),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt
+}
+
+// A shared script cannot hold a Go value that scripts change through a __newindex
+// metamethod or Mutable methods, any more than one with writable fields.
+func TestFreezeMutableUserdata(t *testing.T) {
+	setN := Meta("__newindex", func(c *Call) error {
+		c.Arg[*bindBox](0).n = c.Arg[int](2)
+		return nil
+	})
+	for _, tc := range []struct {
+		name string
+		opts []TypeOption
+		ok   bool
+	}{
+		{"read only", nil, true},
+		{"__newindex", []TypeOption{setN}, false},
+		{"Mutable", []TypeOption{Mutable()}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := bindBoxRuntime(t, tc.opts...).Load(context.Background(), "box.lua",
+				"local b = box() function f() return b:get() end")
+			if tc.ok && err != nil {
+				t.Fatal(err)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "can be changed and cannot be shared")) {
+				t.Fatalf("got %v, want a refusal to share", err)
+			}
+		})
+	}
+}
+
+// A read-only view of a Go value does not reach its type's __newindex.
+func TestReadonlyUserdataNewindex(t *testing.T) {
+	called := false
+	rt := MustNew(Type[bindBox](
+		Meta("__index", func(c *Call) error { return c.Return(c.Arg[bindBox](0).n) }),
+		Meta("__newindex", func(c *Call) error {
+			called = true
+			return nil
+		}),
+	))
+	s := mustLoad(t, rt, "function f(b) b.n = 1 end")
+	f, err := s.Func1[bindBox, struct{}]("f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f(context.Background(), bindBox{}); err == nil || !strings.Contains(err.Error(), "attempt to modify a read-only bindBox") {
+		t.Errorf("got %v, want a read-only error", err)
+	}
+	if called {
+		t.Error("__newindex ran on a read-only value")
+	}
+}
+
 // The table library writes through a __newindex chain that ends at a Go value, as an
 // assignment does.
 func TestLibraryWrites(t *testing.T) {
