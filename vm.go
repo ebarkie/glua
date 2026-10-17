@@ -33,7 +33,7 @@ func (s *Script) NewVM(ctx context.Context) (*VM, error) {
 		vm.result = append(vm.result, ex.stack[:ex.top]...)
 	}
 	rt.observeEntry(ex, s.name, "", err)
-	ex.reset()
+	vm.leave(ex)
 	if err != nil {
 		return nil, err
 	}
@@ -67,9 +67,11 @@ func (vm *VM) enter() *executor {
 	return ex
 }
 
-// leave clears the executor after a call.
+// leave clears the executor after a call, and shrinks a stack that the call did not use.
 func (vm *VM) leave(ex *executor) {
+	used := ex.st.hi
 	ex.reset()
+	ex.shrink(used)
 }
 
 // Globals returns the VM's globals table, which is not frozen.
