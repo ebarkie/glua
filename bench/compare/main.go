@@ -179,13 +179,13 @@ func compareBoundary(testBin string, rounds int, out string) {
 	for r := range rounds {
 		fmt.Fprintf(os.Stderr, "round %d/%d\n", r+1, rounds)
 		for i, b := range apiBoundary {
+			os.Setenv("GLUA_BENCH_CHECKED", "1")
 			ns, line := goRound(testBin, b.bench, 0, true)
+			os.Unsetenv("GLUA_BENCH_CHECKED")
 			chk[i] = append(chk[i], ns)
 			allocs[i] = allocsOf(line)
 			raw.WriteString(line)
-			os.Setenv("GLUA_BENCH_FAST", "1")
 			ns, _ = goRound(testBin, b.bench, 0, true)
-			os.Unsetenv("GLUA_BENCH_FAST")
 			fast[i] = append(fast[i], ns)
 		}
 	}

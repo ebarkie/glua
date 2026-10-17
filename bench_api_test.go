@@ -20,14 +20,12 @@ function hostptr(r) return same(r) end
 
 const apiRule = `method == "GET" and size < 100 and admin`
 
-// apiFast selects the fast loop for the benchmarks, with GLUA_BENCH_FAST=1.
-var apiFast = os.Getenv("GLUA_BENCH_FAST") == "1"
+// apiChecked selects the checked loop for the benchmarks, with GLUA_BENCH_CHECKED=1; they
+// run the default, fast loop otherwise.
+var apiChecked = os.Getenv("GLUA_BENCH_CHECKED") == "1"
 
 func apiRuntime(opts ...Option) *Runtime {
-	if apiFast {
-		opts = append(opts, withLoop(false))
-	}
-	return MustNew(opts...)
+	return MustNew(append(opts, withLoop(apiChecked))...)
 }
 
 func apiScript(b *testing.B) *Script {
