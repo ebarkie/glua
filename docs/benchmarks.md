@@ -137,16 +137,24 @@ Nanoseconds per call, medians of eight rounds, with the range:
 
 | Call from Go | ns, checked loop | ns, fast loop | Allocations |
 | --- | --- | --- | --- |
-| `function(x) return x + 1 end`, typed, private VM | 89.6 (86.6–118.0) | 87.9 (87.0–91.0) | 0 |
-| Same, shared Script, executor from the pool | 110.8 (106.8–118.1) | 108.8 (103.2–111.2) | 0 |
-| 46-byte string in, same string out | 100.4 (97.2–106.2) | 102.8 (100.7–107.4) | 0 |
-| Rule reading three fields of a `*request` that is reused | 176.8 (170.0–180.9) | 153.8 (147.4–177.3) | 0 |
-| Same rule when `req.method` does not share a pointer with the constant | 173.8 (168.0–277.1) | 153.5 (145.8–215.8) | 0 |
-| Same rule through `Expr` and `Rule.Eval`, struct built per call | 179.6 (171.8–258.6) | 160.5 (155.7–223.6) | 0 |
-| Same rule through `Func1`, struct built per call and passed by value | 197.0 (188.9–209.8) | 175.9 (170.4–231.7) | 0 |
-| Same rule through `Func1`, pointer to a struct built per call | 206.8 (201.8–224.9) | 189.3 (183.7–219.5) | 1 |
-| Function that calls one Go host function made with `Fn1` | 205.9 (202.2–218.3) | 201.8 (195.0–232.4) | 0 |
-| Same, host function written as a `GoFunc` | 194.6 (187.0–235.1) | 191.2 (182.7–252.1) | 0 |
+| `function(x) return x + 1 end`, typed, private VM | 75.2 (74.3–90.5) | 77.3 (75.7–96.4) | 0 |
+| Same, shared Script, executor from the pool | 103.6 (97.8–125.2) | 97.2 (94.0–105.2) | 0 |
+| 46-byte string in, same string out | 96.4 (92.3–99.2) | 96.3 (90.7–99.3) | 0 |
+| Rule reading three fields of a `*request` that is reused | 157.2 (153.6–165.6) | 140.1 (131.3–145.5) | 0 |
+| Same rule when `req.method` does not share a pointer with the constant | 163.4 (151.6–174.3) | 136.8 (132.9–143.2) | 0 |
+| Same rule through `Expr` and `Rule.Eval`, struct built per call | 155.6 (152.8–164.1) | 140.6 (134.7–146.2) | 0 |
+| Same rule through `Func1`, struct built per call and passed by value | 174.4 (169.9–184.7) | 158.4 (151.3–167.7) | 0 |
+| Same rule through `Func1`, pointer to a struct built per call | 185.3 (180.2–188.1) | 168.7 (165.0–186.3) | 1 |
+| Function that calls one Go host function made with `Fn1` | 199.2 (194.7–235.0) | 192.1 (180.0–286.9) | 0 |
+| Same, host function written as a `GoFunc` | 180.6 (172.4–232.7) | 173.9 (167.0–182.6) | 0 |
+| Function that passes a `*request` through a host function made with `Fn1` | 226.4 (214.4–270.7) | 223.0 (211.6–295.3) | 0 |
+| Same, host function a `GoFunc` using `Arg` and `Return` | 234.4 (226.6–320.9) | 231.9 (223.0–270.1) | 0 |
+| Same, called from every core at once, wall time per call | 135.6 (131.5–178.1) | 133.1 (129.7–171.7) | 0 |
+
+The last three rows pass a pointer to a bound struct through the host function and back,
+which converts without reflection. In v0.4.0 they took about 550, 530 and 600 ns: each
+conversion went by reflection, and calls from several goroutines queued on a lock that
+looked up the struct's type.
 
 ## How the numbers are taken
 
