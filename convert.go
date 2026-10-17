@@ -2,10 +2,12 @@ package glua
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -45,9 +47,13 @@ type converter struct {
 }
 
 var (
-	convMu     sync.RWMutex
-	converters = map[reflect.Type]*converter{}
+	convMu     sync.Mutex                                  // serialises registration
+	converters atomic.Pointer[map[reflect.Type]*converter] // copy on write, so lookups take no lock
 )
+
+func init() {
+	converters.Store(&map[reflect.Type]*converter{})
+}
 
 // Convert gives T a scalar or string form instead of a userdata: netip.Addr, uuid.UUID,
 // decimals. Conversions are process-wide, like type IDs; registering a second conversion for
@@ -73,17 +79,18 @@ type convertReg struct {
 func (r convertReg) register() error {
 	convMu.Lock()
 	defer convMu.Unlock()
-	if _, ok := converters[r.t]; ok {
+	cur := *converters.Load()
+	if _, ok := cur[r.t]; ok {
 		return &BindError{Type: r.t, Reason: "the type already has a conversion"}
 	}
-	converters[r.t] = r.c
+	next := maps.Clone(cur)
+	next[r.t] = r.c
+	converters.Store(&next)
 	return nil
 }
 
 func converterFor(t reflect.Type) *converter {
-	convMu.RLock()
-	defer convMu.RUnlock()
-	return converters[t]
+	return (*converters.Load())[t]
 }
 
 // ValueOf converts v to a Value by the built-in rules and registered conversions. It panics

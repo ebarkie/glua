@@ -88,6 +88,7 @@ var (
 	typeMu  sync.Mutex
 	typeIDs = map[reflect.Type]uint64{} // process-wide: an ID means the same type in every Runtime
 	types   atomic.Pointer[[]*typeInfo] // copy on write, so the loop reads it without a lock
+	bound   sync.Map                    // reflect.Type -> uint64, the types fully planned: read without the lock
 )
 
 func init() {
@@ -97,6 +98,9 @@ func init() {
 // bindType builds the plan of struct, slice or map type rt once, with those of the types its
 // fields reach, and returns its type ID.
 func bindType(rt reflect.Type) uint64 {
+	if id, ok := bound.Load(rt); ok {
+		return id.(uint64)
+	}
 	typeMu.Lock()
 	defer typeMu.Unlock()
 	var added []*typeInfo
@@ -113,6 +117,7 @@ func bindType(rt reflect.Type) uint64 {
 		}
 		types.Store(&next)
 	}
+	bound.Store(rt, id)
 	return id
 }
 

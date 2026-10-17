@@ -15,6 +15,7 @@ function id(s) return s end
 function rule(r) return r.method == "GET" and r.size < 100 and r.admin end
 function host(x) local y = inc(x) return y end
 function hostraw(x) local y = incraw(x) return y end
+function hostptr(r) return same(r) end
 `
 
 const apiRule = `method == "GET" and size < 100 and admin`
@@ -35,6 +36,9 @@ func apiScript(b *testing.B) *Script {
 		Global("incraw", GoFunc(func(c *Call) error {
 			x, _ := c.Value(0).Int()
 			return c.ReturnValues(Int(x + 1))
+		})),
+		Global("same", GoFunc(func(c *Call) error {
+			return c.Return(c.Arg[*request](0))
 		})),
 	)
 	s, err := rt.Load(context.Background(), "api.lua", apiSrc)
@@ -154,4 +158,19 @@ func BenchmarkAPIHostCallRaw(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// A host function that takes and returns a pointer, from every P at once: the type lookups
+// behind Arg and Return must not serialise the callers.
+func BenchmarkAPIHostPointerParallel(b *testing.B) {
+	f := must(apiScript(b).Func1[*request, *request]("hostptr"))
+	ctx := context.Background()
+	b.RunParallel(func(pb *testing.PB) {
+		r := &request{Method: method}
+		for pb.Next() {
+			if _, err := f(ctx, r); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
