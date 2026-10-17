@@ -79,6 +79,9 @@ func resultValue[T any](v T) (Value, error) {
 	case *Value:
 		return *(*Value)(p), nil
 	}
+	if x, ok := encodePlanned(v, planFor[T]()); ok {
+		return x, nil
+	}
 	return encodeAny(v)
 }
 
@@ -110,6 +113,9 @@ func argValue[T any](c *Call, i int) (T, error) {
 	case *Value:
 		*(*Value)(p) = v
 		return r, nil
+	}
+	if r, ok, err := argPlanned[T](c, i, v, planFor[T]()); ok {
+		return r, err
 	}
 	return argReflect[T](c, i, v)
 }
@@ -342,36 +348,91 @@ func (d argDec[T]) get(c *Call, i *int) (T, error) {
 	if pl.gen != convGen.Load() {
 		pl = planArg[T](d.plan)
 	}
-	v := c.Value(n)
-	var r T
+	if r, ok, err := argPlanned[T](c, n, c.Value(n), pl); ok {
+		return r, err
+	}
+	return argValue[T](c, n) // what the plan does not take, with its errors
+}
+
+// argPlanned decodes argument i, v, by plan pl, and reports whether the plan took it.
+func argPlanned[T any](c *Call, i int, v Value, pl *argPlan) (r T, ok bool, err error) {
 	p := unsafe.Pointer(&r)
 	switch pl.kind {
 	case akPtr:
 		if v.isObj(kindUser) && v.n&(typeIDMask|flagCallscoped) == pl.id {
 			*(*unsafe.Pointer)(p) = v.p
-			return r, nil
+			return r, true, nil
 		}
 	case akStruct:
 		if v.isObj(kindUser) && v.n&typeIDMask == pl.id {
-			return *(*T)(v.p), nil
+			return *(*T)(v.p), true, nil
 		}
 	case akInt64:
-		x, err := argInt(c, n, v, math.MinInt64, math.MaxInt64)
+		x, err := argInt(c, i, v, math.MinInt64, math.MaxInt64)
 		*(*int64)(p) = x
-		return r, err
+		return r, true, err
 	case akFloat64:
-		f, err := argFloat(c, n, v)
+		f, err := argFloat(c, i, v)
 		*(*float64)(p) = f
-		return r, err
+		return r, true, err
 	case akString:
-		s, err := argString(c, n, v)
+		s, err := argString(c, i, v)
 		*(*string)(p) = s
-		return r, err
+		return r, true, err
 	case akBool:
 		*(*bool)(p) = v.truthy()
-		return r, nil
+		return r, true, nil
 	}
-	return argValue[T](c, n) // what the plan does not take, with its errors
+	return r, false, nil
+}
+
+// encodePlanned converts v by plan pl, and reports whether the plan took it.
+func encodePlanned[T any](v T, pl *argPlan) (Value, bool) {
+	p := unsafe.Pointer(&v)
+	switch pl.kind {
+	case akPtr:
+		if q := *(*unsafe.Pointer)(p); q != nil {
+			return Value{p: q, n: kindUser<<56 | pl.id}, true
+		}
+		return Value{}, true // invariant 1: p == nil exactly when the Value is {nil, 0}
+	case akStruct:
+		q := new(T) // a copy on the heap: the script may keep it
+		*q = v
+		return Value{p: unsafe.Pointer(q), n: kindUser<<56 | pl.id}, true
+	case akInt64:
+		return Int(*(*int64)(p)), true
+	case akFloat64:
+		return Float(*(*float64)(p)), true
+	case akString:
+		return String(*(*string)(p)), true
+	case akBool:
+		return Bool(*(*bool)(p)), true
+	}
+	return Value{}, false
+}
+
+// planCache finds the plan of a type for Call.Arg, Call.Return and ValueOf, which have no
+// bind step to choose one at. It is direct-mapped by the address of the type's descriptor,
+// so a lookup takes no lock and hashes nothing; two types that share a slot take turns.
+var planCache [256]atomic.Pointer[cachedPlan]
+
+type cachedPlan struct {
+	key unsafe.Pointer // the type descriptor of *T
+	argPlan
+}
+
+// planFor returns the plan of type T, chosen again after a conversion is registered.
+func planFor[T any]() *argPlan {
+	e := any((*T)(nil)) // a nil pointer boxes nothing: the interface holds only *T's descriptor
+	key := (*[2]unsafe.Pointer)(unsafe.Pointer(&e))[0]
+	slot := &planCache[(uintptr(key)>>4^uintptr(key)>>12)%uintptr(len(planCache))]
+	if cp := slot.Load(); cp != nil && cp.key == key && cp.gen == convGen.Load() {
+		return &cp.argPlan
+	}
+	var one atomic.Pointer[argPlan]
+	cp := &cachedPlan{key: key, argPlan: *planArg[T](&one)}
+	slot.Store(cp)
+	return &cp.argPlan
 }
 
 // resEnc encodes the result of a typed adapter, by an encoder chosen when the adapter is

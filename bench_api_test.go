@@ -19,6 +19,8 @@ function hostptr(r) return same(r) end
 function fnptr(r) return fsame(r) end
 function fnstruct(r) return fsize(r) end
 function fnnamed(n) return fnext(n) end
+function hostnamed(n) return gnext(n) end
+function hostval(r) return gsize(r) end
 `
 
 const apiRule = `method == "GET" and size < 100 and admin`
@@ -41,6 +43,8 @@ func apiScript(b *testing.B) *Script {
 		Global("same", GoFunc(func(c *Call) error {
 			return c.Return(c.Arg[*request](0))
 		})),
+		Global("gnext", GoFunc(func(c *Call) error { return c.Return(c.Arg[level](0) + 1) })),
+		Global("gsize", GoFunc(func(c *Call) error { return c.Return(c.Arg[request](0).Size) })),
 		Global("fsame", Fn1(func(r *request) *request { return r })),
 		Global("fsize", Fn1(func(r request) int64 { return r.Size })),
 		Global("fnext", Fn1(func(n level) level { return n + 1 })),
@@ -209,6 +213,40 @@ func BenchmarkAPIFnStruct(b *testing.B) {
 
 func BenchmarkAPIFnNamed(b *testing.B) {
 	f := must(apiScript(b).Func1[int64, int64]("fnnamed"))
+	ctx := context.Background()
+	for i := int64(0); b.Loop(); i++ {
+		if _, err := f(ctx, i); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Arg and Return in a GoFunc, which have no bind step: a pointer to a bound struct in and
+// out, a struct by value and a named integer.
+func BenchmarkAPIHostPointer(b *testing.B) {
+	f := must(apiScript(b).Func1[*request, *request]("hostptr"))
+	ctx := context.Background()
+	r := &request{Method: method}
+	for b.Loop() {
+		if _, err := f(ctx, r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAPIHostStruct(b *testing.B) {
+	f := must(apiScript(b).Func1[*request, int64]("hostval"))
+	ctx := context.Background()
+	r := &request{Method: method, Size: 7}
+	for b.Loop() {
+		if _, err := f(ctx, r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAPIHostNamed(b *testing.B) {
+	f := must(apiScript(b).Func1[int64, int64]("hostnamed"))
 	ctx := context.Background()
 	for i := int64(0); b.Loop(); i++ {
 		if _, err := f(ctx, i); err != nil {
