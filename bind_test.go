@@ -223,6 +223,96 @@ func TestReadonlyUserdataNewindex(t *testing.T) {
 	}
 }
 
+type (
+	nestBox    struct{ n int }
+	nestPtr    struct{ Inner *nestBox }
+	nestVal    struct{ Inner nestBox }
+	nestField  struct{ X int }
+	nestFields struct{ Inner nestField }
+	nestFPtr   struct{ Inner *nestField }
+)
+
+// A shared value cannot reach a changeable one through its fields either: a type with
+// __newindex through any field, and one with writable fields through a pointer, whose view
+// is as writable as the value that holds it. A struct field that is not writable is a
+// read-only view, which reaches __newindex but no writable field.
+func TestFreezeNestedChangeable(t *testing.T) {
+	setN := Meta("__newindex", func(c *Call) error { c.Arg[*nestBox](0).n = c.Arg[int](2); return nil })
+	rt := MustNew(
+		Type[nestBox](setN),
+		Type[nestField](Writable("X")),
+		Global("ptr", Fn0(func() *nestPtr { return &nestPtr{Inner: &nestBox{}} })),
+		Global("val", Fn0(func() *nestVal { return &nestVal{} })),
+		Global("fields", Fn0(func() *nestFields { return &nestFields{} })),
+		Global("fptr", Fn0(func() *nestFPtr { return &nestFPtr{Inner: &nestField{}} })),
+	)
+	for _, tc := range []struct{ make, want string }{
+		{"ptr", "global 'o'.inner is a glua.nestBox, which can be changed and cannot be shared"},
+		{"val", "global 'o'.inner is a glua.nestBox, which can be changed and cannot be shared"},
+		{"fptr", "global 'o'.inner is a glua.nestField, whose writable fields cannot be shared"},
+		{"fields", ""},
+	} {
+		_, err := rt.Load(context.Background(), tc.make+".lua", "o = "+tc.make+"()")
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: got %v, want %q", tc.make, err, tc.want)
+		}
+	}
+}
+
+type (
+	freezeMeta     struct{ N int }
+	freezeWritable struct{ X int }
+	freezeOuter    struct{ Inner *freezeMeta }
+)
+
+// Table.Freeze has no Runtime: it refuses a type that any Runtime made writable or mutable.
+func TestTableFreezeChangeable(t *testing.T) {
+	MustNew(
+		Type[freezeMeta](Meta("__newindex", func(c *Call) error { return nil })),
+		Type[freezeWritable](Writable("X")))
+	for _, tc := range []struct {
+		v    any
+		want string
+	}{
+		{&freezeMeta{}, "which can be changed"},
+		{&freezeWritable{}, "whose writable fields"},
+		{&freezeOuter{Inner: &freezeMeta{}}, "table[1].inner is a glua.freezeMeta, which can be changed"},
+	} {
+		tab := NewTable(1, 0)
+		tab.Set(Int(1), ValueOf(tc.v))
+		if err := tab.Freeze(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%T: got %v, want %q", tc.v, err, tc.want)
+		}
+		if tab.Frozen() {
+			t.Errorf("%T: frozen after a refusal", tc.v)
+		}
+	}
+}
+
+type (
+	liveInner struct{ n int }
+	liveOuter struct{ Inner liveInner }
+)
+
+// A struct field of a live value, not writable itself, still reaches its type's __newindex,
+// which changes the field in place; only a copy made for the call refuses it.
+func TestNewindexOnNestedField(t *testing.T) {
+	rt := MustNew(Type[liveInner](
+		Meta("__index", func(c *Call) error { return c.Return(c.Arg[*liveInner](0).n) }),
+		Meta("__newindex", func(c *Call) error { c.Arg[*liveInner](0).n = c.Arg[int](2); return nil }),
+	))
+	s := mustLoad(t, rt, "function f(o) o.inner.n = 5 end")
+	f := must(s.Func1[*liveOuter, struct{}]("f"))
+	o := &liveOuter{}
+	if _, err := f(context.Background(), o); err != nil || o.Inner.n != 5 {
+		t.Errorf("got %v, n = %d, want n = 5", err, o.Inner.n)
+	}
+	byValue := must(s.Func1[liveOuter, struct{}]("f"))
+	if _, err := byValue(context.Background(), liveOuter{}); err == nil || !strings.Contains(err.Error(), "attempt to modify a read-only liveInner") {
+		t.Errorf("a copy for the call: got %v, want a read-only error", err)
+	}
+}
+
 // The table library writes through a __newindex chain that ends at a Go value, as an
 // assignment does.
 func TestLibraryWrites(t *testing.T) {

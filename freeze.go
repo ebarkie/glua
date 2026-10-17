@@ -18,6 +18,7 @@ type freezer struct {
 	plans  *[]*typeInfo // the Runtime's view of bound types; nil for the process-wide one
 	intern bool         // give string keys the canonical pointers constants have
 	seen   map[unsafe.Pointer]bool
+	types  map[uint64]uint8 // the bound types checked: 1 through a live view, 2 a read-only one
 	work   []freezeItem
 	tables []*Table
 	cells  []*cell
@@ -30,7 +31,7 @@ type freezeItem struct {
 }
 
 func newFreezer() *freezer {
-	return &freezer{seen: map[unsafe.Pointer]bool{}}
+	return &freezer{seen: map[unsafe.Pointer]bool{}, types: map[uint64]uint8{}}
 }
 
 // add queues v, reached by path, and everything reachable from it.
@@ -90,22 +91,78 @@ func (f *freezer) walk() error {
 		case kindThread:
 			return fmt.Errorf("%s is a coroutine, which cannot be shared", it.path)
 		case kindUser:
-			ti := userType(v)
-			if f.plans != nil {
-				if id := v.n & typeIDMask; id < uint64(len(*f.plans)) {
-					ti = (*f.plans)[id]
-				}
-			}
-			if ti != nil && ti.stateful && !isStdFile(v) {
+			id := v.n & typeIDMask
+			if ti := f.plan(id); ti != nil && ti.stateful && !isStdFile(v) {
 				return fmt.Errorf("%s is a %s, which has hidden state and cannot be shared", it.path, typeName(v))
 			}
-			if ti != nil && ti.writable() {
-				return fmt.Errorf("%s is a %s, whose writable fields cannot be shared", it.path, ti.rt)
-			}
-			if ti != nil && ti.mutable {
-				return fmt.Errorf("%s is a %s, which can be changed and cannot be shared", it.path, ti.rt)
+			if err := f.checkType(id, v.n&flagReadonly != 0, it.path); err != nil {
+				return err
 			}
 		}
+	}
+	return nil
+}
+
+// plan returns the plan of bound type id, as the Runtime sees it.
+func (f *freezer) plan(id uint64) *typeInfo {
+	ts := f.plans
+	if ts == nil {
+		ts = types.Load()
+	}
+	if id < uint64(len(*ts)) {
+		return (*ts)[id]
+	}
+	return nil
+}
+
+// checkType fails if a script can change a value of bound type id, reached by path, or a
+// value its fields reach: through writable fields, unless the view is read-only, and through
+// a __newindex metamethod or Mutable methods, which a read-only view reaches too. Without a
+// Runtime, as for Table.Freeze, a type counts as writable or mutable if any Runtime made it
+// so. Each type is checked once for each kind of view.
+func (f *freezer) checkType(id uint64, readonly bool, path string) error {
+	bit := uint8(1)
+	if readonly {
+		bit = 2
+	}
+	if f.types[id]&bit != 0 {
+		return nil
+	}
+	f.types[id] |= bit
+	ti := f.plan(id)
+	if ti == nil {
+		return nil
+	}
+	var changed uint32
+	if f.plans == nil {
+		changed = ti.changedBy.Load()
+	}
+	if !readonly && (ti.writable() || changed&changedWritable != 0) {
+		return fmt.Errorf("%s is a %s, whose writable fields cannot be shared", path, ti.rt)
+	}
+	if ti.mutable || changed&changedMutable != 0 {
+		return fmt.Errorf("%s is a %s, which can be changed and cannot be shared", path, ti.rt)
+	}
+	for i := range ti.fields {
+		if err := f.checkField(&ti.fields[i], readonly, path+"."+ti.fields[i].name); err != nil {
+			return err
+		}
+	}
+	if ti.kind == planSlice || ti.kind == planMap {
+		return f.checkField(&ti.elem, readonly, path+" (an element)")
+	}
+	return nil
+}
+
+// checkField checks the bound type a field reaches, through the view loadField gives: a
+// struct, slice or map field is read-only unless the field is writable, and a pointer field
+// keeps the view of the value that holds it.
+func (f *freezer) checkField(fl *field, readonly bool, path string) error {
+	switch fl.kind {
+	case fStruct, fSlice, fMap:
+		return f.checkType(fl.sub, readonly || !fl.rw, path)
+	case fPtr:
+		return f.checkType(fl.sub, readonly, path)
 	}
 	return nil
 }

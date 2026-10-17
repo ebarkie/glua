@@ -84,7 +84,15 @@ type typeInfo struct {
 	stateful bool             // values carry hidden state: freezing refuses them
 	mutable  bool             // values change through __newindex or Mutable methods: freezing refuses them
 	handles  []unique.Handle[string]
+	// On a process-wide plan, changedBy records that some Runtime made the type writable
+	// (changedWritable) or mutable (changedMutable), for Table.Freeze, which has no Runtime.
+	changedBy atomic.Uint32
 }
+
+const (
+	changedWritable = 1 << iota
+	changedMutable
+)
 
 var (
 	typeMu sync.Mutex // serialises planning
@@ -479,7 +487,7 @@ func (ex *executor) newindexUser(obj, key, val Value) (Value, error) {
 		if !ok || !found {
 			if ti.meta != nil {
 				if h := ti.meta.metaGet("__newindex"); !h.IsNil() {
-					if readonly {
+					if obj.n&flagCallscoped != 0 { // a copy for the call: the change would be lost
 						return Value{}, ex.errorf("attempt to modify a read-only %s", ti.rt.Name())
 					}
 					return h, nil
@@ -723,8 +731,9 @@ func Writable(fields ...string) TypeOption {
 	return typeOptionFunc(func(o *typeOptions) { o.writable = append(o.writable, fields...) })
 }
 
-// Mutable marks a type whose methods change its values, so that a shared script cannot hold
-// one. A type with a __newindex metamethod is mutable without it.
+// Mutable marks a type whose methods or metamethods change its values, such as a __call
+// that counts, so that a shared script cannot hold one. glua cannot tell a function that
+// writes from one that reads. A type with a __newindex metamethod is mutable without it.
 func Mutable() TypeOption {
 	return typeOptionFunc(func(o *typeOptions) { o.mutable = true })
 }
@@ -741,7 +750,8 @@ func Rename(field, luaName string) TypeOption {
 
 // customize returns the Runtime's copy of a plan with the options applied.
 func customize(gp *typeInfo, o *typeOptions) (*typeInfo, error) {
-	ti := &typeInfo{rt: gp.rt, id: gp.id, kind: gp.kind, byName: map[string]int{}, elem: gp.elem, meta: gp.meta}
+	ti := &typeInfo{rt: gp.rt, id: gp.id, kind: gp.kind, byName: map[string]int{}, elem: gp.elem, meta: gp.meta,
+		builtin: gp.builtin, stateful: gp.stateful}
 	bad := func(format string, args ...any) error {
 		return &BindError{Type: gp.rt, Reason: fmt.Sprintf(format, args...)}
 	}
@@ -878,6 +888,12 @@ func (rt *Runtime) registerTypes(list []*typeOptions) error {
 		c, err := customize(gp, o)
 		if err != nil {
 			return err
+		}
+		if c.writable() {
+			gp.changedBy.Or(changedWritable)
+		}
+		if c.mutable {
+			gp.changedBy.Or(changedMutable)
 		}
 		rt.custom[id] = c
 	}
