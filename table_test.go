@@ -147,6 +147,55 @@ func TestNextWithDeletion(t *testing.T) {
 	}
 }
 
+// A hint that no longer holds the key, or never did, must give what Next gives.
+func TestNextHint(t *testing.T) {
+	tbl := NewTable(0, 0)
+	for i := range 40 {
+		tbl.Set(String(string(rune('A'+i))), Int(int64(i)))
+	}
+	tbl.Set(Int(1), Bool(true))
+	tbl.Set(Float(0.5), Bool(true))
+	k := Value{}
+	for {
+		wk, wv, ok := tbl.Next(k)
+		if !ok {
+			t.Fatalf("Next(%v) failed", k)
+		}
+		for hint := -1; hint <= len(tbl.nodes); hint++ {
+			gk, gv, _, ok := tbl.next(k, hint)
+			if !ok || !same(&gk, &wk) || !same(&gv, &wv) {
+				t.Fatalf("next(%v, %d) = %v, %v, %v; Next gives %v, %v", k, hint, gk, gv, ok, wk, wv)
+			}
+		}
+		if wk.IsNil() {
+			break
+		}
+		k = wk
+	}
+}
+
+// Traversals that nest or interleave share the executor's hint, and must not disturb each other.
+func TestPairsInterleaved(t *testing.T) {
+	_, res := runWithOutput(t, `
+		local a, b = {}, {}
+		for i = 1, 30 do a["a"..i] = i; b["b"..i] = i end
+		local n = 0
+		for _, x in pairs(a) do
+			for _, y in pairs(b) do n = n + x * y end
+		end
+		local m = 0
+		for ka, x in pairs(a) do
+			for _ in next, b do m = m + 1 end
+			a[ka] = nil -- clearing fields during a traversal is allowed
+			m = m + x
+		end
+		return n, m, next(a)
+	`)
+	if len(res) != 3 || !same(&res[0], new(Int(465*465))) || !same(&res[1], new(Int(30*30+465))) || !res[2].IsNil() {
+		t.Fatalf("got %v", res)
+	}
+}
+
 func TestTableKeys(t *testing.T) {
 	tbl := NewTable(0, 0)
 	tbl.Set(Float(2), String("two"))

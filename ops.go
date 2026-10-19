@@ -1383,7 +1383,7 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 	switch {
 	case f.p == unsafe.Pointer(nextG) && f.n == kindGoFn<<56:
 		var ok bool
-		if k, v, ok = t.Next(ctl); !ok {
+		if k, v, ex.nextAt, ok = t.next(ctl, ex.nextAt); !ok {
 			return false, nil // the general path raises the error
 		}
 	case f.p == unsafe.Pointer(ipairsAuxG) && f.n == kindGoFn<<56 && t.meta == nil && ctl.p == tInt():
