@@ -710,7 +710,7 @@ func TestCoroutineStacksKeptClean(t *testing.T) {
 }
 
 // A Go function in tail position returns its results from the caller's frame at once, or,
-// for pcall, pairs and a yield, through the RETURN after the TAILCALL.
+// for pcall, pairs with __pairs and a yield, through the RETURN after the TAILCALL.
 func TestTailCallGo(t *testing.T) {
 	for _, tc := range []struct{ src, want string }{
 		{"local function f() return select('#') end return f()", "0"},
@@ -721,6 +721,7 @@ func TestTailCallGo(t *testing.T) {
 		{"local function f(x) return setmetatable(x, {__index = {k = 1}}) end return f({}).k", "1"},
 		{"local function f() return pcall(error, 'e') end return f()", "false\te"},
 		{"local function f() return pcall(function(...) return ... end, 1, 2) end return f()", "true\t1\t2"},
+		{"local function f(t) return pairs(t) end local n = 0 for _, v in f({3, 4}) do n = n + v end return n", "7"},
 		{"local function f(t) return pairs(t) end local p = setmetatable({}, {__pairs = function() return next, {7}, nil end})\n" +
 			"local n = 0 for _, v in f(p) do n = n + v end return n", "7"},
 		{"local function f(x) return coroutine.yield(x) end\n" +

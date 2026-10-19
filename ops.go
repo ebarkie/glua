@@ -881,7 +881,7 @@ func (ex *executor) callValue(fn, nargs int) error {
 		case v.isObj(kindLuaFn):
 			return ex.pushLua((*closure)(v.p), fn, nargs, 0)
 		case v.isObj(kindGoFn):
-			return ex.callGo((*goFunc)(v.p), fn, nargs)
+			return ex.callGo((*goFunc)(v.p), fn, nargs, false)
 		}
 		var err error
 		if nargs, err = ex.callTM(fn, nargs, hops); err != nil {
@@ -984,7 +984,7 @@ func (ex *executor) tailCall(fn, nargs int) error {
 		if !v.isObj(kindGoFn) {
 			return ex.tailCallTM(fn, nargs)
 		}
-		return ex.tailCallGo((*goFunc)(v.p), fn, nargs)
+		return ex.callGo((*goFunc)(v.p), fn, nargs, true)
 	}
 	dst := ex.funcSlot()
 	// the stack the callee needs, checked before this frame goes, as C Lua's luaD_pretailcall
@@ -1004,24 +1004,6 @@ func (ex *executor) tailCall(fn, nargs int) error {
 		return err
 	}
 	return ex.tick()
-}
-
-// tailCallGo is tailCall for the Go function g: it calls g and returns its results from this
-// frame at once, so the RETURN after the TAILCALL, there for this case, need not go through
-// the driver. pcall and pairs, which may push a Lua frame, and a yield, leave it to that
-// RETURN.
-func (ex *executor) tailCallGo(g *goFunc, fn, nargs int) error {
-	if g == builtinPcall || g == builtinXpcall || g == builtinPairs {
-		return ex.callGo(g, fn, nargs)
-	}
-	n, err := ex.callGoRawFrom(g, fn, nargs, true)
-	if err == errYield {
-		return ex.yieldedAt(fn, yieldCall)
-	}
-	if err != nil {
-		return err
-	}
-	return ex.doReturn(fn, n)
 }
 
 // tailCallTM is tailCall for a value that is not a function: it puts the __call metamethod in
