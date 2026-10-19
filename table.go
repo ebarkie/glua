@@ -460,33 +460,44 @@ func (t *Table) Len() int {
 // existing fields, also to nil, during a traversal is allowed. ok is false for a key that is
 // not in the table.
 func (t *Table) Next(key Value) (k, v Value, ok bool) {
+	k, v, _, ok = t.next(key, -1)
+	return k, v, ok
+}
+
+// next is Next with hint, a guess at key's node index, such as the node index next returned
+// along with key. It saves the hash lookup when that node still holds key, also after key
+// was set to nil. at is the node index of the key it returns, or -1 for the array part and
+// the end.
+func (t *Table) next(key Value, hint int) (k, v Value, at int, ok bool) {
 	i := 0 // position to resume from: 0..len(arr)-1 array, then len(arr)+node index
 	if !key.IsNil() {
 		nk, valid := normKey(key)
 		if !valid {
-			return Value{}, Value{}, false
+			return Value{}, Value{}, -1, false
 		}
 		if nk.p == tInt() && int64(nk.n) >= 1 && int64(nk.n) <= int64(len(t.arr)) {
 			i = int(nk.n)
+		} else if hint >= 0 && hint < len(t.nodes) && same(&t.nodes[hint].k, &nk) {
+			i = len(t.arr) + hint + 1
 		} else {
 			idx := t.findNode(&nk, hashValue(nk))
 			if idx < 0 {
-				return Value{}, Value{}, false
+				return Value{}, Value{}, -1, false
 			}
 			i = len(t.arr) + idx + 1
 		}
 	}
 	for ; i < len(t.arr); i++ {
 		if !t.arr[i].IsNil() {
-			return Int(int64(i) + 1), t.arr[i], true
+			return Int(int64(i) + 1), t.arr[i], -1, true
 		}
 	}
 	for j := i - len(t.arr); j < len(t.nodes); j++ {
 		if nd := &t.nodes[j]; !nd.v.IsNil() {
-			return nd.k, nd.v, true
+			return nd.k, nd.v, j, true
 		}
 	}
-	return Value{}, Value{}, true
+	return Value{}, Value{}, -1, true
 }
 
 // All iterates over every key and value of t, raw, in traversal order.

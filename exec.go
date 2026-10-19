@@ -132,6 +132,8 @@ type executor struct {
 	liveKnown        bool
 	liveBase, liveAt int64
 
+	nextAt int // the node index of the key the last inline next returned, for the next step
+
 	coStacks []coStack // stacks of coroutines that returned in this entry, for the next ones
 }
 
