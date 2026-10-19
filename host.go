@@ -228,8 +228,9 @@ func (ex *executor) hostCall() error {
 
 // callGo calls g with the nargs arguments above stack[fn], for the CALL at pc-1, and puts
 // its results where that CALL expects them. For a TAILCALL, tail, it returns them from the
-// frame at once, so the RETURN after it need not go through the driver; that RETURN is left
-// the results when a Lua frame was pushed or g yielded.
+// frame at once, so the RETURN after it need not go through the driver. That RETURN is left
+// the results of pcall, xpcall and pairs with __pairs, which return early here, and of a
+// yield.
 func (ex *executor) callGo(g *goFunc, fn, nargs int, tail bool) error {
 	switch g {
 	case builtinPcall, builtinXpcall:
