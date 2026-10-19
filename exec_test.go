@@ -708,3 +708,35 @@ func TestCoroutineStacksKeptClean(t *testing.T) {
 		t.Error("reset kept the stacks")
 	}
 }
+
+// A Go function in tail position returns its results from the caller's frame at once, or,
+// for pcall, pairs and a yield, through the RETURN after the TAILCALL.
+func TestTailCallGo(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"local function f() return select('#') end return f()", "0"},
+		{"local function f(...) return select(2, ...) end return f(1, 2, 3)", "2\t3"},
+		{"local function f() return string.byte('abc', 1, 3) end local a, b = f() return a, b", "97\t98"},
+		{"local function f() return string.byte('abc', 1, 3) end local t = {f(), f()} return #t", "4"},
+		{"local function f() return tostring(nil) end return (f()) .. '!'", "nil!"},
+		{"local function f(x) return setmetatable(x, {__index = {k = 1}}) end return f({}).k", "1"},
+		{"local function f() return pcall(error, 'e') end return f()", "false\te"},
+		{"local function f() return pcall(function(...) return ... end, 1, 2) end return f()", "true\t1\t2"},
+		{"local function f(t) return pairs(t) end local p = setmetatable({}, {__pairs = function() return next, {7}, nil end})\n" +
+			"local n = 0 for _, v in f(p) do n = n + v end return n", "7"},
+		{"local function f(x) return coroutine.yield(x) end\n" +
+			"local co = coroutine.wrap(function(x) local a, b = f(x) return a + b end)\n" +
+			"local y = co(5) return y, co(y, 1)", "5\t6"},
+		{"local function f() return error('boom') end local ok, e = pcall(f) return ok, e", "false\ttest:1: boom"}, // the position of f, as C Lua gives
+		{"return math.max(3, 4)", "4"},
+	} {
+		for _, checked := range []bool{false, true} {
+			res, err := runInEnv(t, MustNew(LibSafe|LibCoroutine, withLoop(checked)), tc.src)
+			if err != nil {
+				t.Fatalf("%s: %v", tc.src, err)
+			}
+			if got := joinValues(res); got != tc.want {
+				t.Errorf("%s (checked %v): got %q, want %q", tc.src, checked, got, tc.want)
+			}
+		}
+	}
+}
