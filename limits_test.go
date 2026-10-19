@@ -13,6 +13,12 @@ import (
 // runLimited loads src under rt and calls its function f.
 func runLimited(t *testing.T, rt *Runtime, ctx context.Context, src string) (Value, error) {
 	t.Helper()
+	return loadLimited(t, rt, src)(ctx)
+}
+
+// loadLimited loads src and returns its function f.
+func loadLimited(t *testing.T, rt *Runtime, src string) func(context.Context) (Value, error) {
+	t.Helper()
 	s, err := rt.Load(context.Background(), "hostile.lua", src)
 	if err != nil {
 		t.Fatal(err)
@@ -21,7 +27,7 @@ func runLimited(t *testing.T, rt *Runtime, ctx context.Context, src string) (Val
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f(ctx)
+	return f
 }
 
 func TestHostileScripts(t *testing.T) {
@@ -124,6 +130,12 @@ func TestResultsChargedAsTheyGrow(t *testing.T) {
 		{name: "string.pack c", src: "function f() return string.pack('c1000000000', '') end", budgetOnly: true},
 		{name: "os.date", src: "function f() return os.date(string.rep('%c', 3 << 18)) end", budgetOnly: true},
 	}
+	// how soon after the deadline a build must stop: the race detector and stack stress
+	// slow everything several times over, and a CI runner adds its own pauses
+	stopWithin := 100 * time.Millisecond
+	if raceEnabled || stackStress {
+		stopWithin = time.Second
+	}
 	for _, b := range builds {
 		for _, c := range []struct {
 			limits Limits
@@ -136,11 +148,13 @@ func TestResultsChargedAsTheyGrow(t *testing.T) {
 			if b.budgetOnly && c.want != ErrAlloc {
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), c.within)
+			// the deadline starts once the script is loaded, so it times the build alone
+			f := loadLimited(t, MustNew(LibSafe|LibOS, c.limits), b.src)
 			var before, after runtime.MemStats
 			runtime.ReadMemStats(&before)
+			ctx, cancel := context.WithTimeout(context.Background(), c.within)
 			start := time.Now()
-			_, err := runLimited(t, MustNew(LibSafe|LibOS, c.limits), ctx, b.src)
+			_, err := f(ctx)
 			took := time.Since(start)
 			runtime.ReadMemStats(&after)
 			cancel()
@@ -150,8 +164,8 @@ func TestResultsChargedAsTheyGrow(t *testing.T) {
 			if n := after.TotalAlloc - before.TotalAlloc; c.want == ErrAlloc && n > 64<<20 {
 				t.Errorf("%s: %d MiB allocated before the budget stopped it", b.name, n>>20)
 			}
-			if c.want != ErrAlloc && took > 100*time.Millisecond {
-				t.Errorf("%s: stopped %v after a 5 ms deadline", b.name, took)
+			if c.want != ErrAlloc && took > stopWithin {
+				t.Errorf("%s: stopped %v after a 5 ms deadline, want within %v", b.name, took, stopWithin)
 			}
 		}
 	}
