@@ -1656,7 +1656,7 @@ func (fs *fstate) ret(s *syntax.ReturnStmt) {
 				// FASTCALL stands only before a CALL: make it a jump to the next instruction
 				fs.p.code[e.info-2], fs.p.code[e.info-1] = iABC(opJmpX, 0, 0, 0), 0
 			}
-			fs.abc(opReturn, decA(i), 0, 0) // for a Go function, which returns here
+			fs.abc(opReturn, decA(i), 0, 0) // for the Go calls that leave their results here: see callGo
 			return
 		}
 		if e.k == eCall || e.k == eVararg {

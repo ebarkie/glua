@@ -223,12 +223,15 @@ func (ex *executor) hostCall() error {
 			return err
 		}
 	}
-	return ex.callGo((*goFunc)(ex.stack[fn].p), fn, nargs)
+	return ex.callGo((*goFunc)(ex.stack[fn].p), fn, nargs, false)
 }
 
 // callGo calls g with the nargs arguments above stack[fn], for the CALL at pc-1, and puts
-// its results where that CALL expects them.
-func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
+// its results where that CALL expects them. For a TAILCALL, tail, it returns them from the
+// frame at once, so the RETURN after it need not go through the driver. That RETURN is left
+// the results of pcall, xpcall and pairs with __pairs, which return early here, and of a
+// yield.
+func (ex *executor) callGo(g *goFunc, fn, nargs int, tail bool) error {
 	switch g {
 	case builtinPcall, builtinXpcall:
 		return ex.pcallValue(g, fn, nargs)
@@ -245,6 +248,13 @@ func (ex *executor) callGo(g *goFunc, fn, nargs int) error {
 	}
 	if err != nil {
 		return err
+	}
+	if tail {
+		ex.top = fn + n
+		if n, err = ex.openCount(fn); err != nil { // charges a long list as the RETURN would
+			return err
+		}
+		return ex.doReturn(fn, n)
 	}
 	ex.adjustResults(ex.instr(ex.st.pc-1), fn, n)
 	return nil

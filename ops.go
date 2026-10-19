@@ -881,7 +881,7 @@ func (ex *executor) callValue(fn, nargs int) error {
 		case v.isObj(kindLuaFn):
 			return ex.pushLua((*closure)(v.p), fn, nargs, 0)
 		case v.isObj(kindGoFn):
-			return ex.callGo((*goFunc)(v.p), fn, nargs)
+			return ex.callGo((*goFunc)(v.p), fn, nargs, false)
 		}
 		var err error
 		if nargs, err = ex.callTM(fn, nargs, hops); err != nil {
@@ -984,8 +984,7 @@ func (ex *executor) tailCall(fn, nargs int) error {
 		if !v.isObj(kindGoFn) {
 			return ex.tailCallTM(fn, nargs)
 		}
-		// a Go function: call it, and let the RETURN after the TAILCALL return its results
-		return ex.callValue(fn, nargs)
+		return ex.callGo((*goFunc)(v.p), fn, nargs, true)
 	}
 	dst := ex.funcSlot()
 	// the stack the callee needs, checked before this frame goes, as C Lua's luaD_pretailcall

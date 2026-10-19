@@ -605,3 +605,17 @@ func TestRenewWithTimer(t *testing.T) {
 		t.Errorf("after %d rounds: %v, want the round's cause after 5", rounds, err)
 	}
 }
+
+// Returning a long list from a Go function in tail position costs a step per 8 values, as
+// any open list does, so the step budget still bounds the copying.
+func TestTailCallGoChargesResults(t *testing.T) {
+	many := make([]Value, 8000)
+	rt := MustNew(LibSafe, Limits{Steps: 200_000},
+		Global("many", GoFunc(func(c *Call) error { return c.ReturnValues(many...) })))
+	_, err := runLimited(t, rt, context.Background(), `
+		local function g() return many() end
+		function f() for _ = 1, 1000 do g() end end`)
+	if !errors.Is(err, ErrSteps) {
+		t.Fatalf("got %v, want ErrSteps", err)
+	}
+}
