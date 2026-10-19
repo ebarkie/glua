@@ -464,9 +464,10 @@ func (t *Table) Next(key Value) (k, v Value, ok bool) {
 	return k, v, ok
 }
 
-// next is Next with a guess at the node index of key, such as the at it returned for key,
-// which saves the hash lookup when the node still holds key. at is the node index of the
-// key it returns, or -1.
+// next is Next with hint, a guess at key's node index, such as the node index next returned
+// along with key. It saves the hash lookup when that node still holds key, also after key
+// was set to nil. at is the node index of the key it returns, or -1 for the array part and
+// the end.
 func (t *Table) next(key Value, hint int) (k, v Value, at int, ok bool) {
 	i := 0 // position to resume from: 0..len(arr)-1 array, then len(arr)+node index
 	if !key.IsNil() {

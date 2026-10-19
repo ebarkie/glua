@@ -147,7 +147,8 @@ func TestNextWithDeletion(t *testing.T) {
 	}
 }
 
-// A hint that no longer holds the key, or never did, must give what Next gives.
+// A hint that no longer holds the key, or never did, must give what Next gives, also for
+// keys set to nil during the traversal, whose nodes keep the key.
 func TestNextHint(t *testing.T) {
 	tbl := NewTable(0, 0)
 	for i := range 40 {
@@ -155,7 +156,7 @@ func TestNextHint(t *testing.T) {
 	}
 	tbl.Set(Int(1), Bool(true))
 	tbl.Set(Float(0.5), Bool(true))
-	k := Value{}
+	k, seen := Value{}, 0
 	for {
 		wk, wv, ok := tbl.Next(k)
 		if !ok {
@@ -171,6 +172,12 @@ func TestNextHint(t *testing.T) {
 			break
 		}
 		k = wk
+		if seen++; seen%2 == 0 {
+			tbl.Set(k, Value{})
+		}
+	}
+	if seen != 42 {
+		t.Fatalf("traversal saw %d keys, want 42", seen)
 	}
 }
 
