@@ -131,3 +131,33 @@ return err(function() return table.unpack(setmetatable({}, L), 1, 1) end),
   err(function() table.insert(setmetatable({}, L), 1) end),
   err(function() for _ in ipairs(5) do end end),
   err(function() table.insert(setmetatable({}, {__newindex = 5}), 1) end)
+--== fields added to tables just built, with and without __newindex
+local function new(x, y) return {x = x, y = y} end
+local r, sum = {}, 0
+for i = 1, 20 do
+  local p = new(i, 2 * i)
+  p.z = i; p.w = -i -- adds, the second one past the size the constructor asked for
+  p.y = nil; p.y = 3 -- sets a deleted key again
+  sum = sum + p.x + p.y + p.z + p.w
+end
+r[#r + 1] = sum
+local logged = {}
+local mt = {__newindex = function(t, k, v) logged[#logged + 1] = k; rawset(t, k, v * 10) end}
+for i = 1, 6 do
+  local p = setmetatable(new(i, i), mt)
+  p.x = i -- present: no __newindex
+  p.z = i -- absent: __newindex
+  r[#r + 1] = p.x + p.z
+end
+r[#r + 1] = #logged
+local m = new(1, 2)
+local o = setmetatable({}, m)
+m.__index = function(_, k) return k .. "!" end -- a "__" key added to a table in use as a metatable
+r[#r + 1] = o.q
+local n = 0
+local t = new(1, 2)
+for i = 1, 40 do t["k" .. i] = i end
+t.v = 0
+for _ in pairs(t) do n = n + 1 end
+r[#r + 1] = n
+return table.unpack(r)
