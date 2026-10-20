@@ -478,8 +478,11 @@ dispatch:
 			e = exSlowOp
 			break dispatch
 
-		case opSetField: // R[A][K[B]] = R[C]; the aux word is the site number
-			obj, key := &regs[uint8(i>>8)], kAtChecked(k, uint32(uint8(i>>16)))
+		case opSetField, opSetFieldK: // R[A][K[B]] = R[C] or K[C]; the aux word is the site number
+			obj, key, v := &regs[uint8(i>>8)], kAtChecked(k, uint32(uint8(i>>16))), &regs[uint8(i>>24)]
+			if uint8(i) == opSetFieldK {
+				v = kAtChecked(k, i>>24)
+			}
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
 				t := (*Table)(obj.p)
 				slot := atomic.LoadUint32(hintAtChecked(cl.p, code[pc])) & hintSlotMask
@@ -487,8 +490,8 @@ dispatch:
 				// because of __newindex. Keys starting with "__" go to the driver, which clears
 				// the table's cache of absent metamethods.
 				if int(slot) < len(t.nodes) && t.flags&(tabFrozen|tabGuarded) == 0 && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
-					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) && regs[uint8(i>>24)].p != nil {
-						setValue(&nd.v, &regs[uint8(i>>24)])
+					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) && v.p != nil {
+						setValue(&nd.v, v)
 						pc++
 						continue
 					}
@@ -497,29 +500,13 @@ dispatch:
 			e = exSlowOp
 			break dispatch
 
-		case opSetFieldK: // R[A][K[B]] = K[C]; the aux word is the site number
-			obj, key := &regs[uint8(i>>8)], kAtChecked(k, uint32(uint8(i>>16)))
-			if obj.n == kindTable<<56 && !isScalar(obj.p) {
-				t := (*Table)(obj.p)
-				slot := atomic.LoadUint32(hintAtChecked(cl.p, code[pc])) & hintSlotMask
-				// a write hit also needs the table not frozen, and an old value or no metatable,
-				// because of __newindex. Keys starting with "__" go to the driver, which clears
-				// the table's cache of absent metamethods.
-				if int(slot) < len(t.nodes) && t.flags&(tabFrozen|tabGuarded) == 0 && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
-					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) && kAtChecked(k, i>>24).p != nil {
-						setValue(&nd.v, kAtChecked(k, i>>24))
-						pc++
-						continue
-					}
-				}
+		case opSetTable, opSetIndex, opSetTableK, opSetIndexK: // R[A][R[B]] or R[A][B] = R[C] or K[C]: the array part inline
+			obj, v := &regs[uint8(i>>8)], &regs[uint8(i>>24)]
+			if uint8(i) == opSetTableK || uint8(i) == opSetIndexK {
+				v = kAtChecked(k, i>>24)
 			}
-			e = exSlowOp
-			break dispatch
-
-		case opSetTable, opSetIndex: // R[A][R[B]] or R[A][B] = R[C]: the array part inline
-			obj := &regs[uint8(i>>8)]
 			var idx uint64
-			if uint8(i) == opSetIndex {
+			if uint8(i) == opSetIndex || uint8(i) == opSetIndexK {
 				idx = uint64(uint8(i>>16)) - 1
 			} else if key := &regs[uint8(i>>16)]; key.p == tInt() {
 				idx = key.n - 1
@@ -530,46 +517,16 @@ dispatch:
 			if obj.n == kindTable<<56 && !isScalar(obj.p) {
 				t := (*Table)(obj.p)
 				if idx < uint64(len(t.arr)) && t.flags&tabFrozen == 0 {
-					if v := &t.arr[idx]; v.p != nil || t.meta == nil {
-						setValue(v, &regs[uint8(i>>24)])
+					if d := &t.arr[idx]; d.p != nil || t.meta == nil {
+						setValue(d, v)
 						continue
 					}
 				} else if idx == uint64(len(t.arr)) && idx < uint64(cap(t.arr)) && len(t.nodes) == 0 &&
-					t.meta == nil && t.flags&tabFrozen == 0 && regs[uint8(i>>24)].p != nil {
+					t.meta == nil && t.flags&tabFrozen == 0 && v.p != nil {
 					// an append within capacity: no allocation, and with no hash part no key past
 					// the end to move. Only the length word changes, so no pointer is written.
 					*(*int)(unsafe.Add(unsafe.Pointer(&t.arr), unsafe.Sizeof(uintptr(0)))) = int(idx) + 1
-					setValue(&t.arr[idx], &regs[uint8(i>>24)])
-					continue
-				}
-			}
-			e = exSlowOp
-			break dispatch
-
-		case opSetTableK, opSetIndexK: // R[A][R[B]] or R[A][B] = K[C]: the array part inline
-			obj := &regs[uint8(i>>8)]
-			var idx uint64
-			if uint8(i) == opSetIndexK {
-				idx = uint64(uint8(i>>16)) - 1
-			} else if key := &regs[uint8(i>>16)]; key.p == tInt() {
-				idx = key.n - 1
-			} else {
-				e = exSlowOp
-				break dispatch
-			}
-			if obj.n == kindTable<<56 && !isScalar(obj.p) {
-				t := (*Table)(obj.p)
-				if idx < uint64(len(t.arr)) && t.flags&tabFrozen == 0 {
-					if v := &t.arr[idx]; v.p != nil || t.meta == nil {
-						setValue(v, kAtChecked(k, i>>24))
-						continue
-					}
-				} else if idx == uint64(len(t.arr)) && idx < uint64(cap(t.arr)) && len(t.nodes) == 0 &&
-					t.meta == nil && t.flags&tabFrozen == 0 && kAtChecked(k, i>>24).p != nil {
-					// an append within capacity: no allocation, and with no hash part no key past
-					// the end to move. Only the length word changes, so no pointer is written.
-					*(*int)(unsafe.Add(unsafe.Pointer(&t.arr), unsafe.Sizeof(uintptr(0)))) = int(idx) + 1
-					setValue(&t.arr[idx], kAtChecked(k, i>>24))
+					setValue(&t.arr[idx], v)
 					continue
 				}
 			}
