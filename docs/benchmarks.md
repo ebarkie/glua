@@ -17,10 +17,10 @@ lower is faster.
 | Engine | Relative to C Lua |
 | --- | --- |
 | C Lua 5.4.9 | 1.00x |
-| glua (fast loop) | 1.23x |
-| wangshu | 4.28x |
-| GopherLua | 5.21x |
-| golua | 5.96x |
+| glua (fast loop) | 1.20x |
+| wangshu | 4.26x |
+| GopherLua | 5.22x |
+| golua | 5.97x |
 
 The Lua 5.1 engines, GopherLua and wangshu, cannot run every script; their means cover the
 scripts they ran.
@@ -37,7 +37,7 @@ The engines implement different versions of Lua, which decides what they can run
 | Engine | Version tested | Language | Notes |
 | --- | --- | --- | --- |
 | C Lua | 5.4.9 | Lua 5.4 | Built from source with gcc at `-O2`; the reference |
-| glua | v0.4.0 | Lua 5.4 | The fast interpreter loop, the default |
+| glua | v1.1.0 | Lua 5.4 | The fast interpreter loop, the default |
 | GopherLua | v1.1.2 | Lua 5.1 | Default options, except that the data stack may grow (`RegistryMaxSize`), which two scripts need |
 | golua | v0.4.0 | Lua 5.5 | Default runtime with the standard library |
 | wangshu | v0.2.0 | Lua 5.1 | Default options |
@@ -46,28 +46,28 @@ Times in ms, medians of three rounds of three runs each, with the ratio to C Lua
 
 | Script | C Lua 5.4.9 | glua (fast loop) | GopherLua v1.1.2 | golua v0.4.0 | wangshu v0.2.0 |
 | --- | --- | --- | --- | --- | --- |
-| binarytrees | 29.1 | 28.4 (0.98x) | – | 113.9 (3.91x) | – |
-| closures | 37.6 | 48.8 (1.30x) | 198.6 (5.28x) | 317.6 (8.44x) | 248.4 (6.60x) |
-| concat | 53.4 | 34.0 (0.64x) | 97.5 (1.82x) | 153.3 (2.87x) | 157.4 (2.95x) |
-| coroutine | 14.3 | 24.7 (1.72x) | 42.9 (2.99x) | 191.7 (13.38x) | 61.5 (4.29x) |
-| fannkuch | 34.3 | 47.7 (1.39x) | 199.9 (5.84x) | 225.5 (6.58x) | 254.3 (7.42x) |
-| fib | 17.9 | 16.5 (0.92x) | 74.1 (4.15x) | 162.2 (9.08x) | 84.3 (4.72x) |
-| fieldread | 10.5 | 12.8 (1.22x) | 73.0 (6.95x) | 106.9 (10.18x) | 46.8 (4.46x) |
-| floatloop | 13.2 | 13.7 (1.04x) | 70.7 (5.38x) | 82.3 (6.26x) | 32.5 (2.47x) |
-| format | 68.8 | 75.8 (1.10x) | 253.5 (3.69x) | 116.2 (1.69x) | 97.1 (1.41x) |
-| gsub | 16.3 | 26.4 (1.62x) | 268.5 (16.44x) | 71.5 (4.38x) | 53.4 (3.27x) |
-| json | 27.8 | 33.8 (1.21x) | – | 140.8 (5.06x) | – |
-| mathcalls | 69.2 | 76.7 (1.11x) | – | 453.6 (6.56x) | – |
-| nbody | 43.4 | 45.8 (1.06x) | 293.3 (6.76x) | 280.8 (6.47x) | 268.7 (6.19x) |
-| oop | 49.3 | 81.4 (1.65x) | 224.6 (4.56x) | 227.2 (4.61x) | 242.0 (4.91x) |
-| pairs | 16.0 | 23.6 (1.48x) | 85.6 (5.36x) | 119.7 (7.49x) | 66.0 (4.13x) |
-| parse | 32.8 | 51.4 (1.57x) | 261.3 (7.96x) | 128.7 (3.92x) | 105.4 (3.21x) |
-| policy | 46.1 | 46.2 (1.00x) | 158.1 (3.43x) | 238.5 (5.17x) | 197.2 (4.27x) |
-| sieve | 46.1 | 67.5 (1.46x) | 372.2 (8.07x) | 491.1 (10.64x) | 567.0 (12.29x) |
-| sort | 35.0 | 52.8 (1.51x) | – | 186.0 (5.32x) | – |
-| spectralnorm | 23.7 | 27.5 (1.16x) | 122.8 (5.18x) | 175.3 (7.39x) | 102.9 (4.34x) |
-| vararg | 27.3 | 37.9 (1.39x) | – | 227.5 (8.34x) | 106.1 (3.89x) |
-| Geometric mean of the ratios, over the scripts the engine ran | | 1.23x (21 scripts) | 5.21x (16 scripts) | 5.96x (21 scripts) | 4.28x (17 scripts) |
+| binarytrees | 29.7 | 27.7 (0.93x) | – | 111.7 (3.76x) | – |
+| closures | 38.6 | 47.3 (1.22x) | 207.9 (5.38x) | 321.7 (8.33x) | 256.6 (6.64x) |
+| concat | 54.2 | 33.8 (0.62x) | 100.8 (1.86x) | 151.5 (2.80x) | 149.3 (2.76x) |
+| coroutine | 14.8 | 27.6 (1.87x) | 40.0 (2.70x) | 201.4 (13.60x) | 61.2 (4.13x) |
+| fannkuch | 32.9 | 46.2 (1.41x) | 199.2 (6.05x) | 231.1 (7.02x) | 247.0 (7.50x) |
+| fib | 16.7 | 18.0 (1.08x) | 76.2 (4.55x) | 159.7 (9.54x) | 80.5 (4.81x) |
+| fieldread | 11.2 | 12.3 (1.10x) | 81.1 (7.21x) | 105.2 (9.36x) | 46.5 (4.14x) |
+| floatloop | 10.0 | 12.8 (1.29x) | 69.6 (6.98x) | 79.1 (7.93x) | 31.3 (3.14x) |
+| format | 67.0 | 48.7 (0.73x) | 259.6 (3.87x) | 119.4 (1.78x) | 99.2 (1.48x) |
+| gsub | 17.7 | 25.0 (1.41x) | 260.3 (14.69x) | 72.8 (4.11x) | 53.3 (3.01x) |
+| json | 29.7 | 32.5 (1.10x) | – | 143.7 (4.84x) | – |
+| mathcalls | 63.3 | 80.2 (1.27x) | – | 462.6 (7.31x) | – |
+| nbody | 44.3 | 46.2 (1.04x) | 288.9 (6.53x) | 273.4 (6.18x) | 274.4 (6.20x) |
+| oop | 48.2 | 75.3 (1.56x) | 226.1 (4.69x) | 222.4 (4.61x) | 239.1 (4.96x) |
+| pairs | 16.3 | 20.5 (1.25x) | 88.4 (5.42x) | 122.4 (7.51x) | 64.3 (3.94x) |
+| parse | 32.6 | 48.6 (1.49x) | 204.1 (6.27x) | 129.4 (3.97x) | 104.1 (3.20x) |
+| policy | 40.5 | 42.8 (1.06x) | 155.9 (3.85x) | 239.4 (5.91x) | 201.9 (4.99x) |
+| sieve | 50.3 | 74.7 (1.49x) | 375.4 (7.46x) | 466.4 (9.27x) | 576.9 (11.47x) |
+| sort | 34.8 | 48.0 (1.38x) | – | 168.2 (4.84x) | – |
+| spectralnorm | 24.5 | 27.4 (1.12x) | 117.5 (4.80x) | 175.5 (7.16x) | 104.4 (4.26x) |
+| vararg | 27.7 | 39.3 (1.42x) | – | 221.1 (7.99x) | 92.2 (3.33x) |
+| Geometric mean of the ratios, over the scripts the engine ran | | 1.20x (21 scripts) | 5.22x (16 scripts) | 5.97x (21 scripts) | 4.26x (17 scripts) |
 
 - GopherLua, binarytrees: does not load: <string> line:14(column:22) near '<':   syntax error
 - GopherLua, json: returns 311640, C Lua 313140
@@ -102,29 +102,29 @@ Times in ms, medians of three rounds of three runs each, with the range of the r
 
 | Script, ms | C Lua 5.4.9 | glua, checked | / C Lua | glua, fast | / C Lua | checked, GC marking | / C Lua |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| binarytrees | 32.96 (31.55–35.15) | 35.81 (32.79–47.92) | 1.09x | 31.58 (31.49–52.15) | 0.96x | 114.92 (100.92–162.87) | 3.49x |
-| closures | 42.52 (40.65–67.06) | 71.95 (57.17–104.72) | 1.69x | 54.28 (48.04–74.38) | 1.28x | 144.15 (141.37–244.63) | 3.39x |
-| concat | 58.37 (58.21–61.35) | 38.88 (38.08–41.66) | 0.67x | 38.45 (35.52–42.81) | 0.66x | 119.46 (105.33–130.32) | 2.05x |
-| coroutine | 17.63 (15.54–23.90) | 28.34 (28.17–38.84) | 1.61x | 27.44 (26.97–28.31) | 1.56x | 117.22 (114.98–127.46) | 6.65x |
-| fannkuch | 39.98 (37.41–40.13) | 65.56 (64.63–72.87) | 1.64x | 57.96 (57.54–68.73) | 1.45x | 87.57 (85.06–90.57) | 2.19x |
-| fib | 19.31 (19.15–21.44) | 26.95 (25.58–27.59) | 1.40x | 20.15 (18.99–20.71) | 1.04x | 60.39 (59.88–69.26) | 3.13x |
-| fieldread | 13.33 (13.26–13.84) | 19.36 (19.22–20.15) | 1.45x | 14.25 (13.78–15.30) | 1.07x | 21.26 (20.36–35.45) | 1.60x |
-| floatloop | 12.31 (11.64–12.68) | 19.51 (19.20–19.66) | 1.58x | 14.40 (14.02–14.58) | 1.17x | 21.31 (20.15–23.31) | 1.73x |
-| format | 77.54 (75.07–93.23) | 85.76 (82.20–85.80) | 1.11x | 87.64 (82.91–87.87) | 1.13x | 155.90 (143.55–169.53) | 2.01x |
-| gsub | 20.57 (19.97–23.53) | 31.60 (30.87–32.82) | 1.54x | 31.36 (30.35–32.31) | 1.52x | 69.86 (68.15–84.60) | 3.40x |
-| json | 34.35 (31.04–47.46) | 36.99 (36.22–38.05) | 1.08x | 35.09 (34.95–37.23) | 1.02x | 100.22 (99.15–110.23) | 2.92x |
-| mathcalls | 71.80 (70.33–77.86) | 100.41 (97.96–116.40) | 1.40x | 85.53 (85.49–89.29) | 1.19x | 250.11 (226.73–258.96) | 3.48x |
-| nbody | 52.09 (51.32–67.18) | 69.59 (66.79–88.05) | 1.34x | 53.09 (51.49–54.24) | 1.02x | 118.64 (106.34–138.66) | 2.28x |
-| oop | 55.90 (55.78–56.04) | 92.62 (91.63–96.99) | 1.66x | 87.03 (85.00–99.10) | 1.56x | 220.95 (213.65–229.73) | 3.95x |
-| pairs | 19.38 (17.95–20.69) | 28.75 (28.36–28.87) | 1.48x | 27.10 (26.87–30.39) | 1.40x | 90.20 (89.27–98.01) | 4.65x |
-| parse | 36.85 (36.71–50.18) | 60.24 (58.19–60.47) | 1.63x | 56.58 (56.12–56.67) | 1.54x | 142.45 (135.84–149.87) | 3.87x |
-| policy | 45.20 (44.38–48.37) | 54.07 (50.54–54.48) | 1.20x | 42.48 (40.44–64.78) | 0.94x | 124.66 (124.48–127.14) | 2.76x |
-| sieve | 58.46 (57.36–65.46) | 116.53 (113.17–117.70) | 1.99x | 102.26 (80.01–104.83) | 1.75x | 169.18 (164.60–173.29) | 2.89x |
-| sort | 40.07 (36.91–40.30) | 61.41 (58.63–80.83) | 1.53x | 56.13 (54.93–56.25) | 1.40x | 160.92 (150.75–161.26) | 4.02x |
-| spectralnorm | 29.17 (27.88–29.45) | 44.24 (41.99–44.59) | 1.52x | 32.68 (31.90–53.36) | 1.12x | 79.12 (72.35–80.88) | 2.71x |
-| vararg | 30.64 (29.71–32.52) | 43.74 (41.96–46.07) | 1.43x | 42.64 (39.72–42.78) | 1.39x | 116.63 (115.80–140.23) | 3.81x |
-| Geometric mean | | | 1.40x | | 1.22x | | 3.01x |
-| Worst | | | 1.99x | | 1.75x | | 6.65x |
+| binarytrees | 29.25 (28.68–31.79) | 29.79 (29.46–31.82) | 1.02x | 25.66 (25.39–27.19) | 0.88x | 78.47 (77.00–81.16) | 2.68x |
+| closures | 36.45 (36.34–36.45) | 52.28 (50.29–54.32) | 1.43x | 41.70 (39.92–46.32) | 1.14x | 130.18 (129.08–151.25) | 3.57x |
+| concat | 53.43 (53.40–56.75) | 31.74 (31.11–32.78) | 0.59x | 32.10 (30.84–34.56) | 0.60x | 95.84 (84.55–96.47) | 1.79x |
+| coroutine | 14.06 (13.78–14.29) | 28.45 (26.31–28.64) | 2.02x | 26.59 (25.13–27.51) | 1.89x | 118.39 (117.68–120.84) | 8.42x |
+| fannkuch | 33.65 (33.55–35.10) | 57.58 (57.43–60.18) | 1.71x | 51.31 (50.37–59.32) | 1.52x | 76.41 (73.45–77.60) | 2.27x |
+| fib | 17.05 (16.44–18.03) | 23.75 (23.23–24.67) | 1.39x | 17.56 (17.53–18.24) | 1.03x | 57.30 (56.23–57.35) | 3.36x |
+| fieldread | 12.76 (12.27–12.93) | 17.85 (16.30–18.40) | 1.40x | 13.21 (12.39–14.41) | 1.04x | 18.37 (17.55–20.46) | 1.44x |
+| floatloop | 11.59 (11.09–11.89) | 16.72 (16.54–17.29) | 1.44x | 13.38 (13.24–13.61) | 1.15x | 19.22 (18.83–21.45) | 1.66x |
+| format | 68.33 (67.97–72.71) | 48.65 (46.99–50.21) | 0.71x | 48.85 (47.19–51.64) | 0.71x | 88.89 (86.03–89.10) | 1.30x |
+| gsub | 17.69 (17.41–18.76) | 26.28 (26.09–26.40) | 1.49x | 25.28 (24.54–25.93) | 1.43x | 55.17 (52.27–56.49) | 3.12x |
+| json | 30.72 (29.49–31.02) | 32.48 (31.02–33.18) | 1.06x | 30.52 (29.68–31.51) | 0.99x | 86.92 (84.61–87.59) | 2.83x |
+| mathcalls | 65.38 (64.80–69.26) | 90.53 (89.61–90.55) | 1.38x | 80.55 (80.17–81.19) | 1.23x | 213.53 (204.37–214.82) | 3.27x |
+| nbody | 49.28 (48.57–49.33) | 58.49 (57.46–63.20) | 1.19x | 45.07 (44.34–47.02) | 0.91x | 89.25 (89.24–90.66) | 1.81x |
+| oop | 52.64 (49.99–53.26) | 76.24 (73.01–78.68) | 1.45x | 73.16 (70.16–73.95) | 1.39x | 184.91 (184.04–184.96) | 3.51x |
+| pairs | 18.61 (17.57–19.20) | 22.49 (22.45–23.34) | 1.21x | 19.87 (19.63–21.63) | 1.07x | 77.27 (73.46–79.41) | 4.15x |
+| parse | 32.64 (32.45–33.30) | 46.62 (45.03–46.76) | 1.43x | 45.52 (44.39–45.80) | 1.39x | 106.43 (99.96–106.53) | 3.26x |
+| policy | 42.06 (38.84–42.07) | 49.30 (49.09–52.59) | 1.17x | 39.51 (37.54–39.62) | 0.94x | 110.77 (108.47–114.80) | 2.63x |
+| sieve | 48.82 (47.57–52.80) | 97.82 (78.13–99.71) | 2.00x | 85.97 (72.59–91.63) | 1.76x | 150.04 (148.09–153.93) | 3.07x |
+| sort | 32.83 (32.70–33.31) | 53.19 (51.98–53.23) | 1.62x | 50.85 (48.74–52.87) | 1.55x | 140.26 (139.05–143.30) | 4.27x |
+| spectralnorm | 24.90 (24.20–26.11) | 39.85 (38.14–41.01) | 1.60x | 28.37 (27.26–30.15) | 1.14x | 66.66 (65.23–66.76) | 2.68x |
+| vararg | 29.44 (28.62–29.57) | 37.80 (36.96–38.15) | 1.28x | 36.57 (36.39–36.61) | 1.24x | 102.90 (102.76–103.38) | 3.50x |
+| Geometric mean | | | 1.31x | | 1.15x | | 2.82x |
+| Worst | | | 2.02x | | 1.89x | | 8.42x |
 
 ## Calls between Go and Lua
 
@@ -137,19 +137,19 @@ Nanoseconds per call, medians of eight rounds, with the range:
 
 | Call from Go | ns, checked loop | ns, fast loop | Allocations |
 | --- | --- | --- | --- |
-| `function(x) return x + 1 end`, typed, private VM | 75.2 (74.3–90.5) | 77.3 (75.7–96.4) | 0 |
-| Same, shared Script, executor from the pool | 103.6 (97.8–125.2) | 97.2 (94.0–105.2) | 0 |
-| 46-byte string in, same string out | 96.4 (92.3–99.2) | 96.3 (90.7–99.3) | 0 |
-| Rule reading three fields of a `*request` that is reused | 157.2 (153.6–165.6) | 140.1 (131.3–145.5) | 0 |
-| Same rule when `req.method` does not share a pointer with the constant | 163.4 (151.6–174.3) | 136.8 (132.9–143.2) | 0 |
-| Same rule through `Expr` and `Rule.Eval`, struct built per call | 155.6 (152.8–164.1) | 140.6 (134.7–146.2) | 0 |
-| Same rule through `Func1`, struct built per call and passed by value | 174.4 (169.9–184.7) | 158.4 (151.3–167.7) | 0 |
-| Same rule through `Func1`, pointer to a struct built per call | 185.3 (180.2–188.1) | 168.7 (165.0–186.3) | 1 |
-| Function that calls one Go host function made with `Fn1` | 199.2 (194.7–235.0) | 192.1 (180.0–286.9) | 0 |
-| Same, host function written as a `GoFunc` | 180.6 (172.4–232.7) | 173.9 (167.0–182.6) | 0 |
-| Function that passes a `*request` through a host function made with `Fn1` | 226.4 (214.4–270.7) | 223.0 (211.6–295.3) | 0 |
-| Same, host function a `GoFunc` using `Arg` and `Return` | 234.4 (226.6–320.9) | 231.9 (223.0–270.1) | 0 |
-| Same, called from every core at once, wall time per call | 135.6 (131.5–178.1) | 133.1 (129.7–171.7) | 0 |
+| `function(x) return x + 1 end`, typed, private VM | 89.7 (84.3–90.7) | 81.6 (80.3–89.1) | 0 |
+| Same, shared Script, executor from the pool | 104.0 (98.3–108.7) | 101.8 (95.4–104.7) | 0 |
+| 46-byte string in, same string out | 92.5 (91.0–97.5) | 91.5 (89.6–96.3) | 0 |
+| Rule reading three fields of a `*request` that is reused | 160.5 (150.1–161.7) | 161.8 (151.9–166.5) | 0 |
+| Same rule when `req.method` does not share a pointer with the constant | 156.0 (149.9–161.8) | 161.6 (152.3–164.5) | 0 |
+| Same rule through `Expr` and `Rule.Eval`, struct built per call | 161.8 (151.9–164.6) | 162.2 (155.5–167.4) | 0 |
+| Same rule through `Func1`, struct built per call and passed by value | 174.9 (168.7–180.5) | 182.4 (171.6–183.9) | 0 |
+| Same rule through `Func1`, pointer to a struct built per call | 180.6 (179.7–183.2) | 184.9 (182.4–188.1) | 1 |
+| Function that calls one Go host function made with `Fn1` | 192.0 (184.3–200.7) | 181.6 (179.4–192.1) | 0 |
+| Same, host function written as a `GoFunc` | 171.4 (168.3–183.6) | 175.4 (166.9–178.8) | 0 |
+| Function that passes a `*request` through a host function made with `Fn1` | 210.1 (197.4–212.5) | 205.2 (191.5–207.5) | 0 |
+| Same, host function a `GoFunc` using `Arg` and `Return` | 213.0 (211.3–227.0) | 214.1 (206.8–221.7) | 0 |
+| Same, called from every core at once, wall time per call | 122.8 (121.7–124.8) | 121.0 (119.6–122.5) | 0 |
 
 The last three rows pass a pointer to a bound struct through the host function and back,
 which converts without reflection. In v0.4.0 they took about 550, 530 and 600 ns: each
@@ -160,7 +160,10 @@ looked up the struct's type.
 
 The machine is an Intel Core i7-7600U laptop with a `powersave` CPU governor, not a quiet
 benchmark machine, so individual numbers move by 10 to 20 percent between runs; ratios are
-more stable than times. Go 1.27.2 on linux/amd64; C Lua 5.4.9 built by
+more stable than times. Code layout moves them too: a change elsewhere in the binary can shift
+where the CPU's branch predictor keeps its history for the interpreter loop's dispatch, which
+has moved single rows of the call table by about 15 percent between builds with the same
+instructions executed. Go 1.27.2 on linux/amd64; C Lua 5.4.9 built by
 [`bench/build-clua.sh`](../bench/build-clua.sh) with gcc at `-O2`.
 
 - Scripts across implementations: `go run -C bench/engines . -rounds 3`. Each round runs every
