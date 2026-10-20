@@ -141,8 +141,9 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 	if prev == nil {
 		prev = ex.mainThread()
 	}
-	saved := ex.saveThread()
-	prev.status, prev.waiting = coNormal, saved
+	// the caller's state waits in prev, where tracebacks find it, and comes back from there
+	prev.status, prev.waiting = coNormal, ex.saveThread()
+	saved := &prev.waiting
 	ex.loadThread(co.threadState)
 	ex.st.ticks = saved.st.ticks // the step budget belongs to the entry, not the coroutine
 	ex.co = co
@@ -152,7 +153,7 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 	defer func() {
 		co.threadState = ex.saveThread()
 		saved.st.ticks = ex.st.ticks
-		ex.loadThread(saved)
+		ex.loadThread(*saved)
 		prev.status, prev.waiting = coRunning, threadState{}
 		if ex.co = prev; prev == ex.mainCo {
 			ex.co = nil // the main thread runs as no coroutine
