@@ -540,11 +540,6 @@ func strFormat(c *Call) error {
 			if err := checkSpec(flags, true); err != nil {
 				return err
 			}
-			if spec == "" && (conv == 'd' || conv == 'i') {
-				var buf [24]byte
-				b.Write(strconv.AppendInt(buf[:0], n, 10))
-				break
-			}
 			appendIntC(&b, spec, conv, n)
 		case 'a', 'A', 'e', 'E', 'f', 'g', 'G':
 			// as C Lua 5.4.9's str_format: %a checks the spec before the argument, the others after
@@ -560,17 +555,7 @@ func strFormat(c *Call) error {
 			if err := checkSpec(fmtFlagsF, true); err != nil {
 				return err
 			}
-			if (conv == 'f' || conv == 'e' || conv == 'E') && (spec == "" || spec[0] == '.') && !math.IsInf(x, 0) && !math.IsNaN(x) {
-				// no flags or width: what fmt.Sprintf gives, without parsing a format for it
-				prec := 6
-				if spec != "" {
-					prec = specNum(spec[1:])
-				}
-				var buf [64]byte
-				b.Write(strconv.AppendFloat(buf[:0], x, conv, prec, 64))
-				break
-			}
-			b.WriteString(formatFloatC(spec, conv, x))
+			appendFloatC(&b, spec, conv, x)
 		case 'p':
 			if err := checkSpec(fmtFlagsC, false); err != nil {
 				return err
@@ -651,25 +636,15 @@ func padTo(b *strings.Builder, spec, s string) {
 	}
 }
 
-// pad applies the width and '-' flag of spec to s.
-func pad(spec, s string) string {
-	left := strings.Contains(spec, "-")
-	width, _, _ := strings.Cut(strings.TrimLeft(spec, "-+ #0"), ".") // the precision does not pad
-	w := specNum(width)
-	if len(s) >= w {
-		return s
-	}
-	fill := strings.Repeat(" ", w-len(s))
-	if left {
-		return s + fill
-	}
-	return fill + s
-}
-
 // appendIntC writes n to b as C's printf formats an integer conversion: d and i signed, u, o, x
 // and X unsigned. Go's fmt differs at the edges: it drops the sign of a zero printed with
 // precision 0, gives # a 0x prefix for zero, and counts the prefix out of the zero padding.
 func appendIntC(b *strings.Builder, spec string, conv byte, n int64) {
+	var buf [24]byte
+	if spec == "" && (conv == 'd' || conv == 'i') {
+		b.Write(strconv.AppendInt(buf[:0], n, 10))
+		return
+	}
 	flags := spec[:len(spec)-len(strings.TrimLeft(spec, "-+ #0"))]
 	width, precision, hasPrec := strings.Cut(spec[len(flags):], ".")
 	w, prec := specNum(width), specNum(precision)
@@ -691,7 +666,6 @@ func appendIntC(b *strings.Builder, spec string, conv byte, n int64) {
 	case 'x', 'X':
 		base = 16
 	}
-	var buf [24]byte
 	digits := strconv.AppendUint(buf[:0], u, base)
 	if conv == 'X' {
 		for i, d := range digits {
@@ -737,9 +711,9 @@ func appendIntC(b *strings.Builder, spec string, conv byte, n int64) {
 	}
 }
 
-// formatFloatC formats x like C's printf with the given spec and conversion: Go's fmt
-// does most of it, but not inf, nan or %a in C's form.
-func formatFloatC(spec string, conv byte, x float64) string {
+// appendFloatC writes x to b as C's printf formats it with the given spec and conversion:
+// strconv or Go's fmt does most of it, but not inf, nan or %a in C's form.
+func appendFloatC(b *strings.Builder, spec string, conv byte, x float64) {
 	upper := conv >= 'A' && conv <= 'Z'
 	if math.IsInf(x, 0) || math.IsNaN(x) {
 		s := "inf"
@@ -759,15 +733,26 @@ func formatFloatC(spec string, conv byte, x float64) string {
 		if upper {
 			s = strings.ToUpper(s)
 		}
-		return pad(spec, s) // pad fills with spaces: the 0 flag does not apply to inf and nan
+		padTo(b, spec, s) // spaces: the 0 flag does not apply to inf and nan
+		return
 	}
-	if conv == 'a' || conv == 'A' {
-		return hexFloat(spec, x, upper)
+	switch {
+	case conv == 'a' || conv == 'A':
+		b.WriteString(hexFloat(spec, x, upper))
+	case (conv == 'f' || conv == 'e' || conv == 'E') && (spec == "" || spec[0] == '.'):
+		// no flags or width: what fmt.Sprintf gives, without parsing a format for it
+		prec := 6
+		if spec != "" {
+			prec = specNum(spec[1:])
+		}
+		var buf [64]byte
+		b.Write(strconv.AppendFloat(buf[:0], x, conv, prec, 64))
+	default:
+		if (conv == 'g' || conv == 'G') && !strings.Contains(spec, ".") {
+			spec += ".6" // C's default precision; Go's %g would give the shortest form instead
+		}
+		fmt.Fprintf(b, "%"+spec+string(conv), x)
 	}
-	if (conv == 'g' || conv == 'G') && !strings.Contains(spec, ".") {
-		spec += ".6" // C's default precision; Go's %g would give the shortest form instead
-	}
-	return fmt.Sprintf("%"+spec+string(conv), x)
 }
 
 // hexFloat formats x as glibc's printf formats %a, which is what C Lua gives on Linux: the
@@ -899,7 +884,8 @@ func quoteValue(c *Call, b *strings.Builder, v Value, arg int) error {
 			b.WriteString("0x8000000000000000")
 			return nil
 		}
-		b.WriteString(strconv.FormatInt(n, 10))
+		var buf [24]byte
+		b.Write(strconv.AppendInt(buf[:0], n, 10))
 		return nil
 	case v.p == tFloat():
 		x := math.Float64frombits(v.n)
