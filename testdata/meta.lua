@@ -161,3 +161,30 @@ t.v = 0
 for _ in pairs(t) do n = n + 1 end
 r[#r + 1] = n
 return table.unpack(r)
+--== integer and string keys outside the array part, with and without __newindex
+local t, r = {}, {}
+for i = 0, 9 do t[i] = i * 2 end -- 0 lives in the hash part
+for i = -3, -1 do t[i] = i end
+t[100], t[1000] = "a", "b"
+local k = "s"
+t[k .. 1], t[k .. 2] = 1, 2
+t[0] = t[0] + 5
+r[#r + 1] = t[0] + t[9] + t[-3] + #t
+r[#r + 1] = t[100] .. t[1000] .. tostring(t[101]) .. t[k .. 1] + t[k .. 2]
+local logged = {}
+local mt = {__newindex = function(u, key, v) logged[#logged + 1] = tostring(key); rawset(u, key, v) end,
+  __index = function(_, key) return "idx" .. tostring(key) end}
+local u = setmetatable({[0] = "zero"}, mt)
+u[0] = "z" -- present: no __newindex
+u[-1] = "m" -- absent: __newindex
+u[k] = "s"
+r[#r + 1] = u[0] .. u[-1] .. u[k] .. u[7] .. u[k .. "x"]
+r[#r + 1] = table.concat(logged, ",")
+local a = {1, 2, 3}
+a[5] = 5 -- past the end: the hash part
+a[4] = 4 -- one past the end: appended, and 5 moves over
+r[#r + 1] = #a
+local n = 0
+for _ in pairs(t) do n = n + 1 end
+r[#r + 1] = n
+return table.unpack(r)

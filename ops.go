@@ -100,16 +100,19 @@ func (ex *executor) slowOp() error {
 		*ex.reg(a) = envValue(st.cl)
 	case opGetTable:
 		obj, key := ex.reg(b), ex.reg(c)
-		if key.isString() && obj.isObj(kindTable) { // a string key: straight to the hash part
-			t := (*Table)(obj.p)
-			if i := t.findNode(key, hashString(key.p, int(key.n&lenMask))); i >= 0 {
-				if v := &t.nodes[i].v; v.p != nil || t.meta == nil {
-					setValue(ex.reg(a), v)
+		// a string key, or an integer one the loop did not find in the array part: straight
+		// to the hash part
+		if obj.isObj(kindTable) {
+			if t := (*Table)(obj.p); key.isString() || key.p == tInt() && key.n-1 >= uint64(len(t.arr)) {
+				if i := t.findNode(key, hashValue(*key)); i >= 0 {
+					if v := &t.nodes[i].v; v.p != nil || t.meta == nil {
+						setValue(ex.reg(a), v)
+						return nil
+					}
+				} else if t.meta == nil {
+					*ex.reg(a) = Value{}
 					return nil
 				}
-			} else if t.meta == nil {
-				*ex.reg(a) = Value{}
-				return nil
 			}
 		}
 		return ex.index(op, *obj, *key, a)
@@ -128,6 +131,9 @@ func (ex *executor) slowOp() error {
 		}
 		return ex.index(op, obj, p.k[c], a)
 	case opSetTable:
+		if key := *ex.reg(b); (key.p == tInt() || key.isString()) && quickSet(*ex.reg(a), key, hashValue(key), *ex.reg(c)) >= 0 {
+			return nil
+		}
 		return ex.newindex(op, *ex.reg(a), *ex.reg(b), *ex.reg(c))
 	case opSetIndex:
 		return ex.newindex(op, *ex.reg(a), Int(int64(b)), *ex.reg(c))
@@ -137,6 +143,9 @@ func (ex *executor) slowOp() error {
 		}
 		return ex.newindex(op, *ex.reg(a), p.k[b], *ex.reg(c))
 	case opSetTableK:
+		if key := *ex.reg(b); (key.p == tInt() || key.isString()) && quickSet(*ex.reg(a), key, hashValue(key), p.k[c]) >= 0 {
+			return nil
+		}
 		return ex.newindex(op, *ex.reg(a), *ex.reg(b), p.k[c])
 	case opSetIndexK:
 		return ex.newindex(op, *ex.reg(a), Int(int64(b)), p.k[c])
@@ -1410,34 +1419,52 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 }
 
 // constSet does obj[K[kc]] = val for a SETFIELD the loop could not do inline, such as one
-// that adds a field to a table just built, when the table has no metatable and the write
-// needs no resize: it finds the key with the hash computed at compile time, sets it or adds
-// it, and records where for the site. It reports false when newindex must do the write.
+// that adds a field to a table just built, with quickSet and the key's hash computed at
+// compile time, and records where the key is for the site.
 func (ex *executor) constSet(obj Value, kc int, val Value) bool {
-	if !obj.isObj(kindTable) || val.IsNil() {
-		return false
-	}
-	t := (*Table)(obj.p)
-	if t.meta != nil || t.flags&(tabFrozen|tabGuarded) != 0 || len(t.nodes) == 0 {
-		return false
-	}
 	p := ex.st.cl.p
-	key, h := p.k[kc], p.khash[kc]
-	if !key.isString() || key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f {
-		return false // a key starting with "__" clears the table's caches in set
-	}
-	idx := t.findNode(&key, h)
-	if idx >= 0 {
-		t.nodes[idx].v = val
-	} else {
-		if (t.used+1)*4 > len(t.nodes)*3 || t.memSize() >= maxAlloc/2 {
-			return false // a resize, which newindex charges for
-		}
-		idx = t.insert(key, val, h)
+	idx := quickSet(obj, p.k[kc], p.khash[kc], val)
+	if idx < 0 {
+		return false
 	}
 	learn(&p.hints[ex.aux()], idx)
 	ex.st.pc++ // the aux word
 	return true
+}
+
+// quickSet does obj[key] = val in the hash part, key hashing to h, when obj is a table with
+// no metatable, the key is a string not starting with "__" or an integer that does not
+// belong in the array part, and the write needs no resize. It returns the key's node index,
+// or -1 when newindex must do the write.
+func quickSet(obj, key Value, h uint64, val Value) int {
+	if !obj.isObj(kindTable) || val.IsNil() {
+		return -1
+	}
+	t := (*Table)(obj.p)
+	if t.meta != nil || t.flags&(tabFrozen|tabGuarded) != 0 || len(t.nodes) == 0 {
+		return -1
+	}
+	switch {
+	case key.isString():
+		if key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f {
+			return -1 // a key starting with "__" clears the table's caches in set
+		}
+	case key.p == tInt():
+		if i := int64(key.n) - 1; uint64(i) <= uint64(len(t.arr)) {
+			return -1 // in the array part, or appended to it
+		}
+	default:
+		return -1
+	}
+	idx := t.findNode(&key, h)
+	if idx >= 0 {
+		t.nodes[idx].v = val
+		return idx
+	}
+	if (t.used+1)*4 > len(t.nodes)*3 || t.memSize() >= maxAlloc/2 {
+		return -1 // a resize, which newindex charges for
+	}
+	return t.insert(key, val, h)
 }
 
 // constField does R[dst] = obj[K[kc]] for GETFIELD and SELF, when obj is a table and the
