@@ -462,6 +462,7 @@ func strFormat(c *Call) error {
 		return err
 	}
 	var b strings.Builder
+	b.Grow(min(len(f)+8*c.Len(), 512)) // most results are near this long: growing from empty copies several times
 	charge := building{c: c}
 	arg := 0
 	for i := 0; i < len(f); i++ {
@@ -523,7 +524,7 @@ func strFormat(c *Call) error {
 			if err != nil {
 				return err
 			}
-			b.WriteString(pad(spec, string([]byte{byte(n)})))
+			padTo(&b, spec, string([]byte{byte(n)}))
 		case 'd', 'i', 'u', 'o', 'x', 'X':
 			flags := fmtFlagsI
 			switch conv {
@@ -539,7 +540,12 @@ func strFormat(c *Call) error {
 			if err := checkSpec(flags, true); err != nil {
 				return err
 			}
-			b.WriteString(formatIntC(spec, conv, n))
+			if spec == "" && (conv == 'd' || conv == 'i') {
+				var buf [24]byte
+				b.Write(strconv.AppendInt(buf[:0], n, 10))
+				break
+			}
+			appendIntC(&b, spec, conv, n)
 		case 'a', 'A', 'e', 'E', 'f', 'g', 'G':
 			// as C Lua 5.4.9's str_format: %a checks the spec before the argument, the others after
 			if conv == 'a' || conv == 'A' {
@@ -554,6 +560,16 @@ func strFormat(c *Call) error {
 			if err := checkSpec(fmtFlagsF, true); err != nil {
 				return err
 			}
+			if (conv == 'f' || conv == 'e' || conv == 'E') && (spec == "" || spec[0] == '.') && !math.IsInf(x, 0) && !math.IsNaN(x) {
+				// no flags or width: what fmt.Sprintf gives, without parsing a format for it
+				prec := 6
+				if spec != "" {
+					prec = specNum(spec[1:])
+				}
+				var buf [64]byte
+				b.Write(strconv.AppendFloat(buf[:0], x, conv, prec, 64))
+				break
+			}
 			b.WriteString(formatFloatC(spec, conv, x))
 		case 'p':
 			if err := checkSpec(fmtFlagsC, false); err != nil {
@@ -563,16 +579,14 @@ func strFormat(c *Call) error {
 			if !isScalar(v.p) {
 				s = hidePointer(v.p)
 			}
-			b.WriteString(pad(spec, s))
+			padTo(&b, spec, s)
 		case 'q':
 			if spec != "" {
 				return c.libErrorf("specifier '%%q' cannot have modifiers")
 			}
-			q, err := quoteValue(c, v, arg)
-			if err != nil {
+			if err := quoteValue(c, &b, v, arg); err != nil {
 				return err
 			}
-			b.WriteString(q)
 		case 's':
 			s, err := c.tostring(v)
 			if err != nil {
@@ -589,13 +603,13 @@ func strFormat(c *Call) error {
 				return err
 			}
 			if dot := strings.IndexByte(spec, '.'); dot >= 0 {
-				prec, _ := strconv.Atoi(spec[dot+1:])
+				prec := specNum(spec[dot+1:])
 				if prec < len(s) {
 					s = s[:prec] // bytes, as C counts them
 				}
 				spec = spec[:dot]
 			}
-			b.WriteString(pad(spec, s))
+			padTo(&b, spec, s)
 		default:
 			// the specification with its conversion, as C's form buffer: a C string, so up to a NUL
 			shown, _, _ := strings.Cut(f[start:i+1], "\x00")
@@ -611,11 +625,37 @@ func strFormat(c *Call) error {
 	return c.ReturnValues(String(b.String()))
 }
 
+// specNum reads a width or precision of a checked spec: at most two digits, or none for 0.
+// strconv.Atoi would allocate an error for the empty string, the common case.
+func specNum(d string) int {
+	n := 0
+	for i := 0; i < len(d); i++ {
+		n = n*10 + int(d[i]-'0')
+	}
+	return n
+}
+
+// padTo writes s to b with the width and '-' flag of spec applied.
+func padTo(b *strings.Builder, spec, s string) {
+	width, _, _ := strings.Cut(strings.TrimLeft(spec, "-+ #0"), ".") // the precision does not pad
+	fill := specNum(width) - len(s)
+	left := strings.Contains(spec, "-")
+	if left {
+		b.WriteString(s)
+	}
+	for ; fill > 0; fill-- {
+		b.WriteByte(' ')
+	}
+	if !left {
+		b.WriteString(s)
+	}
+}
+
 // pad applies the width and '-' flag of spec to s.
 func pad(spec, s string) string {
 	left := strings.Contains(spec, "-")
 	width, _, _ := strings.Cut(strings.TrimLeft(spec, "-+ #0"), ".") // the precision does not pad
-	w, _ := strconv.Atoi(width)
+	w := specNum(width)
 	if len(s) >= w {
 		return s
 	}
@@ -626,14 +666,13 @@ func pad(spec, s string) string {
 	return fill + s
 }
 
-// formatIntC formats n as C's printf formats an integer conversion: d and i signed, u, o, x
+// appendIntC writes n to b as C's printf formats an integer conversion: d and i signed, u, o, x
 // and X unsigned. Go's fmt differs at the edges: it drops the sign of a zero printed with
 // precision 0, gives # a 0x prefix for zero, and counts the prefix out of the zero padding.
-func formatIntC(spec string, conv byte, n int64) string {
+func appendIntC(b *strings.Builder, spec string, conv byte, n int64) {
 	flags := spec[:len(spec)-len(strings.TrimLeft(spec, "-+ #0"))]
 	width, precision, hasPrec := strings.Cut(spec[len(flags):], ".")
-	w, _ := strconv.Atoi(width)
-	prec, _ := strconv.Atoi(precision)
+	w, prec := specNum(width), specNum(precision)
 	u, sign := uint64(n), ""
 	if conv == 'd' || conv == 'i' {
 		switch {
@@ -652,39 +691,50 @@ func formatIntC(spec string, conv byte, n int64) string {
 	case 'x', 'X':
 		base = 16
 	}
-	digits := strconv.FormatUint(u, base)
+	var buf [24]byte
+	digits := strconv.AppendUint(buf[:0], u, base)
 	if conv == 'X' {
-		digits = strings.ToUpper(digits)
+		for i, d := range digits {
+			if d >= 'a' {
+				digits[i] = d - 'a' + 'A'
+			}
+		}
 	}
+	zeros := 0 // leading zeros the precision asks for
 	if hasPrec {
 		if prec == 0 && u == 0 {
-			digits = "" // C: precision 0 prints no digits for zero
+			digits = digits[:0] // C: precision 0 prints no digits for zero
 		}
-		if len(digits) < prec {
-			digits = strings.Repeat("0", prec-len(digits)) + digits
-		}
+		zeros = max(prec-len(digits), 0)
 	}
 	prefix := ""
 	if strings.Contains(flags, "#") {
 		switch {
-		case conv == 'o' && !strings.HasPrefix(digits, "0"):
-			digits = "0" + digits
+		case conv == 'o' && zeros == 0 && (len(digits) == 0 || digits[0] != '0'):
+			zeros = 1
 		case conv == 'x' && u != 0:
 			prefix = "0x"
 		case conv == 'X' && u != 0:
 			prefix = "0X"
 		}
 	}
-	size := len(sign) + len(prefix) + len(digits)
-	switch {
-	case size >= w:
-		return sign + prefix + digits
-	case strings.Contains(flags, "-"):
-		return sign + prefix + digits + strings.Repeat(" ", w-size)
-	case strings.Contains(flags, "0") && !hasPrec:
-		return sign + prefix + strings.Repeat("0", w-size) + digits
+	fill := w - (len(sign) + len(prefix) + zeros + len(digits))
+	left := strings.Contains(flags, "-")
+	if !left && strings.Contains(flags, "0") && !hasPrec {
+		zeros, fill = zeros+max(fill, 0), 0 // the 0 flag pads after the sign and prefix
 	}
-	return strings.Repeat(" ", w-size) + sign + prefix + digits
+	for ; !left && fill > 0; fill-- {
+		b.WriteByte(' ')
+	}
+	b.WriteString(sign)
+	b.WriteString(prefix)
+	for ; zeros > 0; zeros-- {
+		b.WriteByte('0')
+	}
+	b.Write(digits)
+	for ; fill > 0; fill-- {
+		b.WriteByte(' ')
+	}
 }
 
 // formatFloatC formats x like C's printf with the given spec and conversion: Go's fmt
@@ -729,7 +779,7 @@ func hexFloat(spec string, x float64, upper bool) string {
 	flags := spec[:len(spec)-len(strings.TrimLeft(spec, "-+ #0"))]
 	prec := -1
 	if dot := strings.IndexByte(spec, '.'); dot >= 0 {
-		prec, _ = strconv.Atoi(spec[dot+1:])
+		prec = specNum(spec[dot+1:])
 	}
 	bits := math.Float64bits(x)
 	biased, mant := int(bits>>52&0x7ff), bits&(1<<52-1)
@@ -792,7 +842,7 @@ func hexFloat(spec string, x float64, upper bool) string {
 		prefix, body = "0X", strings.ToUpper(body)
 	}
 	width, _, _ := strings.Cut(strings.TrimLeft(spec, "-+ #0"), ".")
-	w, _ := strconv.Atoi(width)
+	w := specNum(width)
 	n := len(sign) + len(prefix) + len(body)
 	switch {
 	case n >= w:
@@ -813,11 +863,11 @@ func hexVal(c byte) int {
 }
 
 // quoteValue is %q: a value written so that Lua reads it back.
-func quoteValue(c *Call, v Value, arg int) (string, error) {
+func quoteValue(c *Call, b *strings.Builder, v Value, arg int) error {
 	switch {
 	case v.isString():
 		s := v.str()
-		var b strings.Builder
+		b.Grow(len(s) + 2)
 		b.WriteByte('"')
 		for i := 0; i < len(s); i++ {
 			ch := s[i]
@@ -833,35 +883,42 @@ func quoteValue(c *Call, v Value, arg int) (string, error) {
 				}
 			case ch < 32 || ch == 127:
 				if i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9' {
-					fmt.Fprintf(&b, "\\%03d", ch)
+					fmt.Fprintf(b, "\\%03d", ch)
 				} else {
-					fmt.Fprintf(&b, "\\%d", ch)
+					fmt.Fprintf(b, "\\%d", ch)
 				}
 			default:
 				b.WriteByte(ch)
 			}
 		}
 		b.WriteByte('"')
-		return b.String(), nil
+		return nil
 	case v.p == tInt():
 		n := int64(v.n)
 		if n == math.MinInt64 {
-			return "0x8000000000000000", nil
+			b.WriteString("0x8000000000000000")
+			return nil
 		}
-		return strconv.FormatInt(n, 10), nil
+		b.WriteString(strconv.FormatInt(n, 10))
+		return nil
 	case v.p == tFloat():
 		x := math.Float64frombits(v.n)
 		switch {
 		case math.IsInf(x, 1):
-			return "1e9999", nil
+			b.WriteString("1e9999")
+			return nil
 		case math.IsInf(x, -1):
-			return "-1e9999", nil
+			b.WriteString("-1e9999")
+			return nil
 		case x != x:
-			return "(0/0)", nil
+			b.WriteString("(0/0)")
+			return nil
 		}
-		return hexFloat("", x, false), nil // hexadecimal, so it reads back exactly
+		b.WriteString(hexFloat("", x, false)) // hexadecimal, so it reads back exactly
+		return nil
 	case v.IsNil(), v.p == tBool():
-		return v.String(), nil
+		b.WriteString(v.String())
+		return nil
 	}
-	return "", c.argError(arg+1, "format", "value has no literal form")
+	return c.argError(arg+1, "format", "value has no literal form")
 }
