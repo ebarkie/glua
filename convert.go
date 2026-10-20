@@ -219,7 +219,7 @@ func encodeReflect(rv reflect.Value, depth int) (Value, error) {
 			if !ok {
 				return Value{}, fmt.Errorf("map key %v is not a valid table key", it.Key())
 			}
-			tab.set(canonKey(nk), x)
+			tab.set(nk, x) // set gives a new key its canonical pointer
 		}
 		return tableValue(tab), nil
 	case reflect.Func:

@@ -30,6 +30,20 @@ func khashAt(p *proto, i uint32) uint64 {
 	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(p.khash)), uintptr(i)*8))
 }
 
+// strEqBytes reports whether the strings x and y, both of n bytes, have the same bytes. The
+// caller has checked that both are strings of that length; a key a script builds at run
+// time, by capture, concatenation or sub, never shares a constant's pointer, so equal keys
+// come behind different pointers. A byte loop is the only form the inliner accepts into
+// fast; word compares cost more than its budget.
+func strEqBytes(x, y *Value, n uintptr) bool {
+	for j := uintptr(0); j < n; j++ {
+		if *(*byte)(unsafe.Add(x.p, j)) != *(*byte)(unsafe.Add(y.p, j)) {
+			return false
+		}
+	}
+	return true
+}
+
 // isNum reports whether v is an integer or a float. Small enough to inline into fast.
 func isNum(v *Value) bool { return v.p == tInt() || v.p == tFloat() }
 
@@ -503,11 +517,8 @@ dispatch:
 					for j := uint64(0); j < 8; j++ {
 						nd := &t.nodes[(h+j)&mask]
 						if nd.k.n == key.n && !isScalar(nd.k.p) { // a string of the same length
-							if nd.k.p != key.p {
-								if key.n&lenMask != 0 && *(*byte)(nd.k.p) != *(*byte)(key.p) {
-									continue // another string: they differ in the first byte
-								}
-								break // perhaps the same string behind another pointer: the driver decides
+							if nd.k.p != key.p && !strEqBytes(&nd.k, key, uintptr(n)) {
+								continue // another string of the same length
 							}
 							if nd.v.p == nil && t.meta != nil {
 								break // a deleted key: __index decides
@@ -573,7 +584,7 @@ dispatch:
 				// a write hit also needs the table not frozen, and an old value or no metatable,
 				// because of __newindex. Keys starting with "__" go to the driver, which clears
 				// the table's cache of absent metamethods.
-				if int(slot) < len(t.nodes) && t.flags&(tabFrozen|tabGuarded) == 0 && !(key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f) {
+				if int(slot) < len(t.nodes) && t.flags&(tabFrozen|tabGuarded) == 0 && !isMetaName(key) {
 					if nd := &t.nodes[slot]; same(&nd.k, key) && (nd.v.p != nil || t.meta == nil) && v.p != nil {
 						setValue(&nd.v, v)
 						pc = unsafe.Add(pc, 4)

@@ -131,7 +131,7 @@ func (ex *executor) slowOp() error {
 		}
 		return ex.index(op, obj, p.k[c], a)
 	case opSetTable:
-		if key := *ex.reg(b); (key.p == tInt() || key.isString()) && quickSet(*ex.reg(a), key, hashValue(key), *ex.reg(c)) >= 0 {
+		if key := *ex.reg(b); (key.p == tInt() || key.isString()) && quickSet(*ex.reg(a), key, hashValue(key), *ex.reg(c), false) >= 0 {
 			return nil
 		}
 		return ex.newindex(op, *ex.reg(a), *ex.reg(b), *ex.reg(c))
@@ -143,7 +143,7 @@ func (ex *executor) slowOp() error {
 		}
 		return ex.newindex(op, *ex.reg(a), p.k[b], *ex.reg(c))
 	case opSetTableK:
-		if key := *ex.reg(b); (key.p == tInt() || key.isString()) && quickSet(*ex.reg(a), key, hashValue(key), p.k[c]) >= 0 {
+		if key := *ex.reg(b); (key.p == tInt() || key.isString()) && quickSet(*ex.reg(a), key, hashValue(key), p.k[c], false) >= 0 {
 			return nil
 		}
 		return ex.newindex(op, *ex.reg(a), *ex.reg(b), p.k[c])
@@ -567,6 +567,42 @@ func (ex *executor) newindex(op uint8, obj, key, val Value) error {
 		switch {
 		case obj.isObj(kindTable):
 			t := (*Table)(obj.p)
+			if key.isString() && !val.IsNil() && t.flags&(tabFrozen|tabGuarded) == 0 && !isMetaName(&key) {
+				// a string key with a value, the common store, with one hash and probe: a key the
+				// table has takes the value, a deleted one too; an absent one asks the metatable
+				// for __newindex, then is inserted when no resize, which tableSet charges, is due.
+				// Other keys, nil values, frozen and guarded tables take the general way below
+				h := hashString(key.p, int(key.n&lenMask))
+				idx := t.findNode(&key, h)
+				if idx < 0 || t.nodes[idx].v.IsNil() {
+					if t.meta != nil {
+						if hm := t.meta.metaGet("__newindex"); !hm.IsNil() {
+							if hm.isObj(kindLuaFn) || hm.isObj(kindGoFn) {
+								return ex.callMeta("__newindex", hm, obj, key, val)
+							}
+							obj = hm
+							continue
+						}
+					}
+					if idx < 0 && t.memSize() < maxAlloc/2 {
+						idx = t.tryInsert(key, val, h)
+					}
+					if idx < 0 { // a resize is due, or the table may not grow: tableSet charges or refuses
+						if err := ex.tableSet(t, key, val); err != nil {
+							return err
+						}
+						idx = t.findNode(&key, h)
+					}
+				}
+				if idx >= 0 {
+					t.nodes[idx].v = val
+					if (op == opSetField || op == opSetFieldK || op == opSetGlobal) && hops == 0 {
+						learn(&ex.st.cl.p.hints[ex.aux()], idx)
+					}
+				}
+				ex.skipAux(op)
+				return nil
+			}
 			if t.meta != nil {
 				if old := t.Get(key); old.IsNil() {
 					if h := t.meta.metaGet("__newindex"); !h.IsNil() {
@@ -1431,7 +1467,7 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 // compile time, and records where the key is for the site.
 func (ex *executor) constSet(obj Value, kc int, val Value) bool {
 	p := ex.st.cl.p
-	idx := quickSet(obj, p.k[kc], p.khash[kc], val)
+	idx := quickSet(obj, p.k[kc], p.khash[kc], val, true) // a constant has its canonical pointer
 	if idx < 0 {
 		return false
 	}
@@ -1443,8 +1479,9 @@ func (ex *executor) constSet(obj Value, kc int, val Value) bool {
 // quickSet does obj[key] = val in the hash part, key hashing to h, when obj is a table with
 // no metatable, the key is a string not starting with "__" or an integer that does not
 // belong in the array part, and the write needs no resize. It returns the key's node index,
-// or -1 when newindex must do the write.
-func quickSet(obj, key Value, h uint64, val Value) int {
+// or -1 when newindex must do the write. canonical says that a string key has its canonical
+// pointer already, as a constant has; another new key is given it as it is added.
+func quickSet(obj, key Value, h uint64, val Value, canonical bool) int {
 	if !obj.isObj(kindTable) || val.IsNil() {
 		return -1
 	}
@@ -1454,7 +1491,7 @@ func quickSet(obj, key Value, h uint64, val Value) int {
 	}
 	switch {
 	case key.isString():
-		if key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f {
+		if isMetaName(&key) {
 			return -1 // a key starting with "__" clears the table's caches in set
 		}
 	case key.p == tInt():
@@ -1469,10 +1506,13 @@ func quickSet(obj, key Value, h uint64, val Value) int {
 		t.nodes[idx].v = val
 		return idx
 	}
-	if (t.used+1)*4 > len(t.nodes)*3 || t.memSize() >= maxAlloc/2 {
+	if t.full() || t.memSize() >= maxAlloc/2 {
 		return -1 // a resize, which newindex charges for
 	}
-	return t.insert(key, val, h)
+	if canonical {
+		return t.insert(key, val, h)
+	}
+	return t.insertNew(key, val, h)
 }
 
 // constField does R[dst] = obj[K[kc]] for GETFIELD and SELF, when obj is a table and the

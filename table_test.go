@@ -387,3 +387,94 @@ func TestFrozenGoTableKeysStayCanonical(t *testing.T) {
 		t.Errorf("t.frozenGoTableKey: %v, %v", got, err)
 	}
 }
+
+// A string key a script builds at run time, by capture, concatenation or sub, is inserted
+// with the pointer of the constant that names it, so that reads and writes at constant
+// sites find it inline, as they find a key a constant wrote.
+func TestScriptKeysCanonical(t *testing.T) {
+	src := `
+		local rec = {}
+		for k, v in ("user=u1 path=/api status=200"):gmatch("(%w+)=(%S+)") do rec[k] = v end
+		rec["ms" .. ""] = "17"
+		assert(rec.path == "/api" and rec.ms == "17")
+		return rec`
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(withLoop(checked)), src)
+		if err != nil || len(res) != 1 || !res[0].isObj(kindTable) {
+			t.Fatalf("checked=%v: %v %v", checked, res, err)
+		}
+		tab := (*Table)(res[0].p)
+		for i := range tab.nodes {
+			k := tab.nodes[i].k
+			if !k.isString() {
+				continue
+			}
+			if k.str() != "path" && k.str() != "ms" {
+				continue // the names the script uses; other tests may register the rest
+			}
+			if k.p != unsafe.Pointer(unsafe.StringData(unique.Make(k.str()).Value())) {
+				t.Errorf("checked=%v: key %q does not have the constant's pointer", checked, k.str())
+			}
+		}
+	}
+}
+
+// Reads and writes through a string key built at run time: the loop's probe compares short
+// keys by their bytes, and the driver assigns to a key the table has directly. Neither may
+// skip __index, __newindex, the metamethod cache, frozen tables or reserved names.
+func TestDynamicStringKeys(t *testing.T) {
+	src := `
+		local function dyn(s) return (s .. "!"):sub(1, #s) end -- equal, behind another pointer
+		local t = {}
+		for n = 1, 20 do t[string.rep("k", n)] = n end
+		for n = 1, 20 do
+			local k = dyn(string.rep("k", n))
+			assert(t[k] == n, n)
+			t[k] = n * 10 -- an existing key: assigned in place
+			assert(t[k] == n * 10 and t[string.rep("k", n)] == n * 10, n)
+			assert(t[dyn(string.rep("j", n))] == nil, n) -- the same length, other bytes
+			t[dyn(string.rep("j", n))] = -n
+			assert(t[string.rep("j", n)] == -n and t[k] == n * 10, n)
+		end
+		local base = {gone = "from __index"}
+		local d = setmetatable({gone = 1}, {__index = base})
+		d.gone = nil
+		assert(d[dyn("gone")] == "from __index") -- a deleted key consults __index
+		local log = {}
+		local w = setmetatable({has = 1}, {__newindex = function(_, k, v) log[#log + 1] = k .. "=" .. v end})
+		w[dyn("has")] = 2 -- a key with a value: raw
+		w[dyn("new")] = 3 -- a key without one: __newindex
+		assert(w.has == 2 and rawget(w, "new") == nil and log[1] == "new=3")
+		local mt = {__index = {x = "first"}}
+		local o = setmetatable({}, mt)
+		assert(o.x == "first")
+		mt[dyn("__index")] = {x = "second"} -- a metamethod key: the cache is cleared
+		assert(o.x == "second")
+		local ok, err = pcall(function() _G[dyn("print")] = 1 end)
+		assert(not ok and err:find("reserved name 'print'"), err)
+		return "ok"`
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(withLoop(checked)), src)
+		if err != nil || len(res) != 1 || res[0].String() != "ok" {
+			t.Errorf("checked=%v: %v %v", checked, res, err)
+		}
+	}
+}
+
+// A frozen table keeps every key as it is: assigning to it through a key built at run time
+// fails as any assignment does.
+func TestDynamicKeyFrozen(t *testing.T) {
+	tab := NewTable(0, 1)
+	tab.Set(String("x"), Int(1))
+	if err := tab.Freeze(); err != nil {
+		t.Fatal(err)
+	}
+	s := mustLoad(t, MustNew(), `function f(t) local k = ("x!"):sub(1, 1); t[k] = 2 end`)
+	_, err := s.Call(context.Background(), s.Globals().Get(String("f")), tableValue(tab))
+	if err == nil || !strings.Contains(err.Error(), "frozen") {
+		t.Errorf("assigning to a frozen table: %v", err)
+	}
+	if got, _ := tab.Get(String("x")).Int(); got != 1 {
+		t.Errorf("the frozen table changed: x = %d", got)
+	}
+}
