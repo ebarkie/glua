@@ -1402,17 +1402,25 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 		}
 	case f.p == unsafe.Pointer(ipairsAuxG) && f.n == kindGoFn<<56 && t.meta == nil && ctl.p == tInt():
 		i := int64(ctl.n) + 1
-		if v = t.Get(Int(i)); !v.IsNil() {
+		if uint64(i-1) < uint64(len(t.arr)) {
+			v = t.arr[i-1]
+		} else {
+			v = t.Get(Int(i))
+		}
+		if !v.IsNil() {
 			k = Int(i)
 		}
 	default:
 		return false, nil
 	}
+	// stored one by one: clear on a slice of Values is a runtime call with a bulk write barrier
 	r := ex.stack[base+4 : base+4+c]
-	clear(r)
 	r[0] = k
 	if c > 1 {
 		r[1] = v
+		for j := 2; j < c; j++ {
+			r[j] = Value{}
+		}
 	}
 	ex.st.hi = max(ex.st.hi, base+4+c)
 	return true, ex.tick() // a call ticks
