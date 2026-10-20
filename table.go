@@ -380,15 +380,15 @@ func (t *Table) growArray(n int) {
 	}
 }
 
-// insert places a new key; the caller has made room.
-func (t *Table) insert(key, val Value, h uint64) {
+// insert places a new key and returns its node index; the caller has made room.
+func (t *Table) insert(key, val Value, h uint64) int {
 	mask := uint64(len(t.nodes) - 1)
 	for j := h; ; j++ {
 		nd := &t.nodes[j&mask]
 		if nd.k.p == nil {
 			nd.k, nd.v = key, val
 			t.used++
-			return
+			return int(j & mask)
 		}
 	}
 }

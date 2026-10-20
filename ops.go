@@ -132,12 +132,18 @@ func (ex *executor) slowOp() error {
 	case opSetIndex:
 		return ex.newindex(op, *ex.reg(a), Int(int64(b)), *ex.reg(c))
 	case opSetField:
+		if ex.constSet(*ex.reg(a), b, *ex.reg(c)) {
+			return nil
+		}
 		return ex.newindex(op, *ex.reg(a), p.k[b], *ex.reg(c))
 	case opSetTableK:
 		return ex.newindex(op, *ex.reg(a), *ex.reg(b), p.k[c])
 	case opSetIndexK:
 		return ex.newindex(op, *ex.reg(a), Int(int64(b)), p.k[c])
 	case opSetFieldK:
+		if ex.constSet(*ex.reg(a), b, p.k[c]) {
+			return nil
+		}
 		return ex.newindex(op, *ex.reg(a), p.k[b], p.k[c])
 	case opNewTable:
 		// the sizes are hints: clamp them, so that no instruction can ask for a huge allocation
@@ -1401,6 +1407,37 @@ func (ex *executor) builtinIter(base, c int) (bool, error) {
 	}
 	ex.st.hi = max(ex.st.hi, base+4+c)
 	return true, ex.tick() // a call ticks
+}
+
+// constSet does obj[K[kc]] = val for a SETFIELD the loop could not do inline, such as one
+// that adds a field to a table just built, when the table has no metatable and the write
+// needs no resize: it finds the key with the hash computed at compile time, sets it or adds
+// it, and records where for the site. It reports false when newindex must do the write.
+func (ex *executor) constSet(obj Value, kc int, val Value) bool {
+	if !obj.isObj(kindTable) || val.IsNil() {
+		return false
+	}
+	t := (*Table)(obj.p)
+	if t.meta != nil || t.flags&(tabFrozen|tabGuarded) != 0 || len(t.nodes) == 0 {
+		return false
+	}
+	p := ex.st.cl.p
+	key, h := p.k[kc], p.khash[kc]
+	if !key.isString() || key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f {
+		return false // a key starting with "__" clears the table's caches in set
+	}
+	idx := t.findNode(&key, h)
+	if idx >= 0 {
+		t.nodes[idx].v = val
+	} else {
+		if (t.used+1)*4 > len(t.nodes)*3 || t.memSize() >= maxAlloc/2 {
+			return false // a resize, which newindex charges for
+		}
+		idx = t.insert(key, val, h)
+	}
+	learn(&p.hints[ex.aux()], idx)
+	ex.st.pc++ // the aux word
+	return true
 }
 
 // constField does R[dst] = obj[K[kc]] for GETFIELD and SELF, when obj is a table and the
