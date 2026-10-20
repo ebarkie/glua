@@ -137,9 +137,15 @@ func tabConcat(c *Call) error {
 	}
 	var b strings.Builder
 	charge := building{c: c}
+	var arr []Value // the array part of a table without a metatable, read directly
+	if t.isObj(kindTable) && (*Table)(t.p).meta == nil {
+		arr = (*Table)(t.p).arr
+	}
 	for k := i; k <= j; k++ {
-		v, err := c.index(t, Int(k))
-		if err != nil {
+		var v Value
+		if uint64(k-1) < uint64(len(arr)) {
+			v = arr[k-1]
+		} else if v, err = c.index(t, Int(k)); err != nil {
 			return err
 		}
 		if !v.isString() && !v.isNumber() {

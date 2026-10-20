@@ -314,3 +314,16 @@ if not F then r[#r + 1] = "notF" end
 if T then r[#r + 1] = "T" end
 if not T then r[#r + 1] = "notT" end
 return table.concat(r, ","), (F and 1), (N or 2), (F or N), not N, (T and F)
+--== constructors ending in a call or ... that give no values
+local function none() end
+local function two() return 1, 2 end
+local function pack(...) return {...} end
+local a, b, c = {none()}, {1, none()}, pack()
+local d = {two(), two()}
+local n = 0
+for _ in pairs(a) do n = n + 1 end
+for _ in pairs(b) do n = n + 1 end
+for _ in pairs(c) do n = n + 1 end
+table.insert(a, "x")
+c[#c + 1] = "y"
+return #a, a[1], #b, #c, c[1], #d, d[3], n, next({none()}), select("#", table.unpack(b))
