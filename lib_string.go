@@ -242,8 +242,11 @@ func strFindAux(c *Call, find bool) error {
 			if find {
 				res = append(res, Int(int64(s1+1)), Int(int64(e)))
 			}
-			c.res = ms.captures(res, s1, e, !find)
-			return ms.err
+			if res = ms.captures(res, s1, e, !find); ms.err != nil {
+				return ms.err // no results with an error
+			}
+			c.res = res
+			return nil
 		}
 		if ms.err != nil {
 			return ms.err
@@ -282,9 +285,13 @@ func strGmatch(c *Call) error {
 				if ms.err != nil {
 					return ms.err
 				}
-				c.res = ms.captures(c.res[:0], pos, e, true) // the results, built in place
+				res := ms.captures(c.res[:0], pos, e, true) // the results, built in place
 				pos, lastMatch = e, e
-				return ms.err
+				if ms.err != nil {
+					return ms.err // no results with an error
+				}
+				c.res = res
+				return nil
 			}
 			if ms.err != nil {
 				return ms.err
