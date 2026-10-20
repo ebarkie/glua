@@ -1309,8 +1309,7 @@ func (fs *fstate) table(n *syntax.TableExpr) expdesc {
 				fs.setReturns(&last, -1)
 				fs.abc(opSetList, t.info, 0, 0)
 				fs.emit(uint32(narr - pending))
-				fs.freereg = t.info + 1
-				narr-- // the open list's length is unknown
+				fs.freereg = t.info + 1 // the size hint keeps a slot for the open list's first value
 				pending, last = 0, expdesc{}
 			}
 			continue
