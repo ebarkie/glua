@@ -161,6 +161,15 @@ func (c *Call) clearDead() {
 // that goes deep now and then keeps what it grew, rather than paying to grow it again; one
 // deep call long past is given back. The frames follow the stack: every frame takes a slot.
 func (ex *executor) shrink(used int) {
+	// inlined at every VM call: a stack and frames within the pool's bounds never shrink,
+	// so only the counter of a shrink under way needs the full check
+	if len(ex.stack) > maxPoolStack || len(ex.pframes) > maxPoolFrames || ex.quietChecks != 0 {
+		ex.shrinkCheck(used)
+	}
+}
+
+// shrinkCheck is shrink's full check.
+func (ex *executor) shrinkCheck(used int) {
 	need := used + stackSlack
 	n := max(64, 2*need, 2*(ex.st.nf+1))
 	stack := len(ex.stack) > maxPoolStack && len(ex.stack) > 4*need
