@@ -109,8 +109,11 @@ func (ex *executor) callSyncBody(f Value, args []Value, cl *closure, base int) (
 	if cl != nil {
 		slot = max(base+int(cl.p.maxstack), ex.top)
 	}
-	if d := ex.depth - 1; d >= 0 && d < len(ex.calls) {
-		slot = max(slot, ex.calls[d].base+ex.calls[d].nargs) // above the calling Go function's arguments
+	// above the calling Go function's arguments, when that call is on this thread's stack:
+	// the resume or close that runs a coroutine's closers has its arguments on another. A
+	// record of a call that returned, or a depth a Lua run took without one, places nothing
+	if d := ex.depth - 1; d >= ex.thread().depthBase && d < len(ex.calls) {
+		slot = max(slot, ex.calls[d].base+ex.calls[d].nargs)
 	}
 	for hops := 0; ; hops++ {
 		if err := ex.ensure(slot + 1 + len(args) + stackSlack); err != nil {

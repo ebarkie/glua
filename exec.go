@@ -76,24 +76,23 @@ type state struct {
 // one pool per Runtime serves every Script and Rule. It is not the public VM, which is a
 // private environment plus an executor of its own.
 type executor struct {
-	stack   []Value
+	// the running thread's state: the main thread's, or the coroutine's while one runs. The
+	// counters and the frame list are here, where the loop reads them without a hop; the
+	// stack and the side lists stay in the thread, which resume points at
+	st      state
 	pframes []uint64 // pc:32 | delta:24 | flags:8. No pointers, so no write barrier and nothing to scan
-	calls   []*Call  // one record per host-call depth
+	*threadBufs
+	calls   []*Call // one record per host-call depth
 	depth   int
 	slots   []unsafe.Pointer // by type ID: a *T made with new(T), for structs passed by value
 	ctx     context.Context
 	steps   int64                    // budget not yet handed to st.ticks
-	top     int                      // end of an open list of results or arguments, as a stack index
-	nvar    []int32                  // per frame: the number of extra arguments of a vararg function
-	tbc     []int                    // stack indices of active to-be-closed variables, innermost last
-	cont    []int32                  // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
 	strMeta *Table                   // the metatable all strings share; the string library sets it
 	strIdx  *Table                   // strMeta's __index when it is a table and strMeta is frozen, for s:method()
 	goErrs  map[unsafe.Pointer]error // Go errors by the data of their message, so raising it again keeps the chain
 	co      *coroutine               // the running coroutine, nil on the main thread
 	mainCo  *coroutine               // stands for the main thread in coroutine.running
 	nny     int                      // Go calls and nested runs in progress: a yield cannot cross them
-	st      state
 	types   *[]*typeInfo
 	rt      *Runtime // nil for executors the tests make
 
@@ -150,9 +149,12 @@ func (ex *executor) write(s string) error {
 var defaultChecked = false
 
 func newExecutor() *executor {
+	main := &coroutine{main: true, status: coRunning}
+	main.stack = make([]Value, initStack)
 	return &executor{
-		stack:        make([]Value, initStack),
 		pframes:      make([]uint64, 64),
+		threadBufs:   &main.threadBufs,
+		mainCo:       main,
 		maxSteps:     defaultSteps,
 		maxCallDepth: defaultDepth,
 		maxHostDepth: defaultHost,
@@ -207,6 +209,11 @@ func (ex *executor) call(ctx context.Context, cl *closure, fn, nargs int) (err e
 	}()
 	err = ex.run(cl, fn, nargs)
 	completed = true
+	if ex.co != nil || ex.hostCalls != 0 {
+		// a host function recovered a panic that unwound the VM through it: the counters,
+		// and the thread the executor runs on, are whatever the panic left. Never again
+		ex.poisoned = true
+	}
 	if parent != nil {
 		parent.usedSteps.Add(ex.maxSteps - ex.steps - int64(max(ex.st.ticks, 0)))
 		parent.usedAlloc.Add(max(ex.maxAlloc-ex.allocLeft, 0))
@@ -298,15 +305,20 @@ func (ex *executor) ensure(n int) error {
 		ex.moveStack(len(ex.stack))
 		return nil
 	}
-	limit := maxStack
-	if ex.errExtra > 0 {
-		limit += handlerSlots
-	}
+	limit := ex.stackLimit()
 	if n+stackSlack > limit {
 		return ex.errorf("stack overflow")
 	}
 	ex.moveStack(min(max(2*len(ex.stack), n+stackSlack), limit))
 	return nil
+}
+
+// stackLimit is the number of slots a register stack may grow to now.
+func (ex *executor) stackLimit() int {
+	if ex.errExtra > 0 {
+		return maxStack + handlerSlots
+	}
+	return maxStack
 }
 
 // stressMax is the largest stack lua_stackstress moves at every check; past it, moving the

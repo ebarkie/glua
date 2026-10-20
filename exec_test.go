@@ -741,3 +741,282 @@ func TestTailCallGo(t *testing.T) {
 		}
 	}
 }
+
+// The values a yield passes stay on the coroutine's stack until its next resume, and the
+// resumer reads them there: after the stack grew, through nested resumes, and after a yield
+// from inside pcall. The executor is back on the resumer's thread after an error too.
+func TestYieldValuesInPlace(t *testing.T) {
+	src := `
+		local function deep(n) if n == 0 then return coroutine.yield("a", n, "c") end return deep(n - 1) end
+		local co = coroutine.create(function(n) local x, y = deep(n); return x .. y end)
+		local ok, a, b, c = coroutine.resume(co, 3000) -- the stack grows before the yield
+		assert(ok and a == "a" and b == 0 and c == "c", tostring(a))
+		ok, a = coroutine.resume(co, "p", "q")
+		assert(ok and a == "pq", tostring(a))
+		local inner = coroutine.wrap(function() for i = 1, 3 do coroutine.yield(i, i * i) end end)
+		local outer = coroutine.wrap(function()
+			for i = 1, 3 do
+				local v, sq = inner() -- a nested resume, then a yield of what it gave
+				coroutine.yield(v + sq)
+			end
+		end)
+		assert(outer() == 2 and outer() == 6 and outer() == 12)
+		local pc = coroutine.wrap(function() return pcall(coroutine.yield, "in pcall") end)
+		assert(pc() == "in pcall")
+		assert(select("#", pc("r1", "r2")) == 3) -- true, then the resume values
+		local bad = coroutine.wrap(function() error("boom") end)
+		local ok2, err = pcall(bad)
+		assert(not ok2 and err:find("boom"), err)
+		local co2, main = coroutine.running()
+		assert(main and coroutine.status(co2) == "running")
+		return coroutine.wrap(function() coroutine.yield("after") end)()`
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(LibSafe|LibCoroutine, withLoop(checked)), src)
+		if err != nil || len(res) != 1 || res[0].String() != "after" {
+			t.Errorf("checked=%v: %v %v", checked, res, err)
+		}
+	}
+}
+
+// A thread that runs keeps no copy of its counters and frames: they are the executor's. So
+// an entry that resumed a coroutine leaves nothing behind in the main thread's record, and
+// the pooled executor holds no closure of the script.
+func TestRunningThreadKeepsNoState(t *testing.T) {
+	p, _, err := compileChunk("t", `
+		local co = coroutine.create(function() coroutine.yield(1) end)
+		coroutine.resume(co)
+		return coroutine.resume(co)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := newExecutor()
+	ex.strMeta = nil
+	g := testGlobals()
+	g.Set(String("coroutine"), tableValue(coroutineLib()))
+	if _, err := runClosure(context.Background(), ex, &closure{p: p, env: g}); err != nil {
+		t.Fatal(err)
+	}
+	if m := ex.mainCo; m.st.cl != nil || m.pframes != nil || m.st.hi != 0 {
+		t.Errorf("the main thread's record after the entry: %+v", m.st)
+	}
+}
+
+// A resume that fails before the body runs, for want of room for its values, is raised in
+// the resumer and leaves the coroutine suspended where it was, so it can be resumed again
+// and closed.
+func TestResumeWithoutRoomLeavesCoroutine(t *testing.T) {
+	if stackStress {
+		t.Skip("moving a stack of a million slots at every check is slow")
+	}
+	src := `
+		local function deep(n) if n == 0 then return (coroutine.yield("deep")) end return (deep(n - 1)) end
+		local co = coroutine.create(deep)
+		assert(select(2, coroutine.resume(co, 5000)) == "deep") -- its stack holds 5000 frames
+		local big = {} -- values that fit the resumer's stack but not the coroutine's
+		for i = 1, 1045000 do big[i] = i end
+		local ok, err = pcall(coroutine.resume, co, table.unpack(big)) -- line 7
+		assert(not ok and tostring(err):find("stack overflow"), tostring(err))
+		assert(coroutine.status(co) == "suspended", coroutine.status(co))
+		local ok2, v = coroutine.resume(co, "again")
+		assert(ok2 and v == "again", tostring(v))
+		assert(coroutine.status(co) == "dead")
+		return err`
+	rt := MustNew(LibSafe|LibCoroutine, Limits{Steps: NoLimit, AllocBytes: NoLimit})
+	res, err := runInEnv(t, rt, src)
+	if err != nil || len(res) != 1 || !strings.HasPrefix(res[0].String(), "test:7: stack overflow") {
+		t.Errorf("%v %v", res, err) // the position is the resume's, not the coroutine's
+	}
+}
+
+// A panic in a coroutine's host function, recovered at the entry of a nested Script call,
+// ends that entry and discards its executor; the entry that called it goes on, on its own
+// thread, with its stack and the main thread as they were.
+func TestNestedEntryPanicLeavesCallerThread(t *testing.T) {
+	var inner *Script
+	bang := GoFunc(func(c *Call) error { panic("bang") })
+	nested := GoFunc(func(c *Call) error {
+		f, _ := inner.Func0[int64]("go")
+		_, err := f(c.Context())
+		var pe *PanicError
+		if !errors.As(err, &pe) {
+			return c.Errorf("nested: %v", err)
+		}
+		return c.Return(int64(7))
+	})
+	rt := MustNew(LibSafe|LibCoroutine, RecoverPanics(), Global("bang", bang), Global("nested", nested))
+	inner = mustLoad(t, rt, `function go() coroutine.resume(coroutine.create(function() bang() end)); return 1 end`)
+	outer := mustLoad(t, rt, `function work()
+		local t = {}
+		for i = 1, 100 do t[i] = i end
+		local v = nested()
+		local s = 0
+		for i = 1, 100 do s = s + t[i] end
+		local _, main = coroutine.running()
+		return v + s, main
+	end`)
+	work, _ := outer.Func0[Value]("work")
+	for i := range 3 {
+		res, err := work(context.Background())
+		if err != nil || res.String() != "5057" {
+			t.Fatalf("round %d: %v %v", i, res, err)
+		}
+	}
+}
+
+// A coroutine closed after dying in error leaves its stack to the next one, as a body that
+// returned does: a loop of wrapped bodies that fail allocates no stacks after the first.
+func TestCoroutineStacksReusedAfterError(t *testing.T) {
+	if stackStress {
+		t.Skip("lua_stackstress allocates a stack at every check")
+	}
+	s := mustLoad(t, MustNew(LibSafe|LibCoroutine), `local f = function() error("x") end
+		function work(n) for i = 1, n do pcall(coroutine.wrap(f)) end end`)
+	work, _ := s.Func1[int64, struct{}]("work")
+	ctx := context.Background()
+	if _, err := work(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	if _, err := work(ctx, 1000); err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+	if per := (after.TotalAlloc - before.TotalAlloc) / 1000; per > 4<<10 {
+		t.Errorf("%d bytes allocated for each coroutine", per)
+	}
+}
+
+// Values that the coroutine's stack cannot hold are refused before the switch, with the
+// resumer's position, exactly where its first frame would overflow the stack's limit.
+func TestResumeAtStackLimit(t *testing.T) {
+	if stackStress {
+		t.Skip("a stack of a million slots moves slowly")
+	}
+	src := `
+		local co = coroutine.create(function(...) return select("#", ...) end)
+		local big = {}
+		for i = 1, 1048063 do big[i] = i end -- one more slot than the limit allows a first frame
+		local ok, err = pcall(coroutine.resume, co, table.unpack(big)) -- line 5
+		assert(not ok, "resumed")
+		assert(coroutine.status(co) == "suspended", coroutine.status(co))
+		assert(select(2, coroutine.resume(co, 1, 2)) == 2)
+		return err`
+	rt := MustNew(LibSafe|LibCoroutine, Limits{Steps: NoLimit, AllocBytes: NoLimit})
+	res, err := runInEnv(t, rt, src)
+	if err != nil || len(res) != 1 || !strings.HasPrefix(res[0].String(), "test:5: stack overflow") {
+		t.Errorf("%v %v", res, err)
+	}
+}
+
+// The closers of a coroutine run on its own stack, placed by its frames, not above the
+// arguments of the resume or close that runs them, which lie on another thread's stack: a
+// close from deep in the main thread does not grow the coroutine's stack to that depth.
+func TestCloseFromDeepResumer(t *testing.T) {
+	src := `
+		local co = coroutine.create(function()
+			local x <close> = setmetatable({}, {__close = function() end})
+			coroutine.yield()
+		end)
+		coroutine.resume(co)
+		local function deep(n, ...)
+			if n == 0 then return coroutine.close(co) end
+			return (deep(n - 1, ...))
+		end
+		local wide = {}
+		for i = 1, 150 do wide[i] = i end
+		assert(deep(2000, table.unpack(wide)))
+		local never = coroutine.create(function() end)
+		assert(coroutine.close(never))
+		return coroutine.status(co), coroutine.status(never)`
+	rt := MustNew(LibSafe|LibCoroutine, Limits{AllocBytes: 16 << 20})
+	res, err := runInEnv(t, rt, src)
+	if err != nil || len(res) != 2 || res[0].String() != "dead" || res[1].String() != "dead" {
+		t.Errorf("%v %v", res, err)
+	}
+}
+
+// A host function that recovers a panic which unwound the VM through it ends its entry
+// with the executor's counters, and the thread it runs on, as the panic left them: the
+// entry completes, and the executor is never used again. The next entry of the VM runs
+// coroutines on a fresh one.
+func TestHostRecoveredPanicDiscardsExecutor(t *testing.T) {
+	bang := GoFunc(func(c *Call) error { panic("bang") })
+	swallow := GoFunc(func(c *Call) error {
+		defer func() { recover() }()
+		_, err := c.Invoke(c.Value(0))
+		return err
+	})
+	rt := MustNew(LibSafe|LibCoroutine, withLoop(true), Global("bang", bang), Global("swallow", swallow))
+	s := mustLoad(t, rt, `
+		function hit() swallow(function() coroutine.resume(coroutine.create(function() bang() end)) end) end
+		function gen()
+			local s = 0
+			for v in coroutine.wrap(function() for i = 1, 100 do coroutine.yield(i) end end) do s = s + v end
+			return s
+		end`)
+	ctx := context.Background()
+	vm, err := s.NewVM(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hit, _ := vm.Func0[struct{}]("hit")
+	gen, _ := vm.Func0[int64]("gen")
+	for i := range 3 {
+		hit(ctx) // whatever the damaged entry returns
+		if got, err := gen(ctx); err != nil || got != 5050 {
+			t.Fatalf("round %d after a recovered panic: %d, %v", i, got, err)
+		}
+	}
+}
+
+// A closer is placed above the arguments of the Go call it runs under, not above those of
+// a call that returned, whose record may hold a position on another thread's stack.
+func TestCloserPlacementIgnoresReturnedCalls(t *testing.T) {
+	var sizes []int
+	g := GoFunc(func(c *Call) error { return nil })
+	a := GoFunc(func(c *Call) error { _, err := c.Invoke(c.Value(0)); return err })
+	mark := GoFunc(func(c *Call) error { sizes = append(sizes, len(c.ex.stack)); return nil })
+	rt := MustNew(LibSafe|LibCoroutine, Global("g", g), Global("a", a), Global("mark", mark))
+	_, err := runInEnv(t, rt, `
+		local co = coroutine.wrap(function()
+			local function deep(n) if n == 0 then g() coroutine.yield() return end return (deep(n - 1)) end
+			deep(600)
+		end)
+		co() -- g ran 600 frames up the coroutine's stack; its record at that depth stays
+		mark()
+		a(function() pcall(function() local x <close> = setmetatable({}, {__close = function() end}) error("e") end) end)
+		mark()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sizes[1] != sizes[0] {
+		t.Errorf("the main stack grew from %d to %d slots for a closer placed by a returned call", sizes[0], sizes[1])
+	}
+}
+
+// A wrapped coroutine that fails leaves its error value nowhere: the call record that
+// resume wrote it into lets it go when the host call returns.
+func TestWrapFailureKeepsNothing(t *testing.T) {
+	rt := MustNew(LibSafe | LibCoroutine)
+	p, info, err := compileChunk("test", `local big = {}
+		pcall(coroutine.wrap(function() error(big) end))
+		return 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := newMainClosure(p, info, rt.newEnv(newEnvLoader(rt)))
+	ex := rt.pool.Get().(*executor)
+	ex.setLimits(&rt.run)
+	if _, err := runClosure(context.Background(), ex, cl); err != nil {
+		t.Fatal(err)
+	}
+	for d, c := range ex.calls {
+		for i, v := range c.res[:cap(c.res)] {
+			if !v.IsNil() {
+				t.Errorf("call record %d holds %v at %d after the entry", d, v, i)
+			}
+		}
+	}
+	release(&rt.pool, ex)
+}
