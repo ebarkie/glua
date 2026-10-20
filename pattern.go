@@ -27,6 +27,7 @@ type matchState struct {
 	ticks   int
 	c       *Call
 	err     error
+	caps    []Value // gsub's captures for a function, reused from match to match
 }
 
 // fail records the first error; matching then unwinds.
@@ -457,16 +458,15 @@ func (ms *matchState) getCapture(i, s, e int) Value {
 	return subString(String(ms.src), c.init, c.init+c.len)
 }
 
-// captures returns the captures of a match from s to e, or the whole match when there are
-// none and whole is set.
-func (ms *matchState) captures(s, e int, whole bool) []Value {
+// captures appends the captures of a match from s to e to dst, or the whole match when
+// there are none and whole is set.
+func (ms *matchState) captures(dst []Value, s, e int, whole bool) []Value {
 	n := ms.level
 	if n == 0 && whole {
 		n = 1
 	}
-	vals := make([]Value, n)
 	for i := range n {
-		vals[i] = ms.getCapture(i, s, e)
+		dst = append(dst, ms.getCapture(i, s, e))
 	}
-	return vals
+	return dst
 }
