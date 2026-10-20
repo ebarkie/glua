@@ -238,14 +238,12 @@ func strFindAux(c *Call, find bool) error {
 			if ms.err != nil {
 				return ms.err
 			}
-			caps := ms.captures(s1, e, !find)
-			if ms.err != nil {
-				return ms.err
-			}
+			res := c.res[:0]
 			if find {
-				return c.ReturnValues(append([]Value{Int(int64(s1 + 1)), Int(int64(e))}, caps...)...)
+				res = append(res, Int(int64(s1+1)), Int(int64(e)))
 			}
-			return c.ReturnValues(caps...)
+			c.res = ms.captures(res, s1, e, !find)
+			return ms.err
 		}
 		if ms.err != nil {
 			return ms.err
@@ -284,12 +282,9 @@ func strGmatch(c *Call) error {
 				if ms.err != nil {
 					return ms.err
 				}
-				caps := ms.captures(pos, e, true)
+				c.res = ms.captures(c.res[:0], pos, e, true) // the results, built in place
 				pos, lastMatch = e, e
-				if ms.err != nil {
-					return ms.err
-				}
-				return c.ReturnValues(caps...)
+				return ms.err
 			}
 			if ms.err != nil {
 				return ms.err
@@ -422,12 +417,12 @@ func addValue(c *Call, ms *matchState, b *strings.Builder, charge *building, s, 
 			return false, err
 		}
 	default:
-		caps := ms.captures(s, e, true)
+		ms.caps = ms.captures(ms.caps[:0], s, e, true)
 		if ms.err != nil {
 			return false, ms.err
 		}
 		var err error
-		if v, err = c.call1(repl, caps...); err != nil {
+		if v, err = c.call1(repl, ms.caps...); err != nil {
 			return false, err
 		}
 	}
