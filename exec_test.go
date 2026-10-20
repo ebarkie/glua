@@ -1020,3 +1020,72 @@ func TestWrapFailureKeepsNothing(t *testing.T) {
 	}
 	release(&rt.pool, ex)
 }
+
+// The remainder of floats with whole values, as code written for Lua 5.1 takes bits, is
+// computed as integers, inline and in the driver: the same as fmod gives, sign of a zero
+// included; values that are not whole, or too large, still go the long way.
+func TestFloatModWhole(t *testing.T) {
+	src := `
+		local function same(a, b) return a == b and (a ~= 0 or 1 / a == 1 / b) end
+		local K = 3.0
+		local cases = {
+			{ 7.0, 3.0, 1.0 }, { -7.0, 3.0, 2.0 }, { 7.0, -3.0, -2.0 }, { -7.0, -3.0, -1.0 },
+			{ 6.0, 3.0, 0.0 }, { -6.0, 3.0, -0.0 }, { 6.0, -3.0, 0.0 }, { -0.0, 3.0, -0.0 }, { 0.0, -3.0, 0.0 },
+			{ 7, 3.0, 1.0 }, { 7.0, 3, 1.0 }, { -6, 3.0, -0.0 }, { -5, -1.0, -0.0 }, { 6, -3.0, 0.0 }, { -7, 3.0, 2.0 },
+			{ 5.5, 2.0, 1.5 }, { 7.0, 2.5, 2.0 }, { 2^53, 3.0, 2.0 }, { 2^60, 7.0, 1.0 }, { 16777216.0 * 65536, 256.0, 0.0 },
+			{ 1e300, 7.0, 1.0 }, -- the last three go the long way, with the values C Lua gives
+		}
+		for i, c in ipairs(cases) do
+			local x, y, want = c[1], c[2], c[3]
+			local got = x % y
+			assert(same(got, want), i .. ": " .. tostring(x) .. " % " .. tostring(y) .. " = " .. tostring(got))
+			assert(math.type(got) == "float", i)
+		end
+		local x = 7.0
+		assert(same(x % 3.0, 1.0) and same(-x % 3.0, 2.0) and same((x - 13) % 3.0, -0.0)) -- the constant form, MODK
+		assert(same(K % 3, 0.0) and same(-K % 3, -0.0)) -- a float register with an integer constant
+		local nan = 7.0 % 0.0
+		assert(nan ~= nan)
+		local bitbuf, room = 0, 1 -- a bit buffer as inflate keeps one, in floats
+		for i = 1, 20 do bitbuf, room = bitbuf + (i % 256) * room, room * 256 end
+		local v = 0
+		for _ = 1, 50 do local p = 2 ^ 5; local r = bitbuf % p; v = v * 2 + r; bitbuf = (bitbuf - r) / p end
+		return v`
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(withLoop(checked)), src)
+		if err != nil || len(res) != 1 {
+			t.Fatalf("checked=%v: %v %v", checked, res, err)
+		}
+		if f, _ := res[0].Float(); f != 5181448545894400 { // as C Lua computes it
+			t.Errorf("checked=%v: bit buffer gave %v", checked, res[0])
+		}
+	}
+}
+
+// A float key with a whole value finds the integer key it normalises to, inline, in the
+// array part and in the hash part; one without, or past the integers, goes the long way.
+func TestFloatKeysInline(t *testing.T) {
+	src := `
+		local t = { 10, 20, 30, [0] = 5, [-1] = -5, [100] = 1000, [0.5] = "half", [2^53] = "big", [2^63] = "huge" }
+		assert(t[1.0] == 10 and t[3.0] == 30 and t[0.0] == 5 and t[-0.0] == 5 and t[-1.0] == -5 and t[100.0] == 1000)
+		assert(t[0.5] == "half" and t[2^53] == "big" and t[2^63] == "huge" and t[4.0] == nil and t[1e300] == nil)
+		local nan = 0 / 0
+		assert(t[nan] == nil)
+		t[2.0] = 22
+		t[0.0] = 55
+		t[100.0] = 1001
+		t[4.0] = 40 -- an append, as t[4] is
+		assert(t[2] == 22 and t[0] == 55 and t[100] == 1001 and t[4] == 40 and #t == 4)
+		local w = {}
+		for k = 1, 10 do w[k + 0.0] = k * k end
+		local s = 0
+		for k = 1, 10 do s = s + w[k] end
+		assert(s == 385 and #w == 10)
+		return "ok"`
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(withLoop(checked)), src)
+		if err != nil || len(res) != 1 || res[0].String() != "ok" {
+			t.Errorf("checked=%v: %v %v", checked, res, err)
+		}
+	}
+}

@@ -113,6 +113,15 @@ func floatMod(x, y float64) float64 {
 	if y == 0 || math.IsInf(x, 0) || x != x || y != y {
 		return (x * y) / (x * y)
 	}
+	// whole numbers below 2^53, as code written before Lua had integers takes bits: exact
+	// as integers, where math.Mod loops over the bits of the quotient
+	if a, b := int64(x), int64(y); float64(a) == x && float64(b) == y && x < 0x1p53 && x > -0x1p53 && y < 0x1p53 && y > -0x1p53 {
+		m := intMod(a, b)
+		if m == 0 {
+			return math.Copysign(0, x) // as fmod: a zero remainder keeps the dividend's sign
+		}
+		return float64(m)
+	}
 	m := math.Mod(x, y)
 	if (m > 0 && y < 0) || (m < 0 && y != m && y > 0) {
 		m += y
