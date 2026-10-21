@@ -1,6 +1,7 @@
 package glua
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -59,5 +60,145 @@ func TestStringFormat(t *testing.T) {
 		if got := res[i].String(); got != c.want {
 			t.Errorf("string.format(%q, %s) = %q, want %q", c.spec, c.arg, got, c.want)
 		}
+	}
+}
+
+// A scan for a match skips to the bytes its first item can take (pattern.go's firstSet),
+// with the results C Lua gives: for the first items that take a byte, those that may take
+// none or any, and the anchors, captures, balances, frontiers and back-references that are
+// left to the matcher. Malformed patterns still raise, and the bytes passed over are
+// charged as steps.
+func TestPatternFirstSet(t *testing.T) {
+	src := `
+		local out = {}
+		local function r(...)
+			local t = table.pack(...)
+			for i = 1, t.n do t[i] = tostring(t[i]) end
+			out[#out + 1] = table.concat(t, ",", 1, t.n)
+		end
+		r(("hello world"):find("o")) -- one byte: memchr
+		r(("hello world"):find("o", 6))
+		r(("hello world"):find("o", 12))
+		r(("abc"):find("d"))
+		r((""):find("a"))
+		r(("a1b22c333"):gsub("%d+", "#")) -- a class
+		r(("x1y2"):gsub("%d", { ["1"] = "one" })) -- the run between matches is copied once
+		r(("a\0b"):gsub("%z", "Z"))
+		r(("abc"):find("[^a]")) -- a set
+		r(("ab-c]d"):find("[%]-]"))
+		r(("aaa"):gsub("a", "b", 2)) -- the limit
+		r(("abc"):gsub("x*", "-")) -- may take no byte: every position
+		r(("abc"):gsub("(x?)", "-"))
+		r(("abc"):gsub("x-", "-"))
+		r(("ab"):find("()b")) -- a position capture, then b
+		r(("abab"):gsub("(ab)%1", "X")) -- a capture's first item
+		r(("xaby"):find("((a)b)"))
+		r(("foo(bar)"):find("%b()"))
+		r(("THE (quick) fox"):find("%f[%a]%a+"))
+		r(("a$b"):find("%$"))
+		r(("ab"):find("$"))
+		r(("ab"):gsub("$", "!"))
+		r(("a$b"):find("$b"))
+		r(("a^b"):find("^b"))
+		r(("a^b"):find("b^"))
+		r(("a.b"):find("%."))
+		r(("abc"):find("."))
+		local w = {}
+		for n in ("1/100 101 2/200"):gmatch("%d+") do w[#w + 1] = n end
+		r(table.concat(w, " "))
+		local c = 0
+		for _ in ("a^b^c"):gmatch("^.") do c = c + 1 end -- '^' is a literal in gmatch
+		r(c)
+		c = 0
+		for _ in ("aaa"):gmatch("a*") do c = c + 1 end -- not the empty match right after
+		r(c)
+		r(pcall(string.find, "abc", "[a"))
+		r(pcall(string.find, "abc", "a%"))
+		r(pcall(string.gsub, "abc", "[", ""))
+		local ok, err = pcall(function() for _ in ("abc"):gmatch("[a") do end end) -- raised by the iterator
+		r(ok, err:match("malformed.*$"))
+		for i = 0, 99 do -- past the cache's size, with and without a set
+			local p = string.char(97 + i % 26) .. (i % 2 == 0 and "%d" or "")
+			if ("q7"):find(p) ~= (i % 26 == 16 and 1 or nil) then error(p) end
+		end
+		r(#out)
+		r((("a"):rep(400)):find(("a"):rep(300))) -- too long for the cache
+		return table.concat(out, "|")`
+	want := []string{
+		"5,5", "8,8", "nil", "nil", "nil",
+		"a#b#c#,3", "xoney2,2", "aZb,1",
+		"2,2", "3,3",
+		"bba,2",
+		"-a-b-c-,4", "-a-b-c-,4", "-a-b-c-,4",
+		"2,2,2", "X,1", "2,3,ab,a",
+		"4,8", "1,3",
+		"2,2", "3,2", "ab!,1", "2,3", "nil", "nil", "2,2", "1,1",
+		"1 100 101 2 200", "2", "1",
+		"false,malformed pattern (missing ']')",
+		"false,malformed pattern (ends with '%')",
+		"false,malformed pattern (missing ']')",
+		"false,malformed pattern (missing ']')",
+		"34", "1,300",
+	}
+	for _, checked := range []bool{true, false} {
+		res, err := runInEnv(t, MustNew(withLoop(checked)), src)
+		if err != nil || len(res) != 1 {
+			t.Fatalf("checked=%v: %v %v", checked, res, err)
+		}
+		got := strings.Split(res[0].String(), "|")
+		for i := range max(len(got), len(want)) {
+			var g, w string
+			if i < len(got) {
+				g = got[i]
+			}
+			if i < len(want) {
+				w = want[i]
+			}
+			if g != w {
+				t.Errorf("checked=%v: case %d: got %q, want %q", checked, i, g, w)
+			}
+		}
+	}
+	// the bytes skipped are charged, found or not: a megabyte scanned is 16K steps, over
+	// the 7K left after the subject is made
+	for _, src := range []string{
+		`return (("x"):rep(1 << 20)):match("[yz]")`,
+		`return (("x"):rep(1 << 20)):match("y")`,
+		`return (("x"):rep(1 << 20) .. "y"):match("[yz]")`,
+		`return (("x"):rep(1 << 20)):gsub("[yz]", "")`,
+		`for _ in (("x"):rep(1 << 20)):gmatch("%d") do end`,
+	} {
+		_, err := runInEnv(t, MustNew(Limits{Steps: 40_000, AllocBytes: NoLimit}), src)
+		if !errors.Is(err, ErrSteps) {
+			t.Errorf("%s: %v, want the step limit", src, err)
+		}
+	}
+	if _, err := runInEnv(t, MustNew(Limits{Steps: 40_000, AllocBytes: NoLimit}), `return #(("x"):rep(1 << 20))`); err != nil {
+		t.Errorf("the subject alone: %v", err) // so the scans above were what ran out
+	}
+	// building a set is charged too, and a long set is left to the matcher
+	_, err := runInEnv(t, MustNew(Limits{Steps: 2_000, AllocBytes: NoLimit}),
+		`local p = "[" .. ("a"):rep(1 << 16) .. "]" for i = 1, 200 do ("x"):find(p) end`)
+	if !errors.Is(err, ErrSteps) {
+		t.Errorf("a long set: %v, want the step limit", err)
+	}
+	_, err = runInEnv(t, MustNew(Limits{Steps: 2_000, AllocBytes: NoLimit}),
+		`for i = 1, 100 do ("x"):find("[" .. ("a"):rep(i % 30 + 1) .. "]") end`)
+	if !errors.Is(err, ErrSteps) {
+		t.Errorf("sets built each call: %v, want the step limit", err)
+	}
+	// the matcher's errors before the first item are not lost
+	res, err := runInEnv(t, MustNew(), `return pcall(string.find, "xyz", ("("):rep(33) .. "a")`)
+	if err != nil || len(res) != 2 || res[0].Truthy() || !strings.Contains(res[1].String(), "too many captures") {
+		t.Errorf("33 captures: %v %v", res, err)
+	}
+	// an iterator the budget stopped mid-scan can be called again by a closer
+	_, err = runInEnv(t, MustNew(Limits{Steps: 40_000, AllocBytes: NoLimit}), `
+		local s = ("x"):rep(1 << 20) .. "y"
+		local it = s:gmatch("yq")
+		local t <close> = setmetatable({}, { __close = function() pcall(it) end })
+		return it()`)
+	if !errors.Is(err, ErrSteps) {
+		t.Errorf("gmatch stopped by the budget: %v, want the step limit", err)
 	}
 }

@@ -229,10 +229,20 @@ func strFindAux(c *Call, find bool) error {
 	ms := &matchState{src: s, pat: p, c: c}
 	anchor := len(p) > 0 && p[0] == '^'
 	pi := 0
+	var fs *firstSet
 	if anchor {
 		pi = 1
+	} else if fs = ms.firstSet(); ms.err != nil {
+		return ms.err
 	}
 	for s1 := start; ; s1++ {
+		if fs != nil {
+			next := ms.skip(fs, s1)
+			if next < 0 {
+				break
+			}
+			s1 = next
+		}
 		ms.level, ms.depth = 0, 0
 		if e := ms.match(s1, pi); e != -1 {
 			if ms.err != nil {
@@ -255,6 +265,9 @@ func strFindAux(c *Call, find bool) error {
 			break
 		}
 	}
+	if ms.err != nil {
+		return ms.err
+	}
 	return c.ReturnValues(Value{})
 }
 
@@ -276,10 +289,26 @@ func strGmatch(c *Call) error {
 		pos = len(s) + 1
 	}
 	lastMatch := -1
+	ms := &matchState{src: s, pat: p, c: c}
+	fs := ms.firstSet() // nil for a '^', a literal in gmatch
+	if ms.err != nil {
+		return ms.err
+	}
 	it := &goFunc{name: "gmatch iterator", stateful: true}
 	it.f = func(c *Call) error {
 		ms := &matchState{src: s, pat: p, c: c}
 		for ; pos <= len(s); pos++ {
+			if fs != nil {
+				next := ms.skip(fs, pos)
+				if next < 0 {
+					if ms.err != nil {
+						return ms.err // pos stays: a closer that calls the iterator again finds it sound
+					}
+					pos = len(s) + 1
+					break
+				}
+				pos = next
+			}
 			ms.level, ms.depth = 0, 0
 			if e := ms.match(pos, 0); e != -1 && e != lastMatch {
 				if ms.err != nil {
@@ -327,10 +356,27 @@ func strGsub(c *Call) error {
 		pi = 1
 	}
 	ms := &matchState{src: src, pat: p, c: c}
+	var fs *firstSet
+	if !anchor {
+		if fs = ms.firstSet(); ms.err != nil {
+			return ms.err
+		}
+	}
 	var b strings.Builder
 	charge := building{c: c}
 	s, n, lastMatch, changed := 0, int64(0), -1, false
 	for n < maxN {
+		if fs != nil { // copy the bytes no match can begin at in one piece
+			next := ms.skip(fs, s)
+			if ms.err != nil {
+				return ms.err
+			}
+			if next < 0 {
+				goto done
+			}
+			b.WriteString(src[s:next])
+			s = next
+		}
 		ms.level, ms.depth = 0, 0
 		e := ms.match(s, pi)
 		if ms.err != nil {
