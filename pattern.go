@@ -1,5 +1,7 @@
 package glua
 
+import "strings"
+
 // Lua patterns, ported from C Lua 5.4's lstrlib.c: a direct interpreter over the pattern
 // text, with no compile step. Backtracking, scanning sets and comparing back-references
 // charge steps, and recursion is capped at 200 levels ("pattern too complex").
@@ -99,31 +101,40 @@ func (ms *matchState) classEnd(p int) int {
 		return p + 1
 	}
 	if c == '[' {
-		start := p
-		if p < len(pat) && pat[p] == '^' {
-			p++
+		end := setEnd(pat, p)
+		if end < 0 {
+			return ms.fail("malformed pattern (missing ']')")
 		}
-		for { // look for a ']'
-			if p >= len(pat) {
-				return ms.fail("malformed pattern (missing ']')")
-			}
-			cc := pat[p]
-			p++
-			if cc == luaEsc && p < len(pat) {
-				p++ // skip escapes, such as '%]'
-			}
-			if p < len(pat) && pat[p] == ']' {
-				if !ms.work(p - start) {
-					return -1
-				}
-				return p + 1
-			}
-			if p >= len(pat) {
-				return ms.fail("malformed pattern (missing ']')")
-			}
+		if !ms.work(end - p - 1) { // the set's length
+			return -1
 		}
+		return end
 	}
 	return p
+}
+
+// setEnd returns the index just past the ']' of the set whose '[' is at p-1 of pat, or -1
+// when none closes it.
+func setEnd(pat string, p int) int {
+	if p < len(pat) && pat[p] == '^' {
+		p++
+	}
+	for { // look for a ']'
+		if p >= len(pat) {
+			return -1
+		}
+		cc := pat[p]
+		p++
+		if cc == luaEsc && p < len(pat) {
+			p++ // skip escapes, such as '%]'
+		}
+		if p < len(pat) && pat[p] == ']' {
+			return p + 1
+		}
+		if p >= len(pat) {
+			return -1
+		}
+	}
 }
 
 func isAlpha(c byte) bool  { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
@@ -207,7 +218,11 @@ func (ms *matchState) singleMatch(s, p, ep int) bool {
 	if s >= len(ms.src) {
 		return false
 	}
-	c := ms.src[s]
+	return ms.matchByte(ms.src[s], p, ep)
+}
+
+// matchByte reports whether the byte c matches the class from p to ep.
+func (ms *matchState) matchByte(c byte, p, ep int) bool {
 	switch ms.pat[p] {
 	case '.':
 		return true
@@ -469,4 +484,131 @@ func (ms *matchState) captures(dst []Value, s, e int, whole bool) []Value {
 		dst = append(dst, ms.getCapture(i, s, e))
 	}
 	return dst
+}
+
+// firstSet is the bytes a match of an unanchored pattern can begin with, when its first
+// item must take one: a literal, a class or a set, not followed by a quantifier that
+// accepts none. A scan for a match skips the bytes outside it without entering the matcher,
+// as most of a text is outside it: find, gsub and gmatch then look at each byte of the
+// subject once, and the matcher sees only the bytes a match could start at.
+type firstSet struct {
+	one int // the one byte of the set, searched for as memchr does, or -1
+	set [256]bool
+}
+
+// maxCachedPattern is the longest pattern whose first set is kept in the executor's cache,
+// and maxFirstItem the longest first item a set is built for: the build tests 256 bytes
+// against the item, and a long set is left to the matcher.
+const (
+	maxCachedPattern = 256
+	maxFirstItem     = 64
+)
+
+// firstSet returns the set for ms's pattern, or nil when its first item may match nothing
+// or anything, or is not a single class, or on an error of the budget, which is in ms.err.
+// The sets are cached by pattern in the executor, as a set's 256 tests cost more than a
+// short subject's scan; the cache is cleared when it fills with patterns built at run
+// time, and long patterns are not kept.
+func (ms *matchState) firstSet() *firstSet {
+	ex := ms.c.ex
+	if fs, ok := ex.firstSets[ms.pat]; ok {
+		return fs
+	}
+	fs := ms.buildFirstSet()
+	if ms.err != nil || len(ms.pat) > maxCachedPattern {
+		return fs
+	}
+	if ex.firstSets == nil {
+		ex.firstSets = make(map[string]*firstSet)
+	} else if len(ex.firstSets) >= 64 {
+		clear(ex.firstSets)
+	}
+	ex.firstSets[strings.Clone(ms.pat)] = fs // its own bytes: the pattern may be part of a large string
+	return fs
+}
+
+// buildFirstSet reads the first item of the pattern and tests every byte against it,
+// charging the tests as the matcher charges a scan of the item. A malformed pattern, or
+// one the matcher fails on before its first item, gives no set, and the matcher reports it.
+func (ms *matchState) buildFirstSet() *firstSet {
+	pat := ms.pat
+	p := 0
+	for p < len(pat) && pat[p] == '(' && !(p+1 < len(pat) && pat[p+1] == ')') {
+		p++ // a capture begins with its first item; a position capture takes no byte
+	}
+	if p >= len(pat) || p > maxCaptures { // past maxCaptures the matcher fails: "too many captures"
+		return nil
+	}
+	var ep int
+	switch pat[p] {
+	case '^', '.', '(', ')':
+		return nil // a literal '^' here would be one, but is left to the matcher
+	case '$':
+		if p+1 == len(pat) {
+			return nil // the end anchor takes no byte
+		}
+		ep = p + 1
+	case luaEsc:
+		if p+1 >= len(pat) {
+			return nil
+		}
+		if c := pat[p+1]; c == 'b' || c == 'f' || c >= '0' && c <= '9' {
+			return nil // a balance, a frontier or a back-reference
+		}
+		ep = p + 2
+	case '[':
+		if ep = setEnd(pat, p+1); ep < 0 || ep-p > maxFirstItem {
+			return nil
+		}
+	default:
+		ep = p + 1
+	}
+	if ep < len(pat) && (pat[ep] == '*' || pat[ep] == '?' || pat[ep] == '-') {
+		return nil // may take no byte
+	}
+	if !ms.work(256 * (ep - p)) {
+		return nil
+	}
+	fs := &firstSet{one: -1}
+	n := 0
+	for c := range 256 {
+		if ms.matchByte(byte(c), p, ep) {
+			fs.set[c] = true
+			n, fs.one = n+1, c
+		}
+	}
+	if n > 1 {
+		fs.one = -1
+	}
+	return fs
+}
+
+// next returns the first position at or after s where a match can begin, or -1.
+func (fs *firstSet) next(src string, s int) int {
+	if fs.one >= 0 {
+		if i := strings.IndexByte(src[s:], byte(fs.one)); i >= 0 {
+			return s + i
+		}
+		return -1
+	}
+	for ; s < len(src); s++ {
+		if fs.set[src[s]] {
+			return s
+		}
+	}
+	return -1
+}
+
+// skip returns the next position at or after s a match can begin at, charging for the
+// bytes passed over, or -1 when there is none, or the budget is spent (ms.err).
+func (ms *matchState) skip(fs *firstSet, s int) int {
+	n := fs.next(ms.src, s)
+	if n < 0 {
+		ms.work(len(ms.src) - s) // the whole rest was scanned
+		return -1
+	}
+	if n > s && !ms.work(n-s) {
+		return -1
+	}
+	return n
 }

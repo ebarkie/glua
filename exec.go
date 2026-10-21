@@ -134,6 +134,8 @@ type executor struct {
 	nextAt int // the node index of the key the last inline next returned, for the next step
 
 	coStacks []coStack // stacks of coroutines that returned in this entry, for the next ones
+
+	firstSets map[string]*firstSet // the bytes a pattern's matches can begin with, by pattern
 }
 
 // write sends text from print or warn to the output.
@@ -282,6 +284,9 @@ func (ex *executor) reset() {
 	if len(ex.coStacks) > 0 { // kept for the entry, not between entries
 		clear(ex.coStacks)
 		ex.coStacks = ex.coStacks[:0]
+	}
+	if len(ex.firstSets) > 0 { // the patterns of one script are not kept for the next
+		clear(ex.firstSets)
 	}
 }
 
