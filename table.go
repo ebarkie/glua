@@ -4,7 +4,6 @@ import (
 	"iter"
 	"math"
 	"math/bits"
-	"strings"
 	"unsafe"
 )
 
@@ -162,7 +161,7 @@ func (t *Table) getSlot(key Value) (Value, int) {
 }
 
 // Set assigns t[key] = val without metamethods. It panics if t is frozen, or if key is nil or NaN.
-// A short string key that is a name gets the pointer the constants of loaded scripts share,
+// A new string key that is a name gets the pointer the constants of loaded scripts share,
 // so that Lua code finds it inline. A table built before the scripts that read it are
 // loaded is found inline once frozen with Freeze; otherwise its keys are found by
 // comparing strings, which is correct but slower.
@@ -177,12 +176,12 @@ func (t *Table) Set(key, val Value) {
 		}
 		panic("glua: table index is NaN")
 	}
-	t.set(canonKey(key), val)
+	t.set(key, val)
 }
 
 // set assigns t[key] = val for a normalised key.
 func (t *Table) set(key, val Value) {
-	if (t.flags&tabAbsent != 0 || t.index != nil || t.metaOK) && key.isString() && strings.HasPrefix(key.str(), "__") {
+	if (t.flags&tabAbsent != 0 || t.index != nil || t.metaOK) && key.isString() && isMetaName(&key) {
 		t.flags &^= tabAbsent // a metamethod may have appeared
 		t.index, t.metaOK = nil, false
 	}
@@ -217,14 +216,37 @@ func (t *Table) set(key, val Value) {
 	if val.IsNil() {
 		return
 	}
-	if (t.used+1)*4 > len(t.nodes)*3 {
+	if t.full() {
 		if t.resize(key) {
 			t.set(key, val) // the key may belong in the array part now
 			return
 		}
 	}
-	t.insert(key, val, h)
+	t.insertNew(key, val, h)
 }
+
+// isMetaName reports whether a string key starts with "__", as the metamethod names do. A
+// raw write of such a key clears the table's metamethod caches, in set.
+func isMetaName(key *Value) bool { return key.n&lenMask >= 2 && *(*uint16)(key.p) == 0x5f5f }
+
+// full reports whether the hash part has no room for another key at its load factor of 3/4.
+func (t *Table) full() bool { return (t.used+1)*4 > len(t.nodes)*3 }
+
+// tryInsert adds key, which the table does not have, with the value val, when no resize is
+// due, and returns its node index, else -1. h is the key's hash.
+func (t *Table) tryInsert(key, val Value, h uint64) int {
+	if t.full() {
+		return -1
+	}
+	return t.insertNew(key, val, h)
+}
+
+// insertNew adds a key the table does not have; the caller has made room. A string key
+// takes the pointer of the constant that names it, if a loaded script has one, so that the
+// loop's pointer compares find it: a key a script built at run time, by capture,
+// concatenation or sub, is read at constant sites as often as one written by a constant.
+// The lookup costs about as much as the probe that found the key absent.
+func (t *Table) insertNew(key, val Value, h uint64) int { return t.insert(canonKey(key), val, h) }
 
 // resize makes room for the new key k, as C Lua's rehash does: it counts the integer keys,
 // k included, and gives the array part the largest size n that keys 1..n fill more than

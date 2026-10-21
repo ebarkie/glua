@@ -588,13 +588,15 @@ func isName(s string) bool {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !(c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || i > 0 && '0' <= c && c <= '9') {
+		if c := s[i]; !(isNameStart(c) || i > 0 && '0' <= c && c <= '9') {
 			return false
 		}
 	}
 	return true
 }
+
+// isNameStart reports whether c can begin a name: a letter or an underscore.
+func isNameStart(c byte) bool { return c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
 
 // hostValue converts a value given to Global or Module. Functions must be GoFuncs: a bare
 // Go function needs an explicit adapter. qual is the name messages give a function from a

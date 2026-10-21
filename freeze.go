@@ -322,13 +322,17 @@ func keepName(s string, h unique.Handle[string]) {
 	}
 }
 
-// canonKey returns k with its canonical pointer, for a key Go code puts in a table: Table.Set,
-// or a Go map converted. A name that some script uses is in the registry; one that no script
-// uses needs no canonical pointer, and is not added, so that a host making tables with endless
+// canonKey returns k with its canonical pointer, for a new key of a table: one Go code puts
+// in with Table.Set or a Go map converted, or one a script builds at run time and inserts.
+// A name that some script uses is in the registry; one that no script uses needs no
+// canonical pointer, and is not added, so that a host or a script making tables with endless
 // distinct keys, such as IDs, leaves no names behind.
 func canonKey(k Value) Value {
 	if !k.isString() || k.n&lenMask > maxInternedSz {
 		return k
+	}
+	if !isNameStart(*(*byte)(k.p)) {
+		return k // not a name, so never in the registry: an ID, a path or a number
 	}
 	if h, ok := interned.Load(k.str()); ok {
 		return String(h.(unique.Handle[string]).Value())
