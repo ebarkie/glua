@@ -489,8 +489,9 @@ func debugTraceback(c *Call) error {
 		lines = append(lines, "[C]: in function 'coroutine.yield'")
 		lines = threadLines(lines, &co.st, co.pframes, co.stack)
 	case co.status == coNormal:
-		ts := &co.waiting
-		lines = append(lines, "[C]: in "+waitingIn(ts)) // resume, or a coroutine.wrap function
+		ts := &co.threadState // its state waits in it, in resume
+		// resume, or a coroutine.wrap function
+		lines = append(lines, "[C]: in "+waitingIn(ts))
 		lines = threadLines(lines, &ts.st, ts.pframes, ts.stack)
 		goBelow = co.main
 	case co.status == coDead && co.errVal != nil && co.stack != nil:

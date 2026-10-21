@@ -6,8 +6,8 @@ import (
 	"unsafe"
 )
 
-// A coroutine is a second register stack and frame list, not a goroutine. resume swaps the
-// executor's per-thread state with the coroutine's and drives it; yield returns errYield,
+// A coroutine is a second register stack and frame list, not a goroutine. resume points the
+// executor at the coroutine's per-thread state and drives it; yield returns errYield,
 // which the driver passes up to resume, leaving the coroutine's frames in place. A yield may
 // cross pcall, metamethods, iterators and __close, which are VM frames, but not a Go
 // function: that would need the Go stack to be suspended.
@@ -23,15 +23,61 @@ const (
 
 var coStatusNames = [...]string{"suspended", "running", "normal", "dead"}
 
-// threadState is everything that belongs to one thread of execution.
+// threadState is everything that belongs to one thread of execution. While the thread runs,
+// the executor holds its counters and frame list, and they are zero here; it points at the
+// threadBufs, which stay in place. While the thread waits in resume, or is suspended, all of
+// it is here, where tracebacks and the live walk read it.
 type threadState struct {
-	stack   []Value
-	pframes []uint64
-	nvar    []int32
-	cont    []int32
-	tbc     []int
+	threadBufs
 	st      state
-	top     int
+	pframes []uint64 // pc:32 | delta:24 | flags:8. No pointers, so no write barrier and nothing to scan
+}
+
+// threadBufs is the part of a thread's state that the executor reaches through a pointer:
+// the loop reads the stack once per run, and the driver takes the hop.
+type threadBufs struct {
+	stack []Value
+	nvar  []int32 // per frame: the number of extra arguments of a vararg function
+	cont  []int32 // per frame: what a continuation frame needs to resume, such as CONCAT's operand count
+	tbc   []int   // stack indices of active to-be-closed variables, innermost last
+	top   int     // end of an open list of results or arguments, as a stack index
+}
+
+// thread returns the running thread: the coroutine, or the main thread's stand-in.
+func (ex *executor) thread() *coroutine {
+	if ex.co != nil {
+		return ex.co
+	}
+	return ex.mainCo
+}
+
+// swap moves the executor from thread from, which keeps its counters and frame list, to
+// thread to, whose own copy is zeroed: the running thread's state is the executor's alone,
+// so no stale state outlives a switch. The step budget belongs to the entry: it goes with
+// the executor.
+func (ex *executor) swap(from, to *coroutine) {
+	ticks := ex.st.ticks
+	from.st, from.pframes = ex.st, ex.pframes
+	ex.st, ex.pframes, ex.threadBufs = to.st, to.pframes, &to.threadBufs
+	ex.st.ticks = ticks
+	to.st, to.pframes = state{}, nil
+}
+
+// switchTo makes co the running thread in place of prev, which then waits in resume.
+func (ex *executor) switchTo(prev, co *coroutine) {
+	ex.swap(prev, co)
+	prev.status, co.status = coNormal, coRunning
+	co.depthBase = ex.depth
+	ex.co = co
+}
+
+// switchBack returns to prev from co, which yielded, returned or failed and has its status set.
+func (ex *executor) switchBack(co, prev *coroutine) {
+	ex.swap(co, prev)
+	prev.status = coRunning
+	if ex.co = prev; prev == ex.mainCo {
+		ex.co = nil // the main thread runs as no coroutine
+	}
 }
 
 type coroutine struct {
@@ -40,14 +86,15 @@ type coroutine struct {
 	status  coStatus
 	main    bool // stands for the main thread in coroutine.running
 	started bool
-	errVal  *Error      // set when the body died in error, for close
-	waiting threadState // while it is normal: its state, waiting in resume, for debug.traceback
+	errVal  *Error // set when the body died in error, for close
 
 	nnyBase   int       // ex.nny when resumed: a yield must come from exactly one Go call above it
+	depthBase int       // ex.depth when resumed: the Go calls below it are on other threads' stacks
 	yieldFn   int       // stack index where a pending yield's results go
 	yieldKind yieldKind // how to deliver them
-	yielded   []Value
-	yieldBuf  []Value // backs yielded, reused from yield to yield
+	// the values the pending yield passed: yieldN of them from stack[yieldArgs], where they
+	// stay, and resume copies them out for whoever resumed
+	yieldArgs, yieldN int
 }
 
 type yieldKind uint8
@@ -62,14 +109,6 @@ const (
 var errYield = errors.New("glua: yield")
 
 func threadValue(co *coroutine) Value { return Value{p: unsafe.Pointer(co), n: kindThread << 56} }
-
-func (ex *executor) saveThread() threadState {
-	return threadState{ex.stack, ex.pframes, ex.nvar, ex.cont, ex.tbc, ex.st, ex.top}
-}
-
-func (ex *executor) loadThread(t threadState) {
-	ex.stack, ex.pframes, ex.nvar, ex.cont, ex.tbc, ex.st, ex.top = t.stack, t.pframes, t.nvar, t.cont, t.tbc, t.st, t.top
-}
 
 // trampoline is function(f, ...) return f(...) end, the body of a coroutine whose
 // function is a Go function.
@@ -125,72 +164,72 @@ func (ex *executor) keepStack(co *coroutine) {
 	co.stack, co.pframes = nil, nil
 }
 
-// resume runs co with args until it yields, returns or fails. ok is false when the body
-// failed; vals are then the error value. Terminal errors come back as err.
-func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, err error) {
+// resume runs co with args until it yields, returns or fails, and appends what it passes
+// back to dst: its results, the values it yielded, or, with ok false, the error value.
+// Terminal errors come back as err. Values that co's stack cannot hold are an error raised
+// in the resumer, before anything changes.
+func (ex *executor) resume(co *coroutine, args, dst []Value) (vals []Value, ok bool, err error) {
 	switch {
 	case co.status == coDead:
-		return []Value{String("cannot resume dead coroutine")}, false, nil
+		return append(dst, String("cannot resume dead coroutine")), false, nil
 	case co.status != coSuspended:
-		return []Value{String("cannot resume non-suspended coroutine")}, false, nil
+		return append(dst, String("cannot resume non-suspended coroutine")), false, nil
 	case ex.depth >= ex.maxHostDepth-1:
 		// the coroutine could not call Go: refuse, as C Lua's resume does near LUAI_MAXCCALLS
-		return []Value{String("C stack overflow")}, false, nil
+		return append(dst, String("C stack overflow")), false, nil
 	}
-	prev := ex.co
-	if prev == nil {
-		prev = ex.mainThread()
-	}
-	// the caller's state waits in prev, where tracebacks find it, and comes back from there
-	prev.status, prev.waiting = coNormal, ex.saveThread()
-	saved := &prev.waiting
-	ex.loadThread(co.threadState)
-	ex.st.ticks = saved.st.ticks // the step budget belongs to the entry, not the coroutine
-	ex.co = co
-	co.status = coRunning
-	co.nnyBase = ex.nny
-	returned := false
-	defer func() {
-		co.threadState = ex.saveThread()
-		saved.st.ticks = ex.st.ticks
-		ex.loadThread(*saved)
-		prev.status, prev.waiting = coRunning, threadState{}
-		if ex.co = prev; prev == ex.mainCo {
-			ex.co = nil // the main thread runs as no coroutine
-		}
-		if le, ok := err.(*Error); ok && le.terminal && le.where == "" {
-			le.where = ex.where() // raised by a Go body, which has no position: the resume's
-		}
-		if returned {
-			ex.keepStack(co)
-		}
-	}()
-
+	// the stack co needs, which runResumed ensures: at its yield, the values; at its start,
+	// the frame of f, its body or the trampoline that calls a Go body, as pushFrame asks
+	var f Value
+	need := co.yieldFn + len(args)
 	if !co.started {
-		co.started = true
-		f := co.fn
-		co.fn = Value{}
+		f = co.fn
 		if !f.isObj(kindLuaFn) {
 			// a Go body starts from a Lua trampoline, so that it is called as Lua calls it:
 			// pcall runs as a catch frame that can yield, and yield itself can be the body
 			args = append([]Value{f}, args...)
 			f = luaFnValue(trampoline)
 		}
-		if err := ex.ensure(1 + len(args) + stackSlack); err != nil {
-			return nil, false, err
-		}
+		need = frameRoom((*closure)(f.p), 0, len(args))
+	}
+	if need+stackSlack > ex.stackLimit() {
+		return dst, false, ex.errorf("stack overflow") // at the resumer, with its position
+	}
+	prev := ex.thread()
+	// the caller's state waits in prev, where tracebacks find it; the executor runs on co's
+	ex.switchTo(prev, co)
+	co.nnyBase = ex.nny
+	vals, ok, err = ex.runResumed(co, f, args, dst, need)
+	// not deferred: a panic poisons the executor, so what state it is left in does not matter
+	ex.switchBack(co, prev)
+	if le, isLua := err.(*Error); isLua && le.terminal && le.where == "" {
+		le.where = ex.where() // raised by a Go body, which has no position: the resume's
+	}
+	if ok && co.status == coDead {
+		ex.keepStack(co) // the body returned, and its results are in vals
+	}
+	return vals, ok, err
+}
+
+// runResumed runs co, whose state the executor has taken, with the resume values args until
+// it yields, returns or fails, as resume reports them. Before it starts, f is the function
+// to call with args, and need the stack that takes, within the limit resume checked, so
+// nothing fails before the body runs: co's status is the body's to set.
+func (ex *executor) runResumed(co *coroutine, f Value, args, dst []Value, need int) (vals []Value, ok bool, err error) {
+	if err := ex.ensure(need); err != nil {
+		return dst, false, err // within the limit: ensure only grows the stack
+	}
+	if !co.started {
 		ex.stack[0] = f
 		copy(ex.stack[1:], args)
 		ex.st.hi = max(ex.st.hi, 1+len(args))
 		if err := ex.pushFrame((*closure)(f.p), 0, len(args), 0, 1, frGoEntry); err != nil {
-			return nil, false, err
+			return dst, false, err
 		}
+		co.started, co.fn = true, Value{} // taken only once it runs
 	} else {
 		// the resume values are the results of the pending yield
 		n := len(args)
-		if err := ex.ensure(co.yieldFn + n); err != nil {
-			return nil, false, err
-		}
 		copy(ex.stack[co.yieldFn:], args)
 		ex.st.hi = max(ex.st.hi, co.yieldFn+n)
 		switch co.yieldKind {
@@ -211,26 +250,25 @@ func (ex *executor) resume(co *coroutine, args []Value) (vals []Value, ok bool, 
 	}
 	switch {
 	case err == nil:
-		co.status, returned = coDead, true
-		return append([]Value(nil), ex.stack[0:ex.top]...), true, nil
+		co.status = coDead
+		return append(dst, ex.stack[0:ex.top]...), true, nil
 	case err == errYield:
 		co.status = coSuspended
-		vals, co.yielded = co.yielded, nil
-		return vals, true, nil
+		return append(dst, ex.stack[co.yieldArgs:co.yieldArgs+co.yieldN]...), true, nil
 	}
-	return ex.coFailed(co, err)
+	return ex.coFailed(co, err, dst)
 }
 
 // coFailed ends a coroutine that died in error. Its frames stay, so that coroutine.close
 // can close its to-be-closed variables; terminal errors pass through.
-func (ex *executor) coFailed(co *coroutine, err error) ([]Value, bool, error) {
+func (ex *executor) coFailed(co *coroutine, err error, dst []Value) ([]Value, bool, error) {
 	co.status = coDead
 	le, ok := err.(*Error)
 	if !ok || le.terminal {
-		return nil, false, err
+		return dst, false, err
 	}
 	co.errVal = le
-	return []Value{le.Value}, false, nil
+	return append(dst, le.Value), false, nil
 }
 
 // yieldable reports whether the running coroutine may yield from a Go function called by
@@ -275,11 +313,12 @@ func coResume(c *Call) error {
 	if err != nil {
 		return err
 	}
-	vals, ok, err := c.ex.resume(co, argView(c, 1))
+	vals, ok, err := c.ex.resume(co, argView(c, 1), append(c.res[:0], Value{}))
 	if err != nil {
 		return err
 	}
-	c.res = append(append(c.res[:0], Bool(ok)), vals...)
+	vals[0] = Bool(ok)
+	c.res = vals
 	return nil
 }
 
@@ -292,8 +331,7 @@ func coYield(c *Call) error {
 		return fmt.Errorf("attempt to yield across a C-call boundary")
 	}
 	co := ex.co
-	co.yieldBuf = append(co.yieldBuf[:0], argView(c, 0)...)
-	co.yielded = co.yieldBuf
+	co.yieldArgs, co.yieldN = c.base, c.nargs // resume copies them out for the resumer
 	return errYield
 }
 
@@ -307,19 +345,8 @@ func coStatusOf(c *Call) error {
 
 func coRunningFn(c *Call) error {
 	ex := c.ex
-	if ex.co == nil {
-		return c.ReturnValues(threadValue(ex.mainThread()), Bool(true))
-	}
-	return c.ReturnValues(threadValue(ex.co), Bool(ex.co.main))
-}
-
-// mainThread returns the coroutine that stands for the main thread, made on first use. While
-// a coroutine runs, it keeps the main thread's state, waiting in resume.
-func (ex *executor) mainThread() *coroutine {
-	if ex.mainCo == nil {
-		ex.mainCo = &coroutine{main: true, status: coRunning}
-	}
-	return ex.mainCo
+	co := ex.thread()
+	return c.ReturnValues(threadValue(co), Bool(co.main))
 }
 
 func coIsYieldable(c *Call) error {
@@ -333,7 +360,7 @@ func coIsYieldable(c *Call) error {
 			return c.ReturnValues(Bool(!co.main)) // a coroutine that is not running can yield when resumed
 		}
 	}
-	return c.ReturnValues(Bool(ex.co != nil && !ex.co.main && ex.nny == ex.co.nnyBase+1))
+	return c.ReturnValues(Bool(ex.yieldable()))
 }
 
 func coWrap(c *Call) error {
@@ -347,7 +374,8 @@ func coWrap(c *Call) error {
 	}
 	g := &goFunc{name: "wrap", qualname: "coroutine.wrap", stateful: true, co: co}
 	g.f = func(c *Call) error {
-		vals, ok, err := c.ex.resume(co, argView(c, 0))
+		vals, ok, err := c.ex.resume(co, argView(c, 0), c.res[:0])
+		c.res = vals // also on failure, so that reset lets the error value go
 		if err != nil {
 			return err
 		}
@@ -371,7 +399,7 @@ func coWrap(c *Call) error {
 			}
 			return &Error{Value: v}
 		}
-		return c.ReturnValues(vals...)
+		return nil
 	}
 	return c.ReturnValues(goFnValue(g))
 }
@@ -406,16 +434,10 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		errv = &v
 	}
 	if len(co.tbc) > 0 {
-		// close the variables the coroutine left open, on its own stack
-		saved := ex.saveThread()
-		ex.loadThread(co.threadState)
-		// the closers run as the coroutine, which cannot yield meanwhile
-		prev := ex.co
-		if prev == nil {
-			prev = ex.mainThread()
-		}
-		ex.co, co.status = co, coRunning
-		prev.status, prev.waiting = coNormal, saved
+		// close the variables the coroutine left open, on its own stack: the closers run as
+		// the coroutine, which cannot yield meanwhile
+		prev := ex.thread()
+		ex.switchTo(prev, co)
 		nnyBase := co.nnyBase
 		co.nnyBase = ex.nny + 1
 		ex.nny++
@@ -426,13 +448,9 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		v, cerr := ex.closeOnError(0, value, true)
 		ex.nny--
 		co.nnyBase = nnyBase
-		prev.status, prev.waiting = coRunning, threadState{}
-		if ex.co = prev; prev == ex.mainCo {
-			ex.co = nil
-		}
-		co.threadState = ex.saveThread()
-		ex.loadThread(saved)
+		ex.switchBack(co, prev)
 		if cerr != nil {
+			co.status = coDead // no thread runs it, whatever its closers did
 			return nil, cerr
 		}
 		if !same(&v, &value) {
@@ -440,8 +458,8 @@ func (ex *executor) closeCoroutine(co *coroutine) (*Value, error) {
 		}
 	}
 	co.status = coDead
-	co.errVal = nil
-	co.stack, co.pframes = nil, nil
+	co.errVal, co.fn = nil, Value{} // a body that never ran goes too
+	ex.keepStack(co)                // for the next coroutine, as a body that returned leaves it
 	return errv, nil
 }
 

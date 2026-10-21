@@ -195,3 +195,53 @@ func TestRegisterLimit(t *testing.T) {
 		t.Error("not registered below the limit")
 	}
 }
+
+// The main thread's stack is the executor's, walked once as the root: holding the main
+// thread adds the thread's fixed size, not its stack again.
+func TestLiveBytesMainThreadOnce(t *testing.T) {
+	s := mustLoad(t, liveRuntime(t), `
+		function f()
+			local base = live()
+			local t = {coroutine.running()}
+			return live() - base
+		end`)
+	f, _ := s.Func0[int64]("f")
+	got, err := f(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got > 8<<10 { // a thread counts 4 KB, the table a little
+		t.Errorf("holding the main thread adds %d bytes", got)
+	}
+}
+
+// The main thread of another executor, held by a value that crossed entries, counts as a
+// thread, not with that executor's stack: its stack is the root of its own entries.
+func TestLiveBytesForeignMainThread(t *testing.T) {
+	var held Value
+	keep := GoFunc(func(c *Call) error { held = c.Value(0); return nil })
+	rt := MustNew(LibSafe|LibCoroutine, Global("keep", keep),
+		Global("live", GoFunc(func(c *Call) error { return c.Return(c.LiveBytes()) })))
+	s := mustLoad(t, rt, `function stash() keep(coroutine.running()) end
+		function measure(t) return live() end`)
+	ctx := context.Background()
+	vm, err := s.NewVM(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stash, _ := vm.Func0[struct{}]("stash")
+	if _, err := stash(ctx); err != nil {
+		t.Fatal(err)
+	}
+	measure := s.Globals().Get(String("measure")) // runs on an executor from the pool, not the VM's
+	with, err1 := s.Call(ctx, measure, held)
+	without, err2 := s.Call(ctx, measure, Value{})
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	w, _ := with.Int()
+	wo, _ := without.Int()
+	if d := w - wo; d > 8<<10 { // a thread counts 4 KB; the VM's stack is 8 KB and more
+		t.Errorf("holding another executor's main thread adds %d bytes", d)
+	}
+}

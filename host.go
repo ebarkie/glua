@@ -30,7 +30,14 @@ type Call struct {
 func (c *Call) reset() {
 	clear(c.res) // past len, every slot is nil already: each reset clears what was used
 	c.res = c.res[:0]
+	c.returned()
+}
+
+// returned clears what a record says about its call once the call has returned: a record
+// of a call that returned places nothing above its arguments.
+func (c *Call) returned() {
 	c.unwinding, c.argErr = false, nil
+	c.base, c.nargs = 0, 0
 }
 
 // Context returns the context of the outermost entry from Go. It carries what is left of
@@ -328,7 +335,7 @@ func (ex *executor) callGoRawFrom(g *goFunc, fn, nargs int, fromLua bool) (int, 
 	if n == 1 { // the common case, without a slice copy and a clear
 		ex.stack[fn], c.res[0] = c.res[0], Value{}
 		c.res = c.res[:0]
-		c.unwinding, c.argErr = false, nil
+		c.returned()
 	} else {
 		copy(ex.stack[fn:], c.res)
 		c.reset()

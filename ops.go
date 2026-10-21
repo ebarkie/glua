@@ -978,9 +978,16 @@ func (ex *executor) pushLua(cl *closure, fn, nargs int, flags uint64) error {
 // pushFrame pushes a frame for cl at stack[fn], which returns to the frame at callerBase,
 // resuming at pc. A vararg function's arguments stay below its frame: the function and its
 // fixed parameters are copied above them, as C Lua does.
+// frameRoom is the stack a frame of cl at function slot fn with nargs arguments needs, as
+// pushFrame ensures it: the function, the parameters or the arguments, whichever are more,
+// one slot for an adjusted vararg frame, and the slack above every frame.
+func frameRoom(cl *closure, fn, nargs int) int {
+	return fn + 1 + max(nargs, int(cl.p.nparams)) + 1 + stackSlack
+}
+
 func (ex *executor) pushFrame(cl *closure, fn, nargs, pc, callerBase int, flags uint64) error {
 	st := &ex.st
-	if err := ex.ensure(fn + 1 + max(nargs, int(cl.p.nparams)) + 1 + stackSlack); err != nil {
+	if err := ex.ensure(frameRoom(cl, fn, nargs)); err != nil {
 		return err
 	}
 	if st.nf == len(ex.pframes) {

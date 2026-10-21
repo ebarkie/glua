@@ -38,9 +38,9 @@ func (w *liveWalker) addAll(vs []Value) {
 }
 
 // stack counts a thread's stack and frames, and queues its first n slots.
-func (w *liveWalker) stack(ts *threadState, n int) {
-	w.size += 16*int64(len(ts.stack)) + 8*int64(len(ts.pframes))
-	w.addAll(ts.stack[:min(n, len(ts.stack))])
+func (w *liveWalker) stack(stack []Value, pframes []uint64, n int) {
+	w.size += 16*int64(len(stack)) + 8*int64(len(pframes))
+	w.addAll(stack[:min(n, len(stack))])
 }
 
 // walk visits the queued values and returns the bytes they hold.
@@ -96,13 +96,10 @@ func (w *liveWalker) walk() int64 {
 func (w *liveWalker) thread(co *coroutine) {
 	w.size += 4 << 10
 	w.add(co.fn)
-	w.addAll(co.yielded)
-	switch {
-	case co == w.running:
-	case co.status == coNormal:
-		w.stack(&co.waiting, co.waiting.st.hi)
-	default:
-		w.stack(&co.threadState, co.st.hi)
+	// its stack where it stopped, or what it waits in. The running thread's stack is the
+	// root, walked already; a thread running on another executor is not this entry's
+	if co != w.running && co.status != coRunning {
+		w.stack(co.stack, co.pframes, co.st.hi)
 	}
 }
 
@@ -112,9 +109,12 @@ func (c *Call) liveWalk() *liveWalker {
 	ex := c.ex
 	w := newLiveWalker()
 	w.running = ex.co
-	w.stack(&threadState{stack: ex.stack, pframes: ex.pframes}, c.base+c.nargs)
+	if w.running == nil {
+		w.running = ex.mainCo // its stack is the executor's, walked here as the root
+	}
+	w.stack(ex.stack, ex.pframes, c.base+c.nargs)
 	w.addAll(c.res)
-	if ex.co != nil && ex.mainCo != nil {
+	if ex.co != nil {
 		w.add(threadValue(ex.mainCo)) // waiting in resume, with what it reaches
 	}
 	w.walk()
