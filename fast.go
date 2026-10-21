@@ -723,13 +723,14 @@ dispatch:
 				if m != 0 && (m^b) < 0 { // round towards minus infinity
 					m += b
 				}
-				r := float64(m)
+				// the result's bits, so that no float lives across the branch, which spills it
+				r := math.Float64bits(float64(m))
 				if m == 0 {
 					// as fmod: a zero remainder keeps the dividend's sign, which is bit 63 of an
 					// integer and of a float alike
-					r = math.Float64frombits(x.n & (1 << 63))
+					r = x.n & (1 << 63)
 				}
-				setFloat(&regs[uint8(i>>8)], r)
+				setFloat(&regs[uint8(i>>8)], math.Float64frombits(r))
 			} else {
 				e = exSlowOp
 				break dispatch
