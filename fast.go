@@ -44,6 +44,19 @@ func strEqBytes(x, y *Value, n uintptr) bool {
 	return true
 }
 
+// wholeIndex returns the array index of a float key, from its bits, when its value is whole
+// and an integer: the key it normalises to, less one, as normKey gives it. The range is
+// tested on the float, as arm64 saturates int64(f) where amd64 gives the minimum. Small
+// enough to inline into fast; split in two, it spills the loop.
+func wholeIndex(bits uint64) (uint64, bool) {
+	f := math.Float64frombits(bits)
+	n := int64(f)
+	if float64(n) != f || f >= 0x1p63 || f < -0x1p63 {
+		return 0, false
+	}
+	return uint64(n) - 1, true
+}
+
 // isNum reports whether v is an integer or a float. Small enough to inline into fast.
 func isNum(v *Value) bool { return v.p == tInt() || v.p == tFloat() }
 
@@ -508,6 +521,14 @@ dispatch:
 				idx = uint64(uint8(i>>24)) - 1
 			} else if key := &regs[uint8(i>>24)]; key.p == tInt() {
 				idx = key.n - 1
+			} else if key.p == tFloat() {
+				// a float with a whole value, as arithmetic in code written for Lua 5.1 makes
+				// indexes: the integer key it normalises to
+				var whole bool
+				if idx, whole = wholeIndex(key.n); !whole {
+					e = exSlowOp
+					break dispatch
+				}
 			} else if key.n>>56 == kindString && !isScalar(key.p) && key.n&lenMask <= 16 && obj.n == kindTable<<56 && !isScalar(obj.p) {
 				// a short string key: hash it and probe inline, as hashString and keyEq would
 				t, n := (*Table)(obj.p), key.n&lenMask
@@ -605,6 +626,12 @@ dispatch:
 				idx = uint64(uint8(i>>16)) - 1
 			} else if key := &regs[uint8(i>>16)]; key.p == tInt() {
 				idx = key.n - 1
+			} else if key.p == tFloat() {
+				var whole bool
+				if idx, whole = wholeIndex(key.n); !whole {
+					e = exSlowOp
+					break dispatch
+				}
 			} else {
 				e = exSlowOp
 				break dispatch
@@ -680,6 +707,29 @@ dispatch:
 				} else {
 					setInt(&regs[uint8(i>>8)], uint64(q))
 				}
+			} else if (uint8(i) == opMod || uint8(i) == opModK) && (x.p == tFloat() || y.p == tFloat()) && isNum(x) && isNum(y) {
+				// a float remainder of whole numbers below 2^53, as code written before Lua had
+				// integers takes bits: exact as integers, where math.Mod loops over the quotient's
+				// bits. Two integers with a divisor below 1 are the driver's: the result is an integer
+				fx, fy := toFloat(x), toFloat(y)
+				a, b := int64(fx), int64(fy)
+				if float64(a) != fx || float64(b) != fy || b == 0 || fx >= 0x1p53 || fx <= -0x1p53 || fy >= 0x1p53 || fy <= -0x1p53 {
+					// not whole, too large, NaN, infinite, or a zero divisor. Spelt out: wholeInt
+					// here spills the loop
+					e = exSlowOp
+					break dispatch
+				}
+				m := a % b
+				if m != 0 && (m^b) < 0 { // round towards minus infinity
+					m += b
+				}
+				r := float64(m)
+				if m == 0 {
+					// as fmod: a zero remainder keeps the dividend's sign, which is bit 63 of an
+					// integer and of a float alike
+					r = math.Float64frombits(x.n & (1 << 63))
+				}
+				setFloat(&regs[uint8(i>>8)], r)
 			} else {
 				e = exSlowOp
 				break dispatch
